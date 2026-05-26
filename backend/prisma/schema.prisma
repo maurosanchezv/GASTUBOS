@@ -1,0 +1,230 @@
+// GasTubos — Prisma Schema
+// PostgreSQL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── ENUMS ────────────────────────────────────────────────────────────────────
+
+enum Rol {
+  ADMIN
+  SUPERVISOR
+  OPERADOR
+}
+
+enum EstadoTubo {
+  DISPONIBLE
+  CARGADO
+  VACIO
+  ENTREGADO
+  ALQUILADO
+  VENDIDO
+  RESERVADO
+  PERDIDO
+  DEVUELTO
+  EN_REVISION
+}
+
+enum TipoCliente {
+  EMPRESA
+  PYME
+  PARTICULAR
+}
+
+enum TipoPropietario {
+  PROPIO
+  CLIENTE
+}
+
+enum TipoOperacion {
+  ENTREGA_SIMPLE   // entrega sin alquiler formal
+  ALQUILER         // genera registro en Alquiler
+  VENTA            // genera registro en Venta
+}
+
+enum EstadoAlquiler {
+  ACTIVO
+  VENCIDO
+  FINALIZADO
+  CANCELADO
+}
+
+// ─── USUARIOS ─────────────────────────────────────────────────────────────────
+
+model Usuario {
+  id          String   @id @default(cuid())
+  username    String   @unique
+  email       String   @unique
+  passwordHash String
+  nombre      String
+  rol         Rol
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // relaciones
+  auditoria       Auditoria[]
+  entregasCreadas Entrega[]   @relation("EntregaCreadaPor")
+  entregasRepartidor Entrega[] @relation("EntregaRepartidor")
+
+  @@map("usuarios")
+}
+
+// ─── CLIENTES ─────────────────────────────────────────────────────────────────
+
+model Cliente {
+  id          String      @id @default(cuid())
+  nombre      String
+  ruc         String      @unique  // RUC o CI
+  telefono    String?
+  direccion   String?
+  contacto    String?     // nombre del contacto principal
+  tipo        TipoCliente @default(EMPRESA)
+  activo      Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  tubos       Tubo[]      // tubos actualmente asignados
+  alquileres  Alquiler[]
+  ventas      Venta[]
+  entregas    Entrega[]
+
+  @@map("clientes")
+}
+
+// ─── TUBOS ────────────────────────────────────────────────────────────────────
+
+model Tubo {
+  id              String          @id  // TUBO-000001, generado en app
+  serie           String          @unique
+  gas             String          // CO2, Oxígeno, Argón, etc.
+  capacidadLitros Int
+  talla           String          // T50, T10, T8
+  pesoKg          Decimal?        @db.Decimal(8, 2)
+  estado          EstadoTubo      @default(DISPONIBLE)
+  propietario     TipoPropietario @default(PROPIO)
+  fechaCompra     DateTime?
+  ubicacion       String?
+  observaciones   String?
+  activo          Boolean         @default(true)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  // cliente actualmente asignado (null si está en depósito)
+  clienteId       String?
+  cliente         Cliente?        @relation(fields: [clienteId], references: [id])
+
+  // Si es tubo de cliente, qué cliente es el dueño
+  propietarioClienteId String?
+
+  // relaciones
+  auditoria       Auditoria[]
+  detallesEntrega DetalleEntrega[]
+  alquileres      Alquiler[]
+  ventas          Venta[]
+
+  @@map("tubos")
+}
+
+// ─── ENTREGAS ─────────────────────────────────────────────────────────────────
+
+model Entrega {
+  id              String        @id @default(cuid())
+  numero          String        @unique  // E-2025-001, generado en app
+  clienteId       String
+  cliente         Cliente       @relation(fields: [clienteId], references: [id])
+  direccionEntrega String
+  tipoOperacion   TipoOperacion
+  fechaEntrega    DateTime      @default(now())
+  observaciones   String?
+
+  // quién creó el registro y quién repartió
+  creadoPorId     String
+  creadoPor       Usuario       @relation("EntregaCreadaPor", fields: [creadoPorId], references: [id])
+  repartidorId    String?
+  repartidor      Usuario?      @relation("EntregaRepartidor", fields: [repartidorId], references: [id])
+
+  detalles        DetalleEntrega[]
+  alquileres      Alquiler[]    // si tipoOperacion = ALQUILER
+
+  createdAt       DateTime      @default(now())
+
+  @@map("entregas")
+}
+
+model DetalleEntrega {
+  id        String  @id @default(cuid())
+  entregaId String
+  entrega   Entrega @relation(fields: [entregaId], references: [id])
+  tuboId    String
+  tubo      Tubo    @relation(fields: [tuboId], references: [id])
+
+  @@unique([entregaId, tuboId])
+  @@map("detalles_entrega")
+}
+
+// ─── ALQUILERES ───────────────────────────────────────────────────────────────
+
+model Alquiler {
+  id            String         @id @default(cuid())
+  numero        String         @unique  // AL-2025-001
+  clienteId     String
+  cliente       Cliente        @relation(fields: [clienteId], references: [id])
+  tuboId        String
+  tubo          Tubo           @relation(fields: [tuboId], references: [id])
+  entregaId     String?        // la entrega que originó este alquiler
+  entrega       Entrega?       @relation(fields: [entregaId], references: [id])
+  fechaInicio   DateTime
+  fechaVencimiento DateTime
+  fechaDevolucion DateTime?
+  estado        EstadoAlquiler @default(ACTIVO)
+  observaciones String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@map("alquileres")
+}
+
+// ─── VENTAS ───────────────────────────────────────────────────────────────────
+
+model Venta {
+  id            String   @id @default(cuid())
+  numero        String   @unique  // V-2025-001
+  clienteId     String
+  cliente       Cliente  @relation(fields: [clienteId], references: [id])
+  tuboId        String
+  tubo          Tubo     @relation(fields: [tuboId], references: [id])
+  fechaVenta    DateTime @default(now())
+  referencia    String?  // nro. de factura, orden, etc.
+  observaciones String?
+  createdAt     DateTime @default(now())
+
+  @@map("ventas")
+}
+
+// ─── AUDITORÍA ────────────────────────────────────────────────────────────────
+
+model Auditoria {
+  id             String     @id @default(cuid())
+  tuboId         String
+  tubo           Tubo       @relation(fields: [tuboId], references: [id])
+  usuarioId      String
+  usuario        Usuario    @relation(fields: [usuarioId], references: [id])
+  accion         String     // "Cambio de estado", "Tubo creado", "QR impreso", etc.
+  estadoAnterior EstadoTubo?
+  estadoNuevo    EstadoTubo?
+  observaciones  String?
+  metadata       Json?      // datos extra (entregaId, alquilerId, etc.)
+  createdAt      DateTime   @default(now())
+
+  @@index([tuboId])
+  @@index([usuarioId])
+  @@index([createdAt])
+  @@map("auditoria")
+}

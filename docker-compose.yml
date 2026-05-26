@@ -1,0 +1,41 @@
+# gastubos/docker-compose.yml
+# Levanta PostgreSQL + Backend en desarrollo.
+# El frontend se corre por separado con: cd frontend && npm run dev
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: gastubos_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     gastubos
+      POSTGRES_PASSWORD: gastubos123
+      POSTGRES_DB:       gastubos_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: gastubos_api
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_URL:  "postgresql://gastubos:gastubos123@postgres:5432/gastubos_db"
+      JWT_SECRET:    "cambiar-esto-en-produccion-xxxx"
+      JWT_EXPIRES:   "8h"
+      PORT:          3001
+      FRONTEND_URL:  "http://localhost:5173"
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+
+volumes:
+  postgres_data:

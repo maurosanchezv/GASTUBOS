@@ -1,0 +1,197 @@
+// gastubos/backend/src/routes/tubos.js
+
+import { Router } from 'express'
+import { z } from 'zod'
+import QRCode from 'qrcode'
+import { prisma } from '../utils/prisma.js'
+import { requireAuth, requireRol } from '../middleware/auth.js'
+import { generarIdTubo } from '../utils/helpers.js'
+import { registrarAuditoria } from '../utils/auditoria.js'
+import { TRANSICIONES_VALIDAS } from '../utils/estadosTubo.js'
+
+const router = Router()
+router.use(requireAuth)
+
+// Validación de tubo nuevo
+const tuboSchema = z.object({
+  serie:            z.string().min(1),
+  gas:              z.string().min(1),
+  capacidadLitros:  z.number().int().positive(),
+  talla:            z.string().min(1),
+  pesoKg:           z.number().positive().optional(),
+  propietario:      z.enum(['PROPIO', 'CLIENTE']).default('PROPIO'),
+  propietarioClienteId: z.string().optional(),
+  fechaCompra:      z.string().datetime().optional(),
+  ubicacion:        z.string().optional(),
+  observaciones:    z.string().optional(),
+  estado:           z.enum(['DISPONIBLE','CARGADO','VACIO']).default('DISPONIBLE'),
+})
+
+// ─── GET /api/tubos ───────────────────────────────────────────────────────────
+router.get('/', async (req, res, next) => {
+  try {
+    const { estado, gas, propietario, clienteId, q, page = 1, limit = 50 } = req.query
+    const where = { activo: true }
+    if (estado)      where.estado      = estado
+    if (gas)         where.gas         = { contains: gas, mode: 'insensitive' }
+    if (propietario) where.propietario = propietario
+    if (clienteId)   where.clienteId   = clienteId
+    if (q) {
+      where.OR = [
+        { id:    { contains: q, mode: 'insensitive' } },
+        { serie: { contains: q, mode: 'insensitive' } },
+        { gas:   { contains: q, mode: 'insensitive' } },
+      ]
+    }
+
+    const [tubos, total] = await Promise.all([
+      prisma.tubo.findMany({
+        where,
+        include: { cliente: { select: { id: true, nombre: true } } },
+        orderBy: { id: 'asc' },
+        skip: (Number(page) - 1) * Number(limit),
+        take: Number(limit),
+      }),
+      prisma.tubo.count({ where }),
+    ])
+
+    res.json({ tubos, total, page: Number(page), limit: Number(limit) })
+  } catch (err) { next(err) }
+})
+
+// ─── GET /api/tubos/:id ───────────────────────────────────────────────────────
+router.get('/:id', async (req, res, next) => {
+  try {
+    const tubo = await prisma.tubo.findUnique({
+      where: { id: req.params.id },
+      include: {
+        cliente: true,
+        auditoria: {
+          include: { usuario: { select: { username: true, nombre: true } } },
+          orderBy: { createdAt: 'desc' },
+          take: 50,
+        },
+        alquileres: {
+          where: { estado: { in: ['ACTIVO', 'VENCIDO'] } },
+          include: { cliente: true },
+          take: 5,
+        },
+      },
+    })
+    if (!tubo) return res.status(404).json({ error: 'Tubo no encontrado' })
+    res.json(tubo)
+  } catch (err) { next(err) }
+})
+
+// ─── POST /api/tubos ──────────────────────────────────────────────────────────
+router.post('/', requireRol('ADMIN', 'OPERADOR'), async (req, res, next) => {
+  try {
+    const data = tuboSchema.parse(req.body)
+    const id   = await generarIdTubo()
+
+    const tubo = await prisma.tubo.create({
+      data: { ...data, id, fechaCompra: data.fechaCompra ? new Date(data.fechaCompra) : null },
+    })
+
+    await registrarAuditoria({
+      tuboId:     id,
+      usuarioId:  req.user.id,
+      accion:     'Tubo creado',
+      estadoNuevo: tubo.estado,
+      observaciones: data.observaciones,
+    })
+
+    res.status(201).json(tubo)
+  } catch (err) {
+    if (err instanceof z.ZodError) return res.status(400).json({ error: err.errors })
+    next(err)
+  }
+})
+
+// ─── PATCH /api/tubos/:id ─────────────────────────────────────────────────────
+router.patch('/:id', requireRol('ADMIN', 'OPERADOR'), async (req, res, next) => {
+  try {
+    const tubo = await prisma.tubo.findUnique({ where: { id: req.params.id } })
+    if (!tubo) return res.status(404).json({ error: 'Tubo no encontrado' })
+
+    // No permitimos cambiar el estado por este endpoint (usar /cambiar-estado)
+    const { estado: _estado, id: _id, ...rest } = req.body
+
+    const actualizado = await prisma.tubo.update({
+      where: { id: req.params.id },
+      data: rest,
+    })
+
+    await registrarAuditoria({
+      tuboId:    req.params.id,
+      usuarioId: req.user.id,
+      accion:    'Tubo editado',
+    })
+
+    res.json(actualizado)
+  } catch (err) { next(err) }
+})
+
+// ─── POST /api/tubos/:id/cambiar-estado ───────────────────────────────────────
+const cambioEstadoSchema = z.object({
+  estadoNuevo:   z.string(),
+  observaciones: z.string().optional(),
+})
+
+router.post('/:id/cambiar-estado', async (req, res, next) => {
+  try {
+    const { estadoNuevo, observaciones } = cambioEstadoSchema.parse(req.body)
+    const tubo = await prisma.tubo.findUnique({ where: { id: req.params.id } })
+    if (!tubo) return res.status(404).json({ error: 'Tubo no encontrado' })
+
+    // Verificar transición válida
+    const permitidas = TRANSICIONES_VALIDAS[tubo.estado] || []
+    if (!permitidas.includes(estadoNuevo)) {
+      return res.status(400).json({
+        error: `No se puede pasar de ${tubo.estado} a ${estadoNuevo}`,
+        transicionesPermitidas: permitidas,
+      })
+    }
+
+    const actualizado = await prisma.tubo.update({
+      where: { id: req.params.id },
+      data:  { estado: estadoNuevo },
+    })
+
+    await registrarAuditoria({
+      tuboId:         req.params.id,
+      usuarioId:      req.user.id,
+      accion:         'Cambio de estado',
+      estadoAnterior: tubo.estado,
+      estadoNuevo,
+      observaciones,
+    })
+
+    res.json(actualizado)
+  } catch (err) {
+    if (err instanceof z.ZodError) return res.status(400).json({ error: err.errors })
+    next(err)
+  }
+})
+
+// ─── GET /api/tubos/:id/qr ────────────────────────────────────────────────────
+// Devuelve el QR como PNG en base64 (para imprimir)
+router.get('/:id/qr', async (req, res, next) => {
+  try {
+    const tubo = await prisma.tubo.findUnique({ where: { id: req.params.id } })
+    if (!tubo) return res.status(404).json({ error: 'Tubo no encontrado' })
+
+    const url = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/tubos/${tubo.id}`
+    const qrDataUrl = await QRCode.toDataURL(url, { width: 300, margin: 2 })
+
+    await registrarAuditoria({
+      tuboId:    req.params.id,
+      usuarioId: req.user.id,
+      accion:    'QR generado',
+    })
+
+    res.json({ qr: qrDataUrl, url })
+  } catch (err) { next(err) }
+})
+
+export default router
