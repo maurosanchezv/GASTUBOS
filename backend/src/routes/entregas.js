@@ -128,7 +128,7 @@ router.post('/', requireRol('ADMIN', 'OPERADOR'), async (req, res, next) => {
 
       // 3. Crear registros adicionales según tipo
       if (data.tipoOperacion === 'ALQUILER') {
-        await Promise.all(data.tubosIds.map(tuboId =>
+        await Promise.all(data.tubosIds.map(async tuboId =>
           tx.alquiler.create({
             data: {
               numero:           await generarNumero('AL'),
@@ -144,7 +144,7 @@ router.post('/', requireRol('ADMIN', 'OPERADOR'), async (req, res, next) => {
       }
 
       if (data.tipoOperacion === 'VENTA') {
-        await Promise.all(data.tubosIds.map(tuboId =>
+        await Promise.all(data.tubosIds.map(async tuboId =>
           tx.venta.create({
             data: {
               numero:    await generarNumero('V'),
