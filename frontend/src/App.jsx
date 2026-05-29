@@ -38,7 +38,7 @@ export default function App() {
   }, [token])
 
   return (
-    <BrowserRouter>
+    <BrowserRouter future={{ v7_relativeSplatPath: true }}>
       <Routes>
         {/* Pública: página de tubo al escanear QR */}
         <Route path="/tubos/:id" element={<TuboPublicoPage />} />
