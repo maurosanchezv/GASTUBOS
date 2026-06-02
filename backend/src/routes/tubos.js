@@ -76,6 +76,11 @@ router.get('/:id', async (req, res, next) => {
           include: { cliente: true },
           take: 5,
         },
+        cargas: {
+          include: { operador: { select: { username: true, nombre: true } } },
+          orderBy: { fechaCarga: 'desc' },
+          take: 20,
+        },
       },
     })
     if (!tubo) return res.status(404).json({ error: 'Tubo no encontrado' })

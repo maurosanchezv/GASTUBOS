@@ -55,6 +55,21 @@ enum EstadoAlquiler {
   CANCELADO
 }
 
+enum TipoGas {
+  CO2
+  OXIGENO
+  ARGON
+  NITROGENO
+  AIRE_COMPRIMIDO
+  MEZCLA_CO2_ARGON
+  ACETILENO
+}
+
+enum UnidadGas {
+  KG
+  M3
+}
+
 // ─── USUARIOS ─────────────────────────────────────────────────────────────────
 
 model Usuario {
@@ -69,9 +84,10 @@ model Usuario {
   updatedAt   DateTime @updatedAt
 
   // relaciones
-  auditoria       Auditoria[]
-  entregasCreadas Entrega[]   @relation("EntregaCreadaPor")
-  entregasRepartidor Entrega[] @relation("EntregaRepartidor")
+  auditoria          Auditoria[]
+  entregasCreadas    Entrega[]   @relation("EntregaCreadaPor")
+  entregasRepartidor Entrega[]   @relation("EntregaRepartidor")
+  cargas             Carga[]
 
   @@map("usuarios")
 }
@@ -128,6 +144,7 @@ model Tubo {
   detallesEntrega DetalleEntrega[]
   alquileres      Alquiler[]
   ventas          Venta[]
+  cargas          Carga[]
 
   @@map("tubos")
 }
@@ -206,6 +223,28 @@ model Venta {
   createdAt     DateTime @default(now())
 
   @@map("ventas")
+}
+
+// ─── CARGAS ───────────────────────────────────────────────────────────────────
+
+model Carga {
+  id            Int       @id @default(autoincrement())
+  numero        String    @unique  // CG-2026-001
+  tuboId        String
+  tubo          Tubo      @relation(fields: [tuboId], references: [id])
+  tipoGas       TipoGas
+  unidad        UnidadGas
+  cantidad      Decimal   @db.Decimal(10, 3)
+  fechaCarga    DateTime
+  operadorId    String
+  operador      Usuario   @relation(fields: [operadorId], references: [id])
+  observaciones String?
+  createdAt     DateTime  @default(now())
+
+  @@index([tuboId])
+  @@index([operadorId])
+  @@index([fechaCarga])
+  @@map("cargas")
 }
 
 // ─── AUDITORÍA ────────────────────────────────────────────────────────────────

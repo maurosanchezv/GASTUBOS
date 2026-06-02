@@ -20,6 +20,7 @@ import VentasPage      from './pages/VentasPage.jsx'
 import ReportesPage    from './pages/ReportesPage.jsx'
 import AuditoriaPage   from './pages/AuditoriaPage.jsx'
 import UsuariosPage    from './pages/UsuariosPage.jsx'
+import CargasPage      from './pages/CargasPage.jsx'
 import TuboPublicoPage from './pages/TuboPublicoPage.jsx'  // sin auth
 
 // Guard: redirige a /login si no hay token
@@ -53,6 +54,7 @@ export default function App() {
           <Route path="tubos/:id/detalle" element={<TuboDetallePage />} />
           <Route path="clientes" element={<ClientesPage />} />
           <Route path="entregas" element={<EntregasPage />} />
+          <Route path="cargas" element={<CargasPage />} />
           <Route path="devoluciones" element={<DevolucionesPage />} />
           <Route path="alquileres" element={<AlquileresPage />} />
           <Route path="ventas" element={<VentasPage />} />

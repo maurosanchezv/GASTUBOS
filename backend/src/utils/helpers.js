@@ -7,7 +7,7 @@ export async function generarIdTubo() {
   return `TUBO-${num}`
 }
 
-const modelos = { E: 'entrega', AL: 'alquiler', V: 'venta' }
+const modelos = { E: 'entrega', AL: 'alquiler', V: 'venta', CG: 'carga' }
 
 export async function generarNumero(prefijo) {
   const anio  = new Date().getFullYear()

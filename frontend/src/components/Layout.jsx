@@ -20,6 +20,7 @@ const NAV = [
   { group: 'Operaciones', items: [
     { to: '/tubos',      icon: 'ti-cylinder',         label: 'Tubos' },
     { to: '/entregas',   icon: 'ti-truck-delivery',   label: 'Entregas' },
+    { to: '/cargas',     icon: 'ti-gas-station',      label: 'Cargas' },
     { to: '/devoluciones',icon: 'ti-arrow-back-up',   label: 'Devoluciones' },
     { to: '/alquileres', icon: 'ti-calendar-time',    label: 'Alquileres', badge: true },
   ]},

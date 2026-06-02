@@ -8,6 +8,12 @@ import { PageHeader, StateBadge, Modal, FormGroup, Spinner } from '../components
 import { useToast } from '../components/ui.jsx'
 import { TRANSICIONES } from '../utils/estadosTubo.js'
 
+const GAS_LABELS = {
+  CO2: 'CO₂', OXIGENO: 'Oxígeno', ARGON: 'Argón',
+  NITROGENO: 'Nitrógeno', AIRE_COMPRIMIDO: 'Aire comprimido',
+  MEZCLA_CO2_ARGON: 'Mezcla CO₂/Argón', ACETILENO: 'Acetileno',
+}
+
 export default function TuboDetallePage() {
   const { id }       = useParams()
   const [params]     = useSearchParams()
@@ -111,6 +117,42 @@ export default function TuboDetallePage() {
                 ))}
               </div>
             </div>
+
+            {/* Historial de cargas */}
+            {tubo.cargas?.length > 0 && (
+              <div className="card" style={{ marginBottom: 16 }}>
+                <div className="card-header">
+                  <div className="card-title">Historial de cargas</div>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{tubo.cargas.length} registro{tubo.cargas.length !== 1 ? 's' : ''}</span>
+                </div>
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr><th>Fecha</th><th>Gas</th><th>Cantidad</th><th>Operador</th><th>Obs.</th></tr>
+                    </thead>
+                    <tbody>
+                      {tubo.cargas.map(c => (
+                        <tr key={c.id}>
+                          <td style={{ fontFamily: 'var(--font-mono)', fontSize: 11, whiteSpace: 'nowrap' }}>
+                            {new Date(c.fechaCarga).toLocaleDateString('es-PY')}
+                          </td>
+                          <td>{GAS_LABELS[c.tipoGas] || c.tipoGas}</td>
+                          <td style={{ fontWeight: 600 }}>
+                            {Number(c.cantidad).toLocaleString('es-PY')} {c.unidad === 'KG' ? 'kg' : 'm³'}
+                          </td>
+                          <td style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
+                            {c.operador?.nombre || c.operador?.username}
+                          </td>
+                          <td style={{ color: 'var(--text-secondary)', fontSize: 11, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {c.observaciones || '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
             {/* Historial */}
             <div className="card">
