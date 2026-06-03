@@ -157,6 +157,8 @@ model Entrega {
   clienteId       String
   cliente         Cliente       @relation(fields: [clienteId], references: [id])
   direccionEntrega String
+  latitud         Float?
+  longitud        Float?
   tipoOperacion   TipoOperacion
   fechaEntrega    DateTime      @default(now())
   observaciones   String?

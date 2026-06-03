@@ -18,6 +18,8 @@ router.use(requireAuth)
 const entregaSchema = z.object({
   clienteId:        z.string(),
   direccionEntrega: z.string().min(1),
+  latitud:          z.number().optional(),
+  longitud:         z.number().optional(),
   tipoOperacion:    z.enum(['ENTREGA_SIMPLE', 'ALQUILER', 'VENTA']),
   repartidorId:     z.string().optional(),
   observaciones:    z.string().optional(),
@@ -105,6 +107,8 @@ router.post('/', requireRol('ADMIN', 'OPERADOR'), async (req, res, next) => {
           numero,
           clienteId:        data.clienteId,
           direccionEntrega: data.direccionEntrega,
+          latitud:          data.latitud,
+          longitud:         data.longitud,
           tipoOperacion:    data.tipoOperacion,
           repartidorId:     data.repartidorId,
           observaciones:    data.observaciones,
