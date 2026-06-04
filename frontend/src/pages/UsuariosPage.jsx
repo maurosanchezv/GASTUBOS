@@ -59,59 +59,188 @@ export default function UsuariosPage() {
       />
       <div className="app-content">
         {loading ? <Spinner /> : (
-          <div className="card" style={{ padding: 0, marginBottom: 16 }}>
-            <div className="table-wrap">
+          <>
+            {/* VISTA TABLE (Desktop) */}
+            <div className="card table-wrap hide-mobile" style={{ padding: 0, marginBottom: 16 }}>
               <table>
-                <thead><tr><th>Usuario</th><th>Nombre</th><th>Email</th><th>Rol</th><th>Estado</th><th></th></tr></thead>
+                <thead><tr><th>Usuario</th><th>Nombre</th><th>Email</th><th>Rol</th><th>Estado</th><th style={{ textAlign: 'right' }}>Acciones</th></tr></thead>
                 <tbody>
-                  {usuarios.map(u => (
-                    <tr key={u.id}>
-                      <td className="td-code">{u.username}</td>
-                      <td style={{ fontWeight: 500 }}>{u.nombre}</td>
-                      <td style={{ color: 'var(--text-secondary)' }}>{u.email}</td>
-                      <td><RolBadge rol={u.rol} /></td>
-                      <td>
-                        <span className={`badge badge-${u.activo ? 'ACTIVO' : 'VACIO'}`}>
-                          {u.activo ? 'Activo' : 'Inactivo'}
-                        </span>
-                      </td>
-                      <td>
-                        <div style={{ display: 'flex', gap: 4 }}>
-                          <button className="btn-icon" title="Editar" onClick={() => { setForm({ ...u, password: '' }); setModal(true) }}>
-                            <i className="ti ti-edit" />
-                          </button>
-                          <button className="btn-icon" title={u.activo ? 'Desactivar' : 'Activar'} onClick={() => handleToggle(u)}>
-                            <i className={`ti ${u.activo ? 'ti-user-off' : 'ti-user-check'}`} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {usuarios.map(u => {
+                    const initials = u.nombre?.split(' ').map(w => w[0]).slice(0,2).join('').toUpperCase() || 'U'
+                    return (
+                      <tr key={u.id}>
+                        <td className="td-code">{u.username}</td>
+                        <td style={{ fontWeight: 500 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <div style={{ 
+                              width: 32, height: 32, borderRadius: '50%', background: 'var(--surface-2)', 
+                              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700,
+                              overflow: 'hidden', border: '1px solid var(--border)'
+                            }}>
+                              {u.avatar ? <img src={u.avatar} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : initials}
+                            </div>
+                            {u.nombre}
+                          </div>
+                        </td>
+                        <td style={{ color: 'var(--text-secondary)' }}>{u.email}</td>
+                        <td><RolBadge rol={u.rol} /></td>
+                        <td>
+                          <span className={`badge badge-${u.activo ? 'ACTIVO' : 'VACIO'}`}>
+                            {u.activo ? 'Activo' : 'Inactivo'}
+                          </span>
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', alignItems: 'flex-start' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                              <button className="btn-icon" title="Editar" onClick={() => { setForm({ ...u, password: '' }); setModal(true) }}>
+                                <i className="ti ti-edit" />
+                              </button>
+                              <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-muted)' }}>Editar</span>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                              <button className="btn-icon" title={u.activo ? 'Desactivar' : 'Activar'} onClick={() => handleToggle(u)}>
+                                <i className={`ti ${u.activo ? 'ti-user-off' : 'ti-user-check'}`} />
+                              </button>
+                              <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-muted)' }}>{u.activo ? 'Baja' : 'Alta'}</span>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
-          </div>
+
+            {/* VISTA CARDS (Mobile) */}
+            <div className="mobile-list">
+              {usuarios.map(u => {
+                const initials = u.nombre?.split(' ').map(w => w[0]).slice(0,2).join('').toUpperCase() || 'U'
+                return (
+                  <div key={u.id} className="list-card">
+                    <div className="list-card-header">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ 
+                          width: 36, height: 36, borderRadius: '50%', background: 'var(--surface-2)', 
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700,
+                          overflow: 'hidden', border: '1px solid var(--border)'
+                        }}>
+                          {u.avatar ? <img src={u.avatar} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : initials}
+                        </div>
+                        <div className="list-card-title">{u.username}</div>
+                      </div>
+                      <RolBadge rol={u.rol} />
+                    </div>
+                  
+                    <div className="list-card-body">
+                      <div className="list-card-item col-span-2">
+                        <span className="list-card-label">Nombre</span>
+                        <span className="list-card-value">{u.nombre}</span>
+                      </div>
+                      <div className="list-card-item">
+                        <span className="list-card-label">Email</span>
+                        <span className="list-card-value">{u.email}</span>
+                      </div>
+                      <div className="list-card-item">
+                        <span className="list-card-label">Estado</span>
+                        <span className={`badge badge-${u.activo ? 'ACTIVO' : 'VACIO'}`} style={{ width: 'fit-content' }}>
+                          {u.activo ? 'Activo' : 'Inactivo'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="list-card-actions" style={{ justifyContent: 'flex-end', gap: 16, paddingTop: 12 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                        <button className="btn-icon" onClick={() => { setForm({ ...u, password: '' }); setModal(true) }}
+                          style={{ width: 44, height: 44, fontSize: 20 }}>
+                          <i className="ti ti-edit" />
+                        </button>
+                        <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)' }}>Editar</span>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                        <button className="btn-icon" onClick={() => handleToggle(u)}
+                          style={{ width: 44, height: 44, fontSize: 20 }}>
+                          <i className={`ti ${u.activo ? 'ti-user-off' : 'ti-user-check'}`} />
+                        </button>
+                        <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)' }}>{u.activo ? 'Dar Baja' : 'Dar Alta'}</span>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </>
         )}
 
         {/* Matriz de permisos */}
-        <div className="card">
-          <div className="card-header"><div className="card-title">Permisos por rol</div></div>
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>Permiso</th><th style={{ textAlign: 'center' }}>Admin</th><th style={{ textAlign: 'center' }}>Supervisor</th><th style={{ textAlign: 'center' }}>Operador</th></tr></thead>
+        <div className="card" style={{ marginTop: 20 }}>
+          <div className="card-header">
+            <div className="card-title">Permisos por rol</div>
+          </div>
+          
+          {/* Vista Tabla (Desktop) */}
+          <div className="table-wrap hide-mobile">
+            <table style={{ border: '1px solid var(--border)', borderRadius: 8 }}>
+              <thead>
+                <tr>
+                  <th style={{ background: 'var(--surface-2)', padding: '12px' }}>Acción / Permiso</th>
+                  <th style={{ textAlign: 'center', background: 'var(--blue-light)', color: 'var(--blue-dark)' }}>Admin</th>
+                  <th style={{ textAlign: 'center', background: 'var(--teal-light)', color: 'var(--teal)' }}>Supervisor</th>
+                  <th style={{ textAlign: 'center', background: 'var(--gray-light)', color: 'var(--gray)' }}>Operador</th>
+                </tr>
+              </thead>
               <tbody>
                 {PERMISOS.map(([p, a, s, o]) => (
                   <tr key={p}>
-                    <td>{p}</td>
+                    <td style={{ fontWeight: 500, padding: '12px' }}>{p}</td>
                     {[a, s, o].map((v, i) => (
                       <td key={i} style={{ textAlign: 'center' }}>
-                        <i className={`ti ${v ? 'ti-circle-check' : 'ti-circle-x'}`} style={{ fontSize: 16, color: v ? 'var(--green)' : 'var(--border-mid)' }} />
+                        {v ? (
+                          <span style={{ color: 'var(--green)', fontSize: 18 }}><i className="ti ti-circle-check-filled" /></span>
+                        ) : (
+                          <span style={{ color: 'var(--text-muted)', fontSize: 18, opacity: 0.3 }}><i className="ti ti-circle-x" /></span>
+                        )}
                       </td>
                     ))}
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+
+          {/* Vista Cards (Mobile) — Se muestra vía CSS en pantallas pequeñas */}
+          <div className="mobile-list">
+            {PERMISOS.map(([p, a, s, o]) => (
+              <div key={p} className="list-card" style={{ background: 'var(--surface-2)', marginBottom: 10 }}>
+                <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: 'var(--blue)' }}>{p}</div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <div style={{ 
+                    flex: 1, textAlign: 'center', padding: '6px', borderRadius: 6,
+                    background: a ? 'var(--green-light)' : 'var(--gray-light)',
+                    opacity: a ? 1 : 0.5
+                  }}>
+                    <div style={{ fontSize: 9, fontWeight: 700, color: a ? 'var(--green)' : 'var(--text-muted)' }}>ADMIN</div>
+                    <i className={`ti ${a ? 'ti-circle-check-filled' : 'ti-circle-x'}`} style={{ color: a ? 'var(--green)' : 'var(--text-muted)' }} />
+                  </div>
+                  <div style={{ 
+                    flex: 1, textAlign: 'center', padding: '6px', borderRadius: 6,
+                    background: s ? 'var(--green-light)' : 'var(--gray-light)',
+                    opacity: s ? 1 : 0.5
+                  }}>
+                    <div style={{ fontSize: 9, fontWeight: 700, color: s ? 'var(--green)' : 'var(--text-muted)' }}>SUP</div>
+                    <i className={`ti ${s ? 'ti-circle-check-filled' : 'ti-circle-x'}`} style={{ color: s ? 'var(--green)' : 'var(--text-muted)' }} />
+                  </div>
+                  <div style={{ 
+                    flex: 1, textAlign: 'center', padding: '6px', borderRadius: 6,
+                    background: o ? 'var(--green-light)' : 'var(--gray-light)',
+                    opacity: o ? 1 : 0.5
+                  }}>
+                    <div style={{ fontSize: 9, fontWeight: 700, color: o ? 'var(--green)' : 'var(--text-muted)' }}>OPE</div>
+                    <i className={`ti ${o ? 'ti-circle-check-filled' : 'ti-circle-x'}`} style={{ color: o ? 'var(--green)' : 'var(--text-muted)' }} />
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </div>

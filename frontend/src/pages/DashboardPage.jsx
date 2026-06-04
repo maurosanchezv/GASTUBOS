@@ -95,7 +95,7 @@ export default function DashboardPage() {
               <div className="card-title">Entregas recientes</div>
               <div className="card-subtitle">Últimas operaciones registradas</div>
             </div>
-            <button className="btn btn-sm" onClick={() => navigate('/entregas')}>
+            <button className="btn btn-sm" onClick={() => navigate('/entregas?tab=historial')}>
               Ver todas <i className="ti ti-arrow-right" />
             </button>
           </div>
@@ -118,7 +118,7 @@ export default function DashboardPage() {
                 </thead>
                 <tbody>
                   {entregasRecientes.map(e => (
-                    <tr key={e.id} style={{ cursor: 'pointer' }} onClick={() => navigate('/entregas')}>
+                    <tr key={e.id} style={{ cursor: 'pointer' }} onClick={() => navigate('/entregas?tab=historial')}>
                       <td className="td-code">{e.numero}</td>
                       <td style={{ fontWeight: 500 }}>{e.cliente?.nombre}</td>
                       <td>

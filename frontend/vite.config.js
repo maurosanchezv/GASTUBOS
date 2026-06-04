@@ -11,11 +11,6 @@ export default defineConfig({
         target: 'http://localhost:3001',
         changeOrigin: true,
       },
-      // proxy para las rutas públicas de QR
-      '/tubos': {
-        target: 'http://localhost:3001',
-        changeOrigin: true,
-      },
     },
   },
   build: {

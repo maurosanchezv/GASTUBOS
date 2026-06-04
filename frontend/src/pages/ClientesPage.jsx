@@ -52,9 +52,10 @@ export default function ClientesPage() {
         </div>
 
         {loading ? <Spinner /> : (
-          <div className="card" style={{ padding: 0 }}>
-            {clientes.length === 0 ? <EmptyState icon="ti-users" message="Sin clientes registrados" /> : (
-              <div className="table-wrap">
+          <>
+            {/* VISTA TABLE (Desktop) */}
+            <div className="card table-wrap hide-mobile" style={{ padding: 0 }}>
+              {clientes.length === 0 ? <EmptyState icon="ti-users" message="Sin clientes registrados" /> : (
                 <table>
                   <thead><tr><th>Nombre</th><th>RUC / CI</th><th>Teléfono</th><th>Tipo</th><th>Tubos</th><th></th></tr></thead>
                   <tbody>
@@ -82,9 +83,47 @@ export default function ClientesPage() {
                     ))}
                   </tbody>
                 </table>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+
+            {/* VISTA CARDS (Mobile) */}
+            <div className="mobile-list">
+              {clientes.length === 0 ? (
+                <EmptyState icon="ti-users" message="Sin resultados" />
+              ) : (
+                clientes.map(c => (
+                  <div key={c.id} className="list-card">
+                    <div className="list-card-header">
+                      <div className="list-card-title" style={{ fontFamily: 'inherit', color: 'inherit' }}>{c.nombre}</div>
+                      <TipoBadge tipo={c.tipo} />
+                    </div>
+                    <div className="list-card-body">
+                      <div className="list-card-item">
+                        <span className="list-card-label">RUC / CI</span>
+                        <span className="list-card-value td-code">{c.ruc}</span>
+                      </div>
+                      <div className="list-card-item">
+                        <span className="list-card-label">Teléfono</span>
+                        <span className="list-card-value">{c.telefono || '—'}</span>
+                      </div>
+                      <div className="list-card-item">
+                        <span className="list-card-label">Tubos asignados</span>
+                        <span className="list-card-value">{c._count?.tubos ?? 0} unidades</span>
+                      </div>
+                    </div>
+                    <div className="list-card-actions">
+                      <button className="btn btn-sm" style={{ flex: 1 }} onClick={() => setDetalle(c)}>
+                        <i className="ti ti-eye" /> Detalle
+                      </button>
+                      <button className="btn btn-sm" onClick={() => { setForm(c); setModal(true) }}>
+                        <i className="ti ti-edit" /> Editar
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </>
         )}
       </div>
 
@@ -123,7 +162,7 @@ export default function ClientesPage() {
             <input value={form.contacto || ''} onChange={f('contacto')} placeholder="Nombre del contacto" />
           </FormGroup>
           <FormGroup label="Dirección" >
-            <input value={form.direccion || ''} onChange={f('direccion')} placeholder="Calle, ciudad" />
+            <textarea value={form.direccion || ''} onChange={f('direccion')} placeholder="Calle, ciudad" style={{ height: 60 }} />
           </FormGroup>
         </div>
       </Modal>

@@ -9,8 +9,10 @@ import shadowUrl from 'leaflet/dist/images/marker-shadow.png'
 import api from '../services/api.js'
 import { PageHeader, StateBadge, Spinner, GasDot, EmptyState } from '../components/ui.jsx'
 import { useToast } from '../components/ui.jsx'
+import jsPDF from 'jspdf'
+import autoTable from 'jspdf-autotable'
 
-// Fix Leaflet marker icons con Vite
+// ... (EMPTY y fixes de Leaflet se mantienen arriba)
 delete L.Icon.Default.prototype._getIconUrl
 L.Icon.Default.mergeOptions({ iconUrl, iconRetinaUrl, shadowUrl })
 
@@ -22,7 +24,10 @@ const EMPTY = {
 }
 
 export default function EntregasPage() {
-  const [tab, setTab]           = useState('nueva')
+  const [params] = useSearchParams()
+  const { toast } = useToast()
+
+  const [tab, setTab]           = useState(params.get('tab') || 'nueva')
   const [form, setForm]         = useState(EMPTY)
   const [clientes, setClientes] = useState([])
   const [usuarios, setUsuarios] = useState([])
@@ -47,40 +52,174 @@ export default function EntregasPage() {
   const mapaHistRef      = useRef(null)
   const mapaHistInstance = useRef(null)
 
-  const [params] = useSearchParams()
-  const { toast } = useToast()
-
   useEffect(() => {
     api.get('/clientes').then(r => setClientes(r.data)).catch(() => {})
     api.get('/usuarios').then(r => setUsuarios(r.data)).catch(() => {})
     if (params.get('tubo')) agregarTubo(params.get('tubo'))
+    if (params.get('tab')) setTab(params.get('tab'))
   }, [])
 
   useEffect(() => {
     if (tab === 'historial') loadEntregas()
   }, [tab])
 
+  // Función para buscar sugerencias
+  const fetchSugerencias = async (q = '') => {
+    setTuboBuscando(true)
+    try {
+      const r = await api.get(`/tubos?q=${encodeURIComponent(q)}&limit=20`)
+      setTuboSugs(r.data.tubos || [])
+    } catch { 
+      setTuboSugs([]) 
+    } finally { 
+      setTuboBuscando(false) 
+    }
+  }
+
   // Búsqueda debounced de tubos
   useEffect(() => {
-    if (!tuboBusq.trim()) { setTuboSugs([]); return }
-    const t = setTimeout(async () => {
-      setTuboBuscando(true)
-      try {
-        const r = await api.get(`/tubos?q=${encodeURIComponent(tuboBusq)}&limit=8`)
-        setTuboSugs(r.data.tubos || [])
-      } catch { setTuboSugs([]) } finally { setTuboBuscando(false) }
+    if (!tuboBusq.trim()) {
+      setTuboSugs([]) // No buscar automáticamente si está vacío (esperar al Focus)
+      return
+    }
+    const t = setTimeout(() => {
+      fetchSugerencias(tuboBusq)
     }, 350)
     return () => clearTimeout(t)
   }, [tuboBusq])
 
-  // Cerrar dropdown al hacer clic afuera
+  // Exportar reportes
+  const [exportMenuAbierto, setExportMenuAbierto] = useState(false)
+  const exportRef = useRef(null)
+
+  const generateCSV = (data, filename) => {
+    const headers = ['Numero', 'Fecha', 'Cliente', 'Tipo', 'Direccion', 'Tubos', 'Repartidor']
+    const rows = data.map(e => [
+      e.numero,
+      new Date(e.fechaEntrega).toLocaleDateString('es-PY'),
+      e.cliente?.nombre,
+      e.tipoOperacion,
+      e.direccionEntrega,
+      e.detalles?.length || 0,
+      e.repartidor?.nombre || '—'
+    ])
+    const csvContent = "\uFEFF" + [headers, ...rows].map(r => r.map(c => `"${c}"`).join(',')).join('\n')
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${filename}.csv`
+    link.click()
+  }
+
+  const generatePDF = (data, title, filename) => {
+    const doc = new jsPDF()
+    doc.text(title, 14, 15)
+    doc.setFontSize(10)
+    doc.text(`Generado el: ${new Date().toLocaleString('es-PY')}`, 14, 22)
+    
+    const tableData = data.map(e => [
+      e.numero,
+      new Date(e.fechaEntrega).toLocaleDateString('es-PY'),
+      e.cliente?.nombre,
+      e.tipoOperacion,
+      e.detalles?.length || 0,
+      e.repartidor?.nombre || '—'
+    ])
+
+    autoTable(doc, {
+      startY: 28,
+      head: [['Nro', 'Fecha', 'Cliente', 'Tipo', 'Cant.', 'Repartidor']],
+      body: tableData,
+      theme: 'grid',
+      headStyles: { fillColor: [26, 95, 168] }
+    })
+    doc.save(`${filename}.pdf`)
+  }
+
+  const handleExport = async (tipo, formato, id = null) => {
+    setExportMenuAbierto(false)
+    let dataToExport = []
+    let title = ""
+    let filename = `reporte_${tipo}_${new Date().toISOString().slice(0, 10)}`
+
+    try {
+      if (tipo === 'individual' && id) {
+        const e = entregas.find(x => x.id === id)
+        if (!e) return toast('No se encontró la entrega', 'error')
+        
+        if (formato === 'pdf') {
+          const doc = new jsPDF()
+          doc.setFontSize(18)
+          doc.setTextColor(26, 95, 168)
+          doc.text(`COMPROBANTE DE ENTREGA: ${e.numero}`, 14, 20)
+          
+          doc.setFontSize(11)
+          doc.setTextColor(0)
+          doc.text(`Cliente: ${e.cliente?.nombre}`, 14, 30)
+          doc.text(`Fecha: ${new Date(e.fechaEntrega).toLocaleString('es-PY')}`, 14, 37)
+          doc.text(`Tipo Operación: ${e.tipoOperacion}`, 14, 44)
+          doc.text(`Dirección: ${e.direccionEntrega}`, 14, 51)
+          doc.text(`Repartidor: ${e.repartidor?.nombre || '—'}`, 14, 58)
+
+          autoTable(doc, {
+            startY: 65,
+            head: [['Código Tubo', 'Gas / Talla']],
+            body: e.detalles.map(d => [d.tuboId, `${d.tubo?.gas || ''} - ${d.tubo?.talla || ''}`]),
+            headStyles: { fillColor: [26, 95, 168] }
+          })
+          doc.save(`Entrega_${e.numero}.pdf`)
+        } else {
+          generateCSV([e], `Entrega_${e.numero}`)
+        }
+        return toast('Reporte generado', 'success')
+      }
+
+      if (tipo === 'mes' || tipo === 'anio') {
+        const ahora = new Date()
+        const desde = new Date(ahora.getFullYear(), tipo === 'mes' ? ahora.getMonth() : 0, 1)
+        const r = await api.get(`/entregas?desde=${desde.toISOString()}&limit=1000`)
+        dataToExport = r.data.entregas
+        title = tipo === 'mes' ? "REPORTE MENSUAL DE ENTREGAS" : "REPORTE ANUAL DE ENTREGAS"
+      } else {
+        dataToExport = entregas
+        title = "HISTORIAL DE ENTREGAS"
+      }
+
+      if (dataToExport.length === 0) return toast('No hay datos para exportar', 'info')
+
+      if (formato === 'pdf') {
+        generatePDF(dataToExport, title, filename)
+      } else {
+        generateCSV(dataToExport, filename)
+      }
+      toast('Reporte generado correctamente', 'success')
+    } catch (err) {
+      toast('Error al generar reporte', 'error')
+    }
+  }
+
+  // Cerrar menus al hacer clic afuera
   useEffect(() => {
     const handler = e => {
       if (busqRef.current && !busqRef.current.contains(e.target)) setTuboSugs([])
+      if (exportRef.current && !exportRef.current.contains(e.target)) setExportMenuAbierto(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [])
+
+  const reverseGeocode = async (lat, lng) => {
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`)
+      const data = await res.json()
+      if (data.display_name) {
+        setForm(f => ({ ...f, direccionEntrega: data.display_name }))
+      }
+    } catch (err) {
+      console.error('Error reverse geocoding', err)
+    }
+  }
 
   // Inicializar mapa picker cuando se abre
   useEffect(() => {
@@ -118,6 +257,7 @@ export default function EntregasPage() {
         mapaPickerInstance.current.marker = marker
       }
       setForm(f => ({ ...f, latitud: latR, longitud: lngR }))
+      reverseGeocode(latR, lngR)
     })
 
     mapaPickerInstance.current = { map, marker }
@@ -198,6 +338,7 @@ export default function EntregasPage() {
         const lat = parseFloat(pos.coords.latitude.toFixed(6))
         const lng = parseFloat(pos.coords.longitude.toFixed(6))
         setForm(f => ({ ...f, latitud: lat, longitud: lng }))
+        reverseGeocode(lat, lng)
         setGpsLoading(false)
         toast('Ubicación GPS obtenida', 'success')
         // Actualizar mapa si está abierto
@@ -260,7 +401,7 @@ export default function EntregasPage() {
         {/* ── NUEVA ENTREGA ─────────────────────────────────────────────────── */}
         {tab === 'nueva' && (
           <form onSubmit={handleSubmit}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 16 }}>
+            <div className="entregas-grid">
               <div>
                 {/* Datos de la entrega */}
                 <div className="card" style={{ marginBottom: 16 }}>
@@ -370,24 +511,22 @@ export default function EntregasPage() {
                   </div>
 
                   <div ref={busqRef} style={{ position: 'relative', marginBottom: 12 }}>
-                    <div style={{ position: 'relative' }}>
-                      <i className="ti ti-search" style={{
-                        position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
-                        color: 'var(--text-muted)', fontSize: 14, pointerEvents: 'none',
-                      }} />
+                    <div className="search-bar" style={{ marginBottom: 0 }}>
+                      <i className="ti ti-search" />
                       <input
-                        style={{ paddingLeft: 32 }}
-                        placeholder="Buscar por código, gas o serie… (ej: TUBO-0001, CO2, Argon)"
+                        placeholder="Buscar código, gas o serie…"
                         value={tuboBusq}
                         onChange={e => setTuboBusq(e.target.value)}
+                        onFocus={() => {
+                          if (!tuboBusq.trim()) fetchSugerencias('')
+                        }}
                         onKeyDown={e => {
                           if (e.key === 'Escape') { setTuboSugs([]); setTuboBusq('') }
                         }}
                       />
                       {tuboBuscando && (
-                        <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
-                          fontSize: 11, color: 'var(--text-muted)' }}>
-                          Buscando…
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                          ...
                         </span>
                       )}
                     </div>
@@ -507,18 +646,60 @@ export default function EntregasPage() {
         {tab === 'historial' && (
           loadingH ? <Spinner /> : (
             <div>
-              {/* Botón mapa historial */}
-              {entregasConCoords.length > 0 && (
-                <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'flex-end' }}>
+              {/* Botones de acción historial */}
+              <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
+                <button className="btn" onClick={loadEntregas} disabled={loadingH}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, flex: '1 1 auto', justifyContent: 'center', maxWidth: '200px' }}>
+                  <i className={`ti ti-refresh ${loadingH ? 'ti-spin' : ''}`} />
+                  {loadingH ? 'Actualizando...' : 'Actualizar'}
+                </button>
+
+                {entregasConCoords.length > 0 && (
                   <button className="btn" onClick={() => setMapaHistAbierto(v => !v)}
-                    style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, flex: '1 1 auto', justifyContent: 'center', maxWidth: '200px' }}>
                     <i className="ti ti-map" />
                     {mapaHistAbierto
                       ? 'Ocultar mapa'
-                      : `Ver mapa (${entregasConCoords.length} ubicaciones)`}
+                      : `Mapa (${entregasConCoords.length})`}
                   </button>
+                )}
+                
+                <div ref={exportRef} style={{ position: 'relative', flex: '1 1 auto', maxWidth: '200px' }}>
+                  <button className="btn btn-primary" onClick={() => setExportMenuAbierto(!exportMenuAbierto)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', justifyContent: 'center' }}>
+                    <i className="ti ti-download" />
+                    Exportar
+                  </button>
+                  {exportMenuAbierto && (
+                    <div style={{
+                      position: 'absolute', top: '100%', right: 0, marginTop: 4,
+                      background: 'var(--surface)', border: '1px solid var(--border)',
+                      borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                      zIndex: 100, minWidth: 220, overflow: 'hidden'
+                    }}>
+                      <div style={{ padding: '8px 12px', fontSize: 11, color: 'var(--text-muted)', background: 'var(--surface-2)', fontWeight: 600 }}>REPORTE MENSUAL</div>
+                      <div className="export-item" onClick={() => handleExport('mes', 'pdf')}
+                        style={{ padding: '10px 14px', cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <i className="ti ti-file-type-pdf" style={{ color: '#e11d48' }} /> Descargar PDF
+                      </div>
+                      <div className="export-item" onClick={() => handleExport('mes', 'csv')}
+                        style={{ padding: '10px 14px', cursor: 'pointer', fontSize: 13, borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <i className="ti ti-file-spreadsheet" style={{ color: '#16a34a' }} /> Descargar Planilla (Excel)
+                      </div>
+
+                      <div style={{ padding: '8px 12px', fontSize: 11, color: 'var(--text-muted)', background: 'var(--surface-2)', fontWeight: 600, borderTop: '1px solid var(--border)' }}>REPORTE ANUAL</div>
+                      <div className="export-item" onClick={() => handleExport('anio', 'pdf')}
+                        style={{ padding: '10px 14px', cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <i className="ti ti-file-type-pdf" style={{ color: '#e11d48' }} /> Descargar PDF
+                      </div>
+                      <div className="export-item" onClick={() => handleExport('anio', 'csv')}
+                        style={{ padding: '10px 14px', cursor: 'pointer', fontSize: 13, borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <i className="ti ti-file-spreadsheet" style={{ color: '#16a34a' }} /> Descargar Planilla (Excel)
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
 
               {/* Mapa de historial */}
               {mapaHistAbierto && (
@@ -527,8 +708,8 @@ export default function EntregasPage() {
                 </div>
               )}
 
-              {/* Tabla */}
-              <div className="card" style={{ padding: 0 }}>
+              {/* Vista Tabla (Desktop) */}
+              <div className="card table-wrap hide-mobile" style={{ padding: 0 }}>
                 {entregas.length === 0
                   ? <EmptyState icon="ti-truck-delivery" message="Sin entregas registradas" />
                   : (
@@ -544,6 +725,7 @@ export default function EntregasPage() {
                             <th>Tubos</th>
                             <th>Repartidor</th>
                             <th>Fecha</th>
+                            <th style={{ textAlign: 'right' }}>Acciones</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -577,12 +759,104 @@ export default function EntregasPage() {
                               <td style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
                                 {new Date(e.fechaEntrega).toLocaleDateString('es-PY')}
                               </td>
+                              <td style={{ textAlign: 'right' }}>
+                                <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', alignItems: 'flex-start' }}>
+                                  {e.latitud && e.longitud && (
+                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                                      <a href={`https://www.google.com/maps?q=${e.latitud},${e.longitud}`}
+                                        target="_blank" rel="noopener noreferrer" className="btn-icon"
+                                        title="Ver en mapa">
+                                        <i className="ti ti-map-pin" />
+                                      </a>
+                                      <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-muted)' }}>Mapa</span>
+                                    </div>
+                                  )}
+                                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                                    <button className="btn-icon" title="Descargar PDF"
+                                      onClick={() => handleExport('individual', 'pdf', e.id)}>
+                                      <i className="ti ti-file-type-pdf" style={{ color: '#e11d48' }} />
+                                    </button>
+                                    <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-muted)' }}>PDF</span>
+                                  </div>
+                                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                                    <button className="btn-icon" title="Descargar Planilla"
+                                      onClick={() => handleExport('individual', 'csv', e.id)}>
+                                      <i className="ti ti-file-spreadsheet" style={{ color: '#16a34a' }} />
+                                    </button>
+                                    <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-muted)' }}>Excel</span>
+                                  </div>
+                                </div>
+                              </td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
                     </div>
                   )}
+              </div>
+
+              {/* Vista Mobile (Cards) — Se muestra solo en mobile vía CSS */}
+              <div className="mobile-list">
+                {entregas.length === 0 ? (
+                  <EmptyState icon="ti-truck-delivery" message="Sin entregas registradas" />
+                ) : (
+                  entregas.map(e => (
+                    <div key={e.id} className="list-card">
+                      <div className="list-card-header">
+                        <div className="list-card-title">{e.numero}</div>
+                        <span className={`badge badge-${e.tipoOperacion === 'ALQUILER' ? 'ALQUILADO' : e.tipoOperacion === 'VENTA' ? 'VENDIDO' : 'ENTREGADO'}`}>
+                          {e.tipoOperacion.replace('_', ' ')}
+                        </span>
+                      </div>
+                      
+                      <div className="list-card-body">
+                        <div className="list-card-item col-span-2">
+                          <span className="list-card-label">Cliente</span>
+                          <span className="list-card-value">{e.cliente?.nombre}</span>
+                        </div>
+                        <div className="list-card-item col-span-2">
+                          <span className="list-card-label">Dirección</span>
+                          <span className="list-card-value" style={{ whiteSpace: 'normal' }}>{e.direccionEntrega}</span>
+                        </div>
+                        <div className="list-card-item">
+                          <span className="list-card-label">Fecha</span>
+                          <span className="list-card-value">{new Date(e.fechaEntrega).toLocaleDateString('es-PY')}</span>
+                        </div>
+                        <div className="list-card-item">
+                          <span className="list-card-label">Tubos</span>
+                          <span className="list-card-value">{e.detalles?.length ?? 0}</span>
+                        </div>
+                      </div>
+
+                      <div className="list-card-actions" style={{ justifyContent: 'flex-end', gap: 16, paddingTop: 12 }}>
+                        {e.latitud && e.longitud && (
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                            <a href={`https://www.google.com/maps?q=${e.latitud},${e.longitud}`}
+                              target="_blank" rel="noopener noreferrer" className="btn-icon" 
+                              style={{ width: 44, height: 44, fontSize: 20 }}>
+                              <i className="ti ti-map-pin" />
+                            </a>
+                            <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)' }}>Mapa</span>
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                          <button className="btn-icon" onClick={() => handleExport('individual', 'pdf', e.id)}
+                            style={{ width: 44, height: 44, fontSize: 20 }}>
+                            <i className="ti ti-file-type-pdf" style={{ color: '#e11d48' }} />
+                          </button>
+                          <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)' }}>PDF</span>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                          <button className="btn-icon" onClick={() => handleExport('individual', 'csv', e.id)}
+                            style={{ width: 44, height: 44, fontSize: 20 }}>
+                            <i className="ti ti-file-spreadsheet" style={{ color: '#16a34a' }} />
+                          </button>
+                          <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)' }}>Excel</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           )

@@ -89,7 +89,7 @@ export default function TuboDetallePage() {
       />
 
       <div className="app-content">
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 16 }}>
+        <div className="responsive-grid">
           {/* Info principal */}
           <div>
             <div className="card" style={{ marginBottom: 16 }}>
@@ -97,7 +97,7 @@ export default function TuboDetallePage() {
                 <div className="card-title">Información del tubo</div>
                 <StateBadge estado={tubo.estado} />
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="form-grid">
                 {[
                   ['Código interno', tubo.id],
                   ['Número de serie', tubo.serie],

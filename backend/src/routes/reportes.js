@@ -2,10 +2,11 @@
 
 import { Router } from 'express'
 import { prisma } from '../utils/prisma.js'
-import { requireAuth } from '../middleware/auth.js'
+import { requireAuth, requireRol } from '../middleware/auth.js'
 
 const router = Router()
 router.use(requireAuth)
+router.use(requireRol('ADMIN', 'SUPERVISOR'))
 
 // GET /api/reportes/dashboard — todos los indicadores del dashboard en una sola llamada
 router.get('/dashboard', async (req, res, next) => {

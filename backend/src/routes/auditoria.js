@@ -1,10 +1,11 @@
 // gastubos/backend/src/routes/auditoria.js
 import { Router } from 'express'
 import { prisma } from '../utils/prisma.js'
-import { requireAuth } from '../middleware/auth.js'
+import { requireAuth, requireRol } from '../middleware/auth.js'
 
 const router = Router()
 router.use(requireAuth)
+router.use(requireRol('ADMIN', 'SUPERVISOR'))
 
 router.get('/', async (req, res, next) => {
   try {

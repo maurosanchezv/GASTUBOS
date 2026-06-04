@@ -19,6 +19,7 @@ import AlquileresPage  from './pages/AlquileresPage.jsx'
 import VentasPage      from './pages/VentasPage.jsx'
 import ReportesPage    from './pages/ReportesPage.jsx'
 import AuditoriaPage   from './pages/AuditoriaPage.jsx'
+import PerfilPage      from './pages/PerfilPage.jsx'
 import UsuariosPage    from './pages/UsuariosPage.jsx'
 import CargasPage      from './pages/CargasPage.jsx'
 import TuboPublicoPage from './pages/TuboPublicoPage.jsx'  // sin auth
@@ -60,6 +61,7 @@ export default function App() {
           <Route path="ventas" element={<VentasPage />} />
           <Route path="reportes" element={<ReportesPage />} />
           <Route path="auditoria" element={<AuditoriaPage />} />
+          <Route path="perfil" element={<PerfilPage />} />
           <Route path="usuarios" element={
             <PrivateRoute roles={['ADMIN']}><UsuariosPage /></PrivateRoute>
           } />

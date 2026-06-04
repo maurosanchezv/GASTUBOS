@@ -29,9 +29,12 @@ const NAV = [
     { to: '/ventas',     icon: 'ti-shopping-cart',    label: 'Ventas' },
   ]},
   { group: 'Sistema', items: [
-    { to: '/reportes',   icon: 'ti-chart-bar',        label: 'Reportes' },
-    { to: '/auditoria',  icon: 'ti-list-details',     label: 'Auditoría' },
-    { to: '/usuarios',   icon: 'ti-shield-lock',      label: 'Usuarios', adminOnly: true },
+    { to: '/reportes',   icon: 'ti-chart-bar',        label: 'Reportes', restrictedTo: ['ADMIN', 'SUPERVISOR'] },
+    { to: '/auditoria',  icon: 'ti-list-details',     label: 'Auditoría', restrictedTo: ['ADMIN', 'SUPERVISOR'] },
+    { to: '/usuarios',   icon: 'ti-shield-lock',      label: 'Usuarios', restrictedTo: ['ADMIN'] },
+  ]},
+  { group: 'Mi Cuenta', items: [
+    { to: '/perfil',     icon: 'ti-user-circle',      label: 'Mi Perfil' },
   ]},
 ]
 
@@ -51,9 +54,6 @@ export default function Layout() {
 
   return (
     <div className="app-shell">
-      <button className="mobile-toggle" onClick={() => setSidebarOpen(o => !o)} aria-label="Menú">
-        <i className="ti ti-menu-2" />
-      </button>
       <div className={`sidebar-backdrop ${sidebarOpen ? 'open' : ''}`} onClick={() => setSidebarOpen(false)} />
 
       {/* SIDEBAR */}
@@ -67,12 +67,16 @@ export default function Layout() {
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto' }}>
-          {NAV.map((section, i) => (
-            <div className="nav-section" key={i}>
-              {section.group && <div className="nav-group-label">{section.group}</div>}
-              {section.items.map(item => {
-                if (item.adminOnly && user?.rol !== 'ADMIN') return null
-                return (
+          {NAV.map((section, i) => {
+            const visibleItems = section.items.filter(item => 
+              !item.restrictedTo || item.restrictedTo.includes(user?.rol)
+            )
+            if (visibleItems.length === 0) return null
+
+            return (
+              <div className="nav-section" key={i}>
+                {section.group && <div className="nav-group-label">{section.group}</div>}
+                {visibleItems.map(item => (
                   <NavLink
                     key={item.to}
                     to={item.to}
@@ -86,20 +90,22 @@ export default function Layout() {
                       <span className="nav-badge">{vencidos}</span>
                     )}
                   </NavLink>
-                )
-              })}
-            </div>
-          ))}
+                ))}
+              </div>
+            )
+          })}
         </div>
 
         <div className="sidebar-footer">
-          <div className="user-chip">
-            <div className="user-avatar">{initials}</div>
+          <div className="user-chip" onClick={() => navigate('/perfil')} style={{ cursor: 'pointer' }}>
+            <div className="user-avatar" style={{ overflow: 'hidden' }}>
+              {user?.avatar ? <img src={user.avatar} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : initials}
+            </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="user-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user?.nombre}</div>
               <div className="user-role">{user?.rol}</div>
             </div>
-            <button className="btn-icon" onClick={() => { logout(); navigate('/login') }} title="Salir">
+            <button className="btn-icon" onClick={(e) => { e.stopPropagation(); logout(); navigate('/login') }} title="Salir">
               <i className="ti ti-logout" />
             </button>
           </div>
@@ -109,6 +115,30 @@ export default function Layout() {
       {/* MAIN */}
       <div className="app-main">
         <Outlet />
+      </div>
+
+      {/* BOTTOM NAV (Mobile Only) */}
+      <div className="bottom-nav">
+        <NavLink to="/" end className={({ isActive }) => `bottom-nav-link ${isActive ? 'active' : ''}`}>
+          <i className="ti ti-layout-dashboard" />
+          <span>Inicio</span>
+        </NavLink>
+        <NavLink to="/tubos" className={({ isActive }) => `bottom-nav-link ${isActive ? 'active' : ''}`}>
+          <i className="ti ti-cylinder" />
+          <span>Tubos</span>
+        </NavLink>
+        <NavLink to="/entregas" className={({ isActive }) => `bottom-nav-link ${isActive ? 'active' : ''}`}>
+          <i className="ti ti-truck-delivery" />
+          <span>Entregas</span>
+        </NavLink>
+        <NavLink to="/clientes" className={({ isActive }) => `bottom-nav-link ${isActive ? 'active' : ''}`}>
+          <i className="ti ti-users" />
+          <span>Clientes</span>
+        </NavLink>
+        <button className="bottom-nav-link" style={{ border: 'none', background: 'none' }} onClick={() => setSidebarOpen(true)}>
+          <i className="ti ti-menu-2" />
+          <span>Más</span>
+        </button>
       </div>
     </div>
   )

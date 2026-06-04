@@ -94,11 +94,12 @@ export default function TubosPage() {
         </div>
 
         {loading ? <Spinner /> : (
-          <div className="card" style={{ padding: 0 }}>
-            {tubos.length === 0 ? (
-              <EmptyState icon="ti-cylinder" message="No se encontraron tubos con esos filtros" />
-            ) : (
-              <div className="table-wrap">
+          <>
+            {/* VISTA TABLE (Desktop) */}
+            <div className="card table-wrap hide-mobile" style={{ padding: 0 }}>
+              {tubos.length === 0 ? (
+                <EmptyState icon="ti-cylinder" message="No se encontraron tubos con esos filtros" />
+              ) : (
                 <table>
                   <thead>
                     <tr>
@@ -152,9 +153,49 @@ export default function TubosPage() {
                     ))}
                   </tbody>
                 </table>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+
+            {/* VISTA CARDS (Mobile) */}
+            <div className="mobile-list">
+              {tubos.length === 0 ? (
+                <EmptyState icon="ti-cylinder" message="Sin resultados" />
+              ) : (
+                tubos.map(t => (
+                  <div key={t.id} className="list-card">
+                    <div className="list-card-header">
+                      <div className="list-card-title">{t.id}</div>
+                      <StateBadge estado={t.estado} />
+                    </div>
+                    <div className="list-card-body">
+                      <div className="list-card-item">
+                        <span className="list-card-label">Gas / Capacidad</span>
+                        <span className="list-card-value">
+                          <GasDot gas={t.gas} /> {t.gas} · {t.capacidadLitros}L
+                        </span>
+                      </div>
+                      <div className="list-card-item">
+                        <span className="list-card-label">Propietario</span>
+                        <span className="list-card-value">{t.propietario}</span>
+                      </div>
+                      <div className="list-card-item" style={{ gridColumn: 'span 2' }}>
+                        <span className="list-card-label">Cliente actual</span>
+                        <span className="list-card-value">{t.cliente?.nombre || 'En depósito'}</span>
+                      </div>
+                    </div>
+                    <div className="list-card-actions">
+                      <button className="btn btn-sm" style={{ flex: 1 }} onClick={() => navigate(`/tubos/${t.id}/detalle`)}>
+                        <i className="ti ti-eye" /> Ver detalle
+                      </button>
+                      <button className="btn btn-sm" onClick={() => navigate(`/tubos/${t.id}/detalle?qr=1`)}>
+                        <i className="ti ti-qrcode" /> QR
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </>
         )}
       </div>
 

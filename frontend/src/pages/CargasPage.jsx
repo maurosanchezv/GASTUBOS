@@ -176,49 +176,91 @@ export default function CargasPage() {
 
         {/* TAB: Tubos para cargar */}
         {tab === 'pendientes' && (
-          <div className="card">
+          <>
             {loading ? <Spinner /> : tubos.length === 0 ? (
               <EmptyState icon="ti-circle-check" message="No hay tubos pendientes de carga" />
             ) : (
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Código</th>
-                      <th>Serie</th>
-                      <th>Gas actual</th>
-                      <th>Estado</th>
-                      <th>Ubicación</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {tubos.map(t => (
-                      <tr key={t.id}>
-                        <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{t.id}</td>
-                        <td style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)' }}>{t.serie}</td>
-                        <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <GasDot gas={t.gas} />
-                            {t.gas}
-                          </div>
-                        </td>
-                        <td><StateBadge estado={t.estado} /></td>
-                        <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{t.ubicacion || '—'}</td>
-                        <td>
-                          {(user?.rol === 'ADMIN' || user?.rol === 'OPERADOR') && (
-                            <button className="btn btn-primary btn-sm" onClick={() => abrirModalConTubo(t)}>
-                              <i className="ti ti-bolt" /> Registrar carga
-                            </button>
-                          )}
-                        </td>
+              <>
+                {/* VISTA TABLE (Desktop) */}
+                <div className="card table-wrap hide-mobile" style={{ padding: 0 }}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Código</th>
+                        <th>Serie</th>
+                        <th>Gas actual</th>
+                        <th>Estado</th>
+                        <th>Ubicación</th>
+                        <th style={{ textAlign: 'right' }}>Acciones</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {tubos.map(t => (
+                        <tr key={t.id}>
+                          <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{t.id}</td>
+                          <td style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)' }}>{t.serie}</td>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <GasDot gas={t.gas} />
+                              {t.gas}
+                            </div>
+                          </td>
+                          <td><StateBadge estado={t.estado} /></td>
+                          <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{t.ubicacion || '—'}</td>
+                          <td style={{ textAlign: 'right' }}>
+                            {(user?.rol === 'ADMIN' || user?.rol === 'OPERADOR') && (
+                              <button className="btn btn-primary btn-sm" onClick={() => abrirModalConTubo(t)}>
+                                <i className="ti ti-bolt" /> Cargar
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* VISTA CARDS (Mobile) */}
+                <div className="mobile-list">
+                  {tubos.map(t => (
+                    <div key={t.id} className="list-card">
+                      <div className="list-card-header">
+                        <div className="list-card-title">{t.id}</div>
+                        <StateBadge estado={t.estado} />
+                      </div>
+                      <div className="list-card-body">
+                        <div className="list-card-item">
+                          <span className="list-card-label">Gas Actual</span>
+                          <span className="list-card-value" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <GasDot gas={t.gas} /> {t.gas}
+                          </span>
+                        </div>
+                        <div className="list-card-item">
+                          <span className="list-card-label">Serie</span>
+                          <span className="list-card-value">{t.serie}</span>
+                        </div>
+                        <div className="list-card-item col-span-2">
+                          <span className="list-card-label">Ubicación</span>
+                          <span className="list-card-value">{t.ubicacion || '—'}</span>
+                        </div>
+                      </div>
+                      {(user?.rol === 'ADMIN' || user?.rol === 'OPERADOR') && (
+                        <div className="list-card-actions" style={{ justifyContent: 'flex-end', paddingTop: 12 }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                            <button className="btn-icon btn-primary" onClick={() => abrirModalConTubo(t)}
+                              style={{ width: 44, height: 44, fontSize: 20, borderRadius: 10 }}>
+                              <i className="ti ti-bolt" />
+                            </button>
+                            <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--blue)' }}>Cargar</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </>
             )}
-          </div>
+          </>
         )}
 
         {/* TAB: Historial */}
@@ -227,20 +269,20 @@ export default function CargasPage() {
             {/* Filtros */}
             <div className="card" style={{ marginBottom: 16, padding: '12px 16px' }}>
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                <div style={{ flex: '0 0 200px' }}>
+                <div style={{ flex: '1 1 200px' }}>
                   <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Gas</label>
                   <select value={filtroGas} onChange={e => { setFiltroGas(e.target.value); setPage(1) }}>
-                    <option value="">Todos</option>
+                    <option value="">Todos los gases</option>
                     {Object.entries(TIPO_GAS_LABEL).map(([k, v]) => (
                       <option key={k} value={k}>{v}</option>
                     ))}
                   </select>
                 </div>
-                <div style={{ flex: '0 0 155px' }}>
+                <div style={{ flex: '1 1 150px' }}>
                   <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Desde</label>
                   <input type="date" value={filtroDesde} onChange={e => { setFiltroDesde(e.target.value); setPage(1) }} />
                 </div>
-                <div style={{ flex: '0 0 155px' }}>
+                <div style={{ flex: '1 1 150px' }}>
                   <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Hasta</label>
                   <input type="date" value={filtroHasta} onChange={e => { setFiltroHasta(e.target.value); setPage(1) }} />
                 </div>
@@ -252,11 +294,12 @@ export default function CargasPage() {
               </div>
             </div>
 
-            <div className="card">
-              {loading ? <Spinner /> : cargas.length === 0 ? (
-                <EmptyState icon="ti-history" message="Sin cargas registradas" />
-              ) : (
-                <div className="table-wrap">
+            {loading ? <Spinner /> : cargas.length === 0 ? (
+              <EmptyState icon="ti-history" message="Sin cargas registradas" />
+            ) : (
+              <>
+                {/* VISTA TABLE (Desktop) */}
+                <div className="card table-wrap hide-mobile" style={{ padding: 0 }}>
                   <table>
                     <thead>
                       <tr>
@@ -300,15 +343,55 @@ export default function CargasPage() {
                     </tbody>
                   </table>
                 </div>
-              )}
-              {totalPages > 1 && (
-                <div style={{ display: 'flex', justifyContent: 'center', gap: 8, padding: '12px 0 4px' }}>
-                  <button className="btn btn-sm" disabled={page === 1} onClick={() => setPage(p => p - 1)}>← Anterior</button>
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)', alignSelf: 'center' }}>{page} / {totalPages}</span>
-                  <button className="btn btn-sm" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>Siguiente →</button>
+
+                {/* VISTA CARDS (Mobile) */}
+                <div className="mobile-list">
+                  {cargas.map(c => (
+                    <div key={c.id} className="list-card">
+                      <div className="list-card-header">
+                        <div className="list-card-title">{c.numero}</div>
+                        <div style={{ fontWeight: 700, color: 'var(--blue)' }}>
+                          {Number(c.cantidad).toLocaleString('es-PY')} {c.unidad === 'KG' ? 'kg' : 'm³'}
+                        </div>
+                      </div>
+                      <div className="list-card-body">
+                        <div className="list-card-item">
+                          <span className="list-card-label">Tubo</span>
+                          <span className="list-card-value">{c.tubo?.id}</span>
+                        </div>
+                        <div className="list-card-item">
+                          <span className="list-card-label">Gas</span>
+                          <span className="list-card-value" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <GasDot gas={TIPO_GAS_LABEL[c.tipoGas]} /> {TIPO_GAS_LABEL[c.tipoGas]}
+                          </span>
+                        </div>
+                        <div className="list-card-item">
+                          <span className="list-card-label">Fecha</span>
+                          <span className="list-card-value">{new Date(c.fechaCarga).toLocaleDateString('es-PY')}</span>
+                        </div>
+                        <div className="list-card-item">
+                          <span className="list-card-label">Operador</span>
+                          <span className="list-card-value">{c.operador?.username}</span>
+                        </div>
+                        {c.observaciones && (
+                          <div className="list-card-item col-span-2">
+                            <span className="list-card-label">Obs.</span>
+                            <span className="list-card-value" style={{ whiteSpace: 'normal', fontSize: 11 }}>{c.observaciones}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              )}
-            </div>
+              </>
+            )}
+            {totalPages > 1 && (
+              <div style={{ display: 'flex', justifyContent: 'center', gap: 8, padding: '12px 0 4px' }}>
+                <button className="btn btn-sm" disabled={page === 1} onClick={() => setPage(p => p - 1)}>← Anterior</button>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)', alignSelf: 'center' }}>{page} / {totalPages}</span>
+                <button className="btn btn-sm" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>Siguiente →</button>
+              </div>
+            )}
           </>
         )}
       </div>

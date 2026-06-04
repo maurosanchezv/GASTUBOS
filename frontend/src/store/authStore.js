@@ -34,4 +34,14 @@ export const useAuthStore = create((set, get) => ({
       set({ user: null, token: null })
     }
   },
+
+  updateProfile: async (payload) => {
+    try {
+      const { data } = await api.patch('/auth/me', payload)
+      set({ user: data })
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: err.response?.data?.error || 'Error al actualizar perfil' }
+    }
+  },
 }))

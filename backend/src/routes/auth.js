@@ -54,9 +54,29 @@ router.get('/me', requireAuth, async (req, res, next) => {
   try {
     const user = await prisma.usuario.findUnique({
       where: { id: req.user.id },
-      select: { id: true, username: true, nombre: true, email: true, rol: true },
+      select: { id: true, username: true, nombre: true, email: true, rol: true, avatar: true },
     })
     if (!user) return res.status(404).json({ error: 'Usuario no encontrado' })
+    res.json(user)
+  } catch (err) { next(err) }
+})
+
+// PATCH /api/auth/me — permite al usuario actualizar su propio perfil
+router.patch('/me', requireAuth, async (req, res, next) => {
+  try {
+    const { nombre, email, password, avatar } = req.body
+    const data = {}
+    if (nombre) data.nombre = nombre
+    if (email)  data.email = email
+    if (avatar) data.avatar = avatar
+    if (password) data.passwordHash = await bcrypt.hash(password, 12)
+
+    const user = await prisma.usuario.update({
+      where: { id: req.user.id },
+      data,
+      select: { id: true, username: true, nombre: true, email: true, rol: true, avatar: true },
+    })
+
     res.json(user)
   } catch (err) { next(err) }
 })

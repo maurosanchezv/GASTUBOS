@@ -25,10 +25,9 @@ export default function TuboPublicoPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // Llama al endpoint público (sin auth)
-    fetch(`${import.meta.env.VITE_API_URL?.replace('/api','') || 'http://localhost:3001'}/tubos/${id}`)
-      .then(r => r.ok ? r.json() : Promise.reject('no encontrado'))
-      .then(setTubo)
+    // Llama al endpoint público (sin auth) usando la nueva ruta /api/public/tubos
+    api.get(`/public/tubos/${id}`)
+      .then(res => setTubo(res.data))
       .catch(() => setError('Tubo no encontrado'))
       .finally(() => setLoading(false))
   }, [id])

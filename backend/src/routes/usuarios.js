@@ -19,7 +19,7 @@ const usuarioSchema = z.object({
 router.get('/', async (req, res, next) => {
   try {
     const usuarios = await prisma.usuario.findMany({
-      select: { id: true, username: true, nombre: true, email: true, rol: true, activo: true, createdAt: true },
+      select: { id: true, username: true, nombre: true, email: true, rol: true, avatar: true, activo: true, createdAt: true },
     })
     res.json(usuarios)
   } catch (err) { next(err) }

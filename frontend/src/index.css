@@ -354,28 +354,37 @@ textarea { resize: vertical; min-height: 72px; }
   z-index: 200;
   display: flex; align-items: center; justify-content: center;
   padding: 16px;
+  backdrop-filter: blur(2px);
 }
 .modal {
   background: var(--surface);
   border-radius: var(--radius-lg);
   width: 540px; max-width: 100%;
   max-height: 90vh;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--border-mid);
   box-shadow: 0 16px 48px rgba(0,0,0,.15);
+  overflow: hidden; /* El scroll lo manejará el body */
 }
 .modal-header {
   padding: 16px 20px;
   border-bottom: 1px solid var(--border);
   display: flex; align-items: center; justify-content: space-between;
-  position: sticky; top: 0; background: var(--surface); z-index: 1;
+  flex-shrink: 0;
 }
 .modal-title  { font-size: 14px; font-weight: 600; }
-.modal-body   { padding: 20px; }
+.modal-body   { 
+  padding: 20px 20px 40px; 
+  overflow-y: auto; 
+  flex: 1;
+  -webkit-overflow-scrolling: touch;
+}
 .modal-footer {
   padding: 14px 20px;
   border-top: 1px solid var(--border);
   display: flex; justify-content: flex-end; gap: 8px;
+  flex-shrink: 0;
 }
 
 /* ── Tabs ────────────────────────────────────────────────────── */
@@ -451,29 +460,155 @@ textarea { resize: vertical; min-height: 72px; }
 /* ── Mobile ──────────────────────────────────────────────────── */
 .mobile-toggle {
   display: none;
-  position: fixed; top: 10px; left: 10px; z-index: 300;
-  background: var(--blue); color: #fff;
-  border: none; border-radius: 8px;
-  width: 36px; height: 36px;
-  align-items: center; justify-content: center;
-  font-size: 18px;
 }
 .sidebar-backdrop {
   display: none;
   position: fixed; inset: 0;
   background: rgba(0,0,0,.3);
   z-index: 90;
+  backdrop-filter: blur(2px);
 }
 
-@media (max-width: 768px) {
-  .app-sidebar { transform: translateX(-100%); }
+.bottom-nav {
+  display: none;
+  position: fixed; bottom: 0; left: 0; right: 0;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  height: 60px;
+  z-index: 100;
+  padding: 0 10px;
+  box-shadow: 0 -4px 12px rgba(0,0,0,.05);
+}
+.bottom-nav-link {
+  flex: 1;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 4px;
+  color: var(--text-secondary);
+  font-size: 10px; font-weight: 500;
+  transition: color .12s;
+}
+.bottom-nav-link i { font-size: 20px; }
+.bottom-nav-link.active { color: var(--blue); }
+
+@media (max-width: 1024px) {
+  .modal-overlay {
+    align-items: flex-start;
+    padding: 8px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .modal {
+    max-height: none;
+    height: auto;
+    width: 100%;
+    margin: 0;
+    display: block; /* Volvemos a block para que el scroll lo maneje el overlay si es necesario */
+  }
+  .modal-header { padding: 10px 16px; position: sticky; top: 0; background: var(--surface); z-index: 2; border-bottom: 1px solid var(--border); }
+  .modal-body   { padding: 12px 16px 20px; overflow: visible; }
+  .modal-footer { padding: 12px 16px; position: sticky; bottom: 0; background: var(--surface); z-index: 2; border-top: 1px solid var(--border); }
+
+  .form-group { gap: 2px; margin-bottom: 8px; }
+  .form-label { font-size: 10px; margin-bottom: 2px; }
+
+  .app-sidebar { transform: translateX(-100%); width: 260px; }
   .app-sidebar.open { transform: translateX(0); box-shadow: 4px 0 20px rgba(0,0,0,.15); }
-  .app-main { margin-left: 0; }
-  .mobile-toggle { display: flex; }
+  .app-main { margin-left: 0; padding-bottom: 70px; width: 100%; min-width: 0; }
   .sidebar-backdrop.open { display: block; }
-  .app-topbar { padding-left: 56px; }
-  .app-content { padding: 16px; }
+  .app-topbar { padding: 0 16px; height: auto; min-height: 52px; padding-top: 8px; padding-bottom: 8px; flex-wrap: wrap; }
+  .app-content { padding: 12px; }
   .form-grid { grid-template-columns: 1fr; }
   .form-grid-3 { grid-template-columns: 1fr; }
   .col-span-2, .col-span-3 { grid-column: span 1; }
+
+  .page-header { flex-direction: column; align-items: flex-start; gap: 8px; margin-bottom: 12px; }
+  .page-header .btn { width: 100%; justify-content: center; padding: 10px; }
+
+  .table-wrap {
+    margin: 0 -12px;
+    padding: 0 12px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  table { min-width: 500px; }
+
+  .bottom-nav { display: flex; }
+  
+  /* Botones más grandes para dedos */
+  .btn, .btn-icon { min-height: 40px; }
+  input, select, textarea { min-height: 44px; font-size: 16px; }
 }
+
+/* ── Mobile List Cards ────────────────────────────────────────── */
+.mobile-list { display: none; }
+@media (max-width: 1024px) {
+  .mobile-list { display: grid; gap: 10px; padding: 4px 0; }
+  .table-wrap.hide-mobile { display: none; }
+  
+  .list-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    position: relative;
+  }
+  .list-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+  .list-card-title {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--blue);
+  }
+  .list-card-body {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    font-size: 12px;
+  }
+  .list-card-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .list-card-label {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+  }
+  .list-card-value {
+    color: var(--text-secondary);
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .list-card-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+  }
+}
+
+.entregas-grid {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: 16px;
+}
+.responsive-grid {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: 16px;
+}
+@media (max-width: 1024px) {
+  .entregas-grid, .responsive-grid { grid-template-columns: 1fr; }
+}
+

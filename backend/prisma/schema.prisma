@@ -79,6 +79,7 @@ model Usuario {
   passwordHash String
   nombre      String
   rol         Rol
+  avatar      String?  // URL o base64 de la foto
   activo      Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -268,4 +269,13 @@ model Auditoria {
   @@index([usuarioId])
   @@index([createdAt])
   @@map("auditoria")
+}
+
+// ─── SISTEMA / CONTADORES Atómicos ────────────────────────────────────────────
+
+model Counter {
+  key   String @id // e.g., "E-2026", "AL-2026", "TUBO"
+  value Int    @default(0)
+
+  @@map("counters")
 }
