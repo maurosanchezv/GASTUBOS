@@ -12,7 +12,7 @@ const usuarioSchema = z.object({
   username: z.string().min(3),
   email:    z.string().email(),
   nombre:   z.string().min(1),
-  rol:      z.enum(['ADMIN','SUPERVISOR','OPERADOR']),
+  rol:      z.enum(['ADMIN','SUPERVISOR','OPERADOR','REPARTIDOR']),
   password: z.string().min(8),
 })
 

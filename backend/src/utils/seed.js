@@ -37,6 +37,19 @@ async function main() {
     },
   })
 
+  const repHash = await bcrypt.hash('repartidor123', 12)
+  await prisma.usuario.upsert({
+    where:  { username: 'repartidor1' },
+    update: {},
+    create: {
+      username:     'repartidor1',
+      email:        'repartidor1@gastubos.com',
+      passwordHash: repHash,
+      nombre:       'Diego Sosa',
+      rol:          'REPARTIDOR',
+    },
+  })
+
   // ── Clientes ───────────────────────────────────────────────────────────────
   const cliente1 = await prisma.cliente.upsert({
     where:  { ruc: '80012345-1' },
@@ -81,9 +94,29 @@ async function main() {
     })
   }
 
+  // ── Precios de Gas de Ejemplo ──────────────────────────────────────────────
+  const preciosData = [
+    { gas: 'CO2',              unidad: 'KG', precioUnitario: 15000 },
+    { gas: 'OXIGENO',          unidad: 'M3', precioUnitario: 25000 },
+    { gas: 'ARGON',            unidad: 'M3', precioUnitario: 45000 },
+    { gas: 'NITROGENO',        unidad: 'M3', precioUnitario: 20000 },
+    { gas: 'AIRE_COMPRIMIDO',  unidad: 'M3', precioUnitario: 12000 },
+    { gas: 'MEZCLA_CO2_ARGON', unidad: 'M3', precioUnitario: 40000 },
+    { gas: 'ACETILENO',        unidad: 'KG', precioUnitario: 60000 },
+  ]
+
+  for (const p of preciosData) {
+    await prisma.precioGas.upsert({
+      where:  { gas: p.gas },
+      update: { precioUnitario: p.precioUnitario, unidad: p.unidad },
+      create: { gas: p.gas, unidad: p.unidad, precioUnitario: p.precioUnitario },
+    })
+  }
+
   console.log('✅ Seed completo.')
-  console.log('   👤 Admin:    admin / admin1234')
-  console.log('   👤 Operador: operador1 / operador123')
+  console.log('   👤 Admin:      admin / admin1234')
+  console.log('   👤 Operador:   operador1 / operador123')
+  console.log('   👤 Repartidor: repartidor1 / repartidor123')
 }
 
 main()

@@ -13,22 +13,28 @@ export const gasColor = (g) => {
   return '#9A3412'
 }
 
+// Roles "de oficina": ven todo lo operativo y de gestión. El REPARTIDOR solo ve
+// Dashboard, Hoja de Ruta y Mi Perfil — el resto se le esconde via `restrictedTo`.
+const OFICINA = ['ADMIN', 'SUPERVISOR', 'OPERADOR']
+
 const NAV = [
   { group: null,         items: [
     { to: '/',           icon: 'ti-layout-dashboard', label: 'Dashboard' },
   ]},
   { group: 'Operaciones', items: [
-    { to: '/tubos',      icon: 'ti-cylinder',         label: 'Tubos' },
-    { to: '/entregas',   icon: 'ti-truck-delivery',   label: 'Entregas' },
-    { to: '/cargas',     icon: 'ti-gas-station',      label: 'Cargas' },
-    { to: '/devoluciones',icon: 'ti-arrow-back-up',   label: 'Devoluciones' },
-    { to: '/alquileres', icon: 'ti-calendar-time',    label: 'Alquileres', badge: true },
+    { to: '/tubos',      icon: 'ti-cylinder',         label: 'Tubos',        restrictedTo: OFICINA },
+    { to: '/reparto',    icon: 'ti-route',            label: 'Hoja de Ruta' },
+    { to: '/entregas',   icon: 'ti-truck-delivery',   label: 'Entregas',     restrictedTo: OFICINA },
+    { to: '/cargas',     icon: 'ti-gas-station',      label: 'Cargas',       restrictedTo: OFICINA },
+    { to: '/devoluciones',icon: 'ti-arrow-back-up',   label: 'Devoluciones', restrictedTo: OFICINA },
+    { to: '/alquileres', icon: 'ti-calendar-time',    label: 'Alquileres',   restrictedTo: OFICINA, badge: true },
   ]},
   { group: 'Gestión', items: [
-    { to: '/clientes',   icon: 'ti-users',            label: 'Clientes' },
-    { to: '/ventas',     icon: 'ti-shopping-cart',    label: 'Ventas' },
+    { to: '/clientes',   icon: 'ti-users',            label: 'Clientes', restrictedTo: OFICINA },
+    { to: '/ventas',     icon: 'ti-shopping-cart',    label: 'Ventas',   restrictedTo: OFICINA },
   ]},
   { group: 'Sistema', items: [
+    { to: '/tarifas',    icon: 'ti-coin',             label: 'Tarifas', restrictedTo: ['ADMIN', 'SUPERVISOR'] },
     { to: '/reportes',   icon: 'ti-chart-bar',        label: 'Reportes', restrictedTo: ['ADMIN', 'SUPERVISOR'] },
     { to: '/auditoria',  icon: 'ti-list-details',     label: 'Auditoría', restrictedTo: ['ADMIN', 'SUPERVISOR'] },
     { to: '/usuarios',   icon: 'ti-shield-lock',      label: 'Usuarios', restrictedTo: ['ADMIN'] },
@@ -38,6 +44,15 @@ const NAV = [
   ]},
 ]
 
+// Items del bottom-nav móvil. El REPARTIDOR ve un layout simplificado.
+const BOTTOM_NAV = [
+  { to: '/',         icon: 'ti-layout-dashboard',  label: 'Inicio' },
+  { to: '/tubos',    icon: 'ti-cylinder',          label: 'Tubos',    restrictedTo: OFICINA },
+  { to: '/reparto',  icon: 'ti-route',             label: 'Ruta',     restrictedTo: ['REPARTIDOR'] },
+  { to: '/entregas', icon: 'ti-truck-delivery',    label: 'Entregas', restrictedTo: OFICINA },
+  { to: '/clientes', icon: 'ti-users',             label: 'Clientes', restrictedTo: OFICINA },
+]
+
 export default function Layout() {
   const { user, logout } = useAuthStore()
   const navigate = useNavigate()
@@ -45,10 +60,12 @@ export default function Layout() {
   const [vencidos, setVencidos] = useState(0)
 
   useEffect(() => {
+    // El REPARTIDOR no tiene acceso al endpoint de alquileres — evitar la llamada.
+    if (user?.rol === 'REPARTIDOR') return
     import('../services/api.js').then(({ default: api }) =>
       api.get('/alquileres/vencidos').then(r => setVencidos(r.data.length)).catch(() => {})
     )
-  }, [])
+  }, [user?.rol])
 
   const initials = user?.nombre?.split(' ').map(w => w[0]).slice(0,2).join('').toUpperCase() || 'U'
 
@@ -119,22 +136,12 @@ export default function Layout() {
 
       {/* BOTTOM NAV (Mobile Only) */}
       <div className="bottom-nav">
-        <NavLink to="/" end className={({ isActive }) => `bottom-nav-link ${isActive ? 'active' : ''}`}>
-          <i className="ti ti-layout-dashboard" />
-          <span>Inicio</span>
-        </NavLink>
-        <NavLink to="/tubos" className={({ isActive }) => `bottom-nav-link ${isActive ? 'active' : ''}`}>
-          <i className="ti ti-cylinder" />
-          <span>Tubos</span>
-        </NavLink>
-        <NavLink to="/entregas" className={({ isActive }) => `bottom-nav-link ${isActive ? 'active' : ''}`}>
-          <i className="ti ti-truck-delivery" />
-          <span>Entregas</span>
-        </NavLink>
-        <NavLink to="/clientes" className={({ isActive }) => `bottom-nav-link ${isActive ? 'active' : ''}`}>
-          <i className="ti ti-users" />
-          <span>Clientes</span>
-        </NavLink>
+        {BOTTOM_NAV.filter(b => !b.restrictedTo || b.restrictedTo.includes(user?.rol)).map(b => (
+          <NavLink key={b.to} to={b.to} end={b.to === '/'} className={({ isActive }) => `bottom-nav-link ${isActive ? 'active' : ''}`}>
+            <i className={`ti ${b.icon}`} />
+            <span>{b.label}</span>
+          </NavLink>
+        ))}
         <button className="bottom-nav-link" style={{ border: 'none', background: 'none' }} onClick={() => setSidebarOpen(true)}>
           <i className="ti ti-menu-2" />
           <span>Más</span>

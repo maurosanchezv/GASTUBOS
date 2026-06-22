@@ -6,15 +6,17 @@ import { useToast } from '../components/ui.jsx'
 
 const EMPTY = { username: '', email: '', nombre: '', rol: 'OPERADOR', password: '' }
 
+// Columnas: [acción, Admin, Supervisor, Operador, Repartidor]
 const PERMISOS = [
-  ['Crear/editar usuarios',       true, false, false],
-  ['Crear/editar tubos',          true, false, true],
-  ['Cambiar estado de tubos',     true, true,  true],
-  ['Registrar entregas',          true, true,  true],
-  ['Registrar devoluciones',      true, true,  true],
-  ['Ver reportes',                true, true,  true],
-  ['Exportar datos',              true, true,  false],
-  ['Configurar sistema',          true, false, false],
+  ['Crear/editar usuarios',                 true, false, false, false],
+  ['Crear/editar tubos',                    true, false, true,  false],
+  ['Cambiar estado de tubos',               true, true,  true,  false],
+  ['Registrar entregas',                    true, true,  true,  false],
+  ['Confirmar/cancelar entregas asignadas', true, true,  true,  true],
+  ['Registrar devoluciones',                true, true,  true,  false],
+  ['Ver reportes',                          true, true,  true,  false],
+  ['Exportar datos',                        true, true,  false, false],
+  ['Configurar sistema',                    true, false, false, false],
 ]
 
 export default function UsuariosPage() {
@@ -187,13 +189,14 @@ export default function UsuariosPage() {
                   <th style={{ textAlign: 'center', background: 'var(--blue-light)', color: 'var(--blue-dark)' }}>Admin</th>
                   <th style={{ textAlign: 'center', background: 'var(--teal-light)', color: 'var(--teal)' }}>Supervisor</th>
                   <th style={{ textAlign: 'center', background: 'var(--gray-light)', color: 'var(--gray)' }}>Operador</th>
+                  <th style={{ textAlign: 'center', background: 'var(--amber-light)', color: 'var(--amber)' }}>Repartidor</th>
                 </tr>
               </thead>
               <tbody>
-                {PERMISOS.map(([p, a, s, o]) => (
+                {PERMISOS.map(([p, a, s, o, r]) => (
                   <tr key={p}>
                     <td style={{ fontWeight: 500, padding: '12px' }}>{p}</td>
-                    {[a, s, o].map((v, i) => (
+                    {[a, s, o, r].map((v, i) => (
                       <td key={i} style={{ textAlign: 'center' }}>
                         {v ? (
                           <span style={{ color: 'var(--green)', fontSize: 18 }}><i className="ti ti-circle-check-filled" /></span>
@@ -210,34 +213,20 @@ export default function UsuariosPage() {
 
           {/* Vista Cards (Mobile) — Se muestra vía CSS en pantallas pequeñas */}
           <div className="mobile-list">
-            {PERMISOS.map(([p, a, s, o]) => (
+            {PERMISOS.map(([p, a, s, o, r]) => (
               <div key={p} className="list-card" style={{ background: 'var(--surface-2)', marginBottom: 10 }}>
                 <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: 'var(--blue)' }}>{p}</div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <div style={{ 
-                    flex: 1, textAlign: 'center', padding: '6px', borderRadius: 6,
-                    background: a ? 'var(--green-light)' : 'var(--gray-light)',
-                    opacity: a ? 1 : 0.5
-                  }}>
-                    <div style={{ fontSize: 9, fontWeight: 700, color: a ? 'var(--green)' : 'var(--text-muted)' }}>ADMIN</div>
-                    <i className={`ti ${a ? 'ti-circle-check-filled' : 'ti-circle-x'}`} style={{ color: a ? 'var(--green)' : 'var(--text-muted)' }} />
-                  </div>
-                  <div style={{ 
-                    flex: 1, textAlign: 'center', padding: '6px', borderRadius: 6,
-                    background: s ? 'var(--green-light)' : 'var(--gray-light)',
-                    opacity: s ? 1 : 0.5
-                  }}>
-                    <div style={{ fontSize: 9, fontWeight: 700, color: s ? 'var(--green)' : 'var(--text-muted)' }}>SUP</div>
-                    <i className={`ti ${s ? 'ti-circle-check-filled' : 'ti-circle-x'}`} style={{ color: s ? 'var(--green)' : 'var(--text-muted)' }} />
-                  </div>
-                  <div style={{ 
-                    flex: 1, textAlign: 'center', padding: '6px', borderRadius: 6,
-                    background: o ? 'var(--green-light)' : 'var(--gray-light)',
-                    opacity: o ? 1 : 0.5
-                  }}>
-                    <div style={{ fontSize: 9, fontWeight: 700, color: o ? 'var(--green)' : 'var(--text-muted)' }}>OPE</div>
-                    <i className={`ti ${o ? 'ti-circle-check-filled' : 'ti-circle-x'}`} style={{ color: o ? 'var(--green)' : 'var(--text-muted)' }} />
-                  </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {[['ADMIN', a], ['SUP', s], ['OPE', o], ['REP', r]].map(([label, v]) => (
+                    <div key={label} style={{
+                      flex: 1, textAlign: 'center', padding: '6px', borderRadius: 6,
+                      background: v ? 'var(--green-light)' : 'var(--gray-light)',
+                      opacity: v ? 1 : 0.5
+                    }}>
+                      <div style={{ fontSize: 9, fontWeight: 700, color: v ? 'var(--green)' : 'var(--text-muted)' }}>{label}</div>
+                      <i className={`ti ${v ? 'ti-circle-check-filled' : 'ti-circle-x'}`} style={{ color: v ? 'var(--green)' : 'var(--text-muted)' }} />
+                    </div>
+                  ))}
                 </div>
               </div>
             ))}
@@ -273,6 +262,7 @@ export default function UsuariosPage() {
               <option value="ADMIN">Administrador</option>
               <option value="SUPERVISOR">Supervisor</option>
               <option value="OPERADOR">Operador</option>
+              <option value="REPARTIDOR">Repartidor</option>
             </select>
           </FormGroup>
           <FormGroup label={form.id ? 'Nueva contraseña (dejar vacío para no cambiar)' : 'Contraseña'} required={!form.id}>

@@ -1,0 +1,110 @@
+# ─── Dependencias y artefactos de build ───────────────────────────────────────
+node_modules/
+dist/
+build/
+out/
+.cache/
+coverage/
+*.tsbuildinfo
+
+# ─── Variables de entorno y credenciales ──────────────────────────────────────
+# Los .env tienen JWT_SECRET, DATABASE_URL con password, etc. NUNCA subir.
+# .env.example SÍ se sube (es la plantilla pública sin valores reales).
+.env
+.env.local
+.env.development
+.env.development.local
+.env.production
+.env.production.local
+.env.test
+.env.test.local
+!.env.example
+
+# ─── Claves, certificados y secretos ──────────────────────────────────────────
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+*.keystore
+*.jks
+secrets/
+credentials.json
+google-services.json
+service-account*.json
+
+# ─── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ─── Capacitor / Android (para cuando empaquetes el APK) ──────────────────────
+# Por defecto Capacitor commitea la carpeta android/, pero adentro hay
+# muchos artefactos generados que NO deben ir al repo.
+frontend/android/.gradle/
+frontend/android/build/
+frontend/android/app/build/
+frontend/android/app/release/
+frontend/android/local.properties
+frontend/android/.idea/
+frontend/android/captures/
+frontend/android/app/src/main/assets/public/
+frontend/android/app/src/main/assets/capacitor.config.json
+frontend/android/app/src/main/assets/capacitor.plugins.json
+frontend/ios/App/build/
+frontend/ios/App/Pods/
+frontend/ios/App/output/
+
+# ─── Documentos internos y notas de IA (no subir al repo público) ─────────────
+docs/
+CLAUDE.md
+claude.md
+GEMINI.md
+gemini.md
+.claude/
+.gemini/
+
+# ─── Archivos del sistema operativo ───────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+*:Zone.Identifier
+*.Zone.Identifier
+
+# ─── Editores e IDEs ──────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.iml
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+*.swo
+*~
+
+# ─── Prisma temporales ────────────────────────────────────────────────────────
+backend/prisma/dev.db
+backend/prisma/dev.db-journal
+backend/prisma/*.db
+backend/prisma/*.db-journal
+
+# ─── Postgres dumps / backups ─────────────────────────────────────────────────
+*.sql.gz
+*.dump
+*.backup
+backups/
+
+# ─── Otros ────────────────────────────────────────────────────────────────────
+tmp/
+temp/
+.tmp/

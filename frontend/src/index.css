@@ -265,12 +265,101 @@ input, select, textarea { font-family: inherit; }
 .badge-ADMIN       { background: var(--purple-light); color: var(--purple); }
 .badge-SUPERVISOR  { background: var(--teal-light);   color: var(--teal); }
 .badge-OPERADOR    { background: var(--blue-light);   color: var(--blue-dark); }
+.badge-REPARTIDOR  { background: var(--amber-light);  color: var(--amber); }
 .badge-ACTIVO      { background: var(--green-light);  color: var(--green); }
 .badge-VENCIDO     { background: var(--red-light);    color: var(--red); }
 .badge-EMPRESA     { background: var(--blue-light);   color: var(--blue-dark); }
 .badge-PYME        { background: var(--teal-light);   color: var(--teal); }
 .badge-PARTICULAR  { background: var(--gray-light);   color: var(--gray); }
 .badge-PROPIO      { background: var(--green-light);  color: var(--green); }
+.badge-tipo-ENTREGA_SIMPLE { background: var(--blue-light);   color: var(--blue-dark); }
+.badge-tipo-ALQUILER       { background: var(--amber-light);  color: var(--amber); }
+.badge-tipo-VENTA          { background: var(--purple-light); color: var(--purple); }
+
+/* ── Reparto (Hoja de Ruta) ──────────────────────────────────── */
+.reparto-wrap { max-width: 1200px; margin: 0 auto; padding: 8px; }
+
+.reparto-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.reparto-stat {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.reparto-stat-label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
+.reparto-stat-value { font-size: 26px; font-weight: 700; font-family: var(--font-mono); line-height: 1.1; }
+.reparto-stat-foot  { font-size: 11px; color: var(--text-secondary); }
+
+.reparto-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
+}
+
+.reparto-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.reparto-card:hover { border-color: var(--border-mid); box-shadow: 0 2px 8px rgba(0,0,0,.04); }
+.reparto-card-head {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;
+}
+.reparto-card-num   { font-family: var(--font-mono); font-weight: 700; color: var(--blue); font-size: 14px; }
+.reparto-card-cli   { font-size: 15px; font-weight: 700; line-height: 1.25; }
+.reparto-card-addr  { font-size: 12px; color: var(--text-secondary); line-height: 1.4; display: flex; align-items: flex-start; gap: 4px; }
+.reparto-card-meta  { display: flex; gap: 10px; font-size: 11px; color: var(--text-muted); padding-top: 8px; border-top: 1px dashed var(--border); }
+.reparto-card-actions { display: flex; gap: 8px; margin-top: auto; padding-top: 4px; }
+
+/* Vista de entrega activa (cuando el chofer entra en una) */
+.reparto-active {
+  max-width: 880px;
+  margin: 0 auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+}
+.reparto-active-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 18px;
+}
+@media (min-width: 900px) {
+  .reparto-active-grid { grid-template-columns: 1.1fr 1fr; align-items: start; }
+}
+
+.reparto-progress {
+  height: 6px; background: var(--surface-2); border-radius: 999px; overflow: hidden;
+  margin-top: 6px; margin-bottom: 10px;
+}
+.reparto-progress-fill {
+  height: 100%; background: var(--green); border-radius: 999px;
+  transition: width .25s ease;
+}
+
+@media (max-width: 768px) {
+  .reparto-wrap { padding: 8px 6px 90px; }
+  .reparto-active-actions-mobile {
+    position: fixed; bottom: 64px; left: 0; right: 0;
+    background: var(--surface); border-top: 1px solid var(--border);
+    padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;
+    z-index: 40;
+  }
+}
 .badge-CLIENTE     { background: var(--purple-light); color: var(--purple); }
 
 /* ── Table ───────────────────────────────────────────────────── */
@@ -337,15 +426,20 @@ textarea { resize: vertical; min-height: 72px; }
 
 /* ── Search bar ──────────────────────────────────────────────── */
 .search-bar {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: 10px;
   background: var(--surface);
   border: 1px solid var(--border-mid);
   border-radius: var(--radius-md);
-  padding: 6px 12px;
+  padding: 10px 16px;
   margin-bottom: 14px;
+  transition: border-color .12s, box-shadow .12s;
 }
-.search-bar i  { color: var(--text-muted); font-size: 15px; flex-shrink: 0; }
-.search-bar input { border: none; background: transparent; outline: none; font-size: 13px; flex: 1; }
+.search-bar:focus-within {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(26,95,168,.1);
+}
+.search-bar i  { color: var(--text-muted); font-size: 17px; flex-shrink: 0; }
+.search-bar input { border: none; background: transparent; outline: none; font-size: 14px; flex: 1; }
 
 /* ── Modal ───────────────────────────────────────────────────── */
 .modal-overlay {
@@ -611,4 +705,137 @@ textarea { resize: vertical; min-height: 72px; }
 @media (max-width: 1024px) {
   .entregas-grid, .responsive-grid { grid-template-columns: 1fr; }
 }
+
+/* ── Estilos de Impresión para Remisión Térmica (80mm) ───────────────── */
+@media print {
+  /* Ocultamos todo el árbol principal de React y modales */
+  #root, .modal-overlay {
+    display: none !important;
+  }
+  
+  /* Hacemos visible solo el contenedor del ticket que inyectamos en document.body */
+  .print-ticket-container {
+    display: block !important;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 80mm;
+    margin: 0;
+    padding: 0;
+    background: white !important;
+    color: black !important;
+  }
+  
+  @page {
+    size: 80mm auto;
+    margin: 0;
+  }
+}
+
+/* Estilos de ticket para visualización previa en modal y para la impresión */
+.ticket-preview {
+  background: #fff;
+  border: 1px solid #ddd;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  color: #000;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 0 auto;
+  width: 100%;
+  max-width: 80mm;
+  padding: 16px;
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+
+@media (max-width: 480px) {
+  .ticket-preview {
+    padding: 10px;
+    font-size: 11px;
+  }
+  .ticket-table th, .ticket-table td {
+    padding: 2px 0;
+    font-size: 10px;
+  }
+  .ticket-signatures {
+    margin-top: 14px;
+    gap: 8px;
+  }
+  .signature-line {
+    margin-top: 18px;
+  }
+}
+
+/* Contenedor especial que solo aparece al imprimir */
+.print-ticket-container {
+  display: none;
+}
+
+.ticket-header {
+  text-align: center;
+  border-bottom: 1px dashed #000;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+}
+.ticket-footer {
+  text-align: center;
+  border-top: 1px dashed #000;
+  padding-top: 8px;
+  margin-top: 16px;
+  font-size: 10px;
+}
+/* Forzamos a que la tabla del ticket ignore la regla global de min-width: 500px de tablas móviles */
+.ticket-table {
+  width: 100%;
+  min-width: 0 !important;
+  border-collapse: collapse;
+  margin: 8px 0;
+}
+.ticket-table th, .ticket-table td {
+  padding: 3px 0;
+  font-size: 11px;
+}
+.ticket-table th {
+  border-bottom: 1px dashed #000;
+  font-weight: bold;
+}
+.ticket-signatures {
+  margin-top: 20px;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+.signature-line {
+  border-top: 1px solid #000;
+  flex: 1;
+  text-align: center;
+  font-size: 9px;
+  margin-top: 24px;
+  padding-top: 2px;
+}
+
+/* ── Address Autocomplete Dropdown ────────────────────────────── */
+.address-autocomplete-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.10);
+  z-index: 300;
+  max-height: 240px;
+  overflow-y: auto;
+  min-width: 100%;
+  width: 130%; /* slightly wider on desktop to make addresses easier to read */
+  box-sizing: border-box;
+}
+
+@media (max-width: 768px) {
+  .address-autocomplete-dropdown {
+    width: 100% !important; /* full width on mobile */
+  }
+}
+
 

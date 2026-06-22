@@ -16,6 +16,7 @@ enum Rol {
   ADMIN
   SUPERVISOR
   OPERADOR
+  REPARTIDOR
 }
 
 enum EstadoTubo {
@@ -172,6 +173,10 @@ model Entrega {
 
   detalles        DetalleEntrega[]
   alquileres      Alquiler[]    // si tipoOperacion = ALQUILER
+  costoDelivery   Decimal       @db.Decimal(10, 2) @default(0.00)
+  confirmada      Boolean       @default(false)
+  cancelada       Boolean       @default(false)
+  motivoCancelacion String?
 
   createdAt       DateTime      @default(now())
 
@@ -179,11 +184,18 @@ model Entrega {
 }
 
 model DetalleEntrega {
-  id        String  @id @default(cuid())
-  entregaId String
-  entrega   Entrega @relation(fields: [entregaId], references: [id])
-  tuboId    String
-  tubo      Tubo    @relation(fields: [tuboId], references: [id])
+  id             String      @id @default(cuid())
+  entregaId      String
+  entrega        Entrega     @relation(fields: [entregaId], references: [id])
+  tuboId         String
+  tubo           Tubo        @relation(fields: [tuboId], references: [id])
+  cantidadGas    Decimal     @db.Decimal(10, 3) @default(0.000)
+  unidadGas      UnidadGas   @default(KG)
+  precioUnitario Decimal     @db.Decimal(10, 2) @default(0.00)
+  subtotal       Decimal     @db.Decimal(10, 2) @default(0.00)
+  // Estado del tubo justo antes de la entrega — usado para revertir al cancelar.
+  // Opcional para que filas viejas (pre-migración) sigan funcionando con fallback.
+  estadoAnterior EstadoTubo?
 
   @@unique([entregaId, tuboId])
   @@map("detalles_entrega")
@@ -279,3 +291,18 @@ model Counter {
 
   @@map("counters")
 }
+
+// ─── PRECIOS DE GAS ───────────────────────────────────────────────────────────
+
+model PrecioGas {
+  id             String    @id @default(cuid())
+  gas            TipoGas   @unique // Ej: CO2, OXIGENO...
+  unidad         UnidadGas // Ej: KG, M3
+  precioUnitario Decimal   @db.Decimal(10, 2)
+  actualizadoPor String?   // ID del Usuario administrador que lo editó
+  updatedAt      DateTime  @updatedAt
+  createdAt      DateTime  @default(now())
+
+  @@map("precios_gas")
+}
+

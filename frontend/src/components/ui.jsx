@@ -42,7 +42,7 @@ export function Modal({ open, title, onClose, children, footer, width = 540 }) {
   if (!open) return null
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal" style={{ width }}>
+      <div className="modal" style={{ width: '100%', maxWidth: width }}>
         <div className="modal-header">
           <span className="modal-title">{title}</span>
           <button className="btn-icon" onClick={onClose}><i className="ti ti-x" /></button>
@@ -132,7 +132,22 @@ export function ToastProvider() {
   useEffect(() => {
     _showToast = (msg, type) => {
       const id = Date.now()
-      setToasts(t => [...t, { id, msg, type }])
+      let cleanMsg = ''
+      if (!msg) {
+        cleanMsg = 'Error desconocido'
+      } else if (typeof msg === 'string') {
+        cleanMsg = msg
+      } else if (Array.isArray(msg)) {
+        cleanMsg = msg.map(err => {
+          const path = err.path ? `Campo "${err.path.join('.')}"` : ''
+          return `${path ? path + ': ' : ''}${err.message}`
+        }).join(' | ')
+      } else if (typeof msg === 'object') {
+        cleanMsg = msg.message || msg.error || JSON.stringify(msg)
+      } else {
+        cleanMsg = String(msg)
+      }
+      setToasts(t => [...t, { id, msg: cleanMsg, type }])
       setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3500)
     }
   }, [])

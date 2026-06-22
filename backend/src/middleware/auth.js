@@ -2,7 +2,10 @@
 
 import jwt from 'jsonwebtoken'
 
-const JWT_SECRET = process.env.JWT_SECRET || 'cambiar-en-produccion'
+export const JWT_SECRET = process.env.JWT_SECRET
+if (!JWT_SECRET) {
+  throw new Error('Falta JWT_SECRET en el entorno. Configurar en .env antes de arrancar.')
+}
 
 // Verifica el token JWT en el header Authorization: Bearer <token>
 export function requireAuth(req, res, next) {

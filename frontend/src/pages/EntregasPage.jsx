@@ -1,13 +1,15 @@
 // gastubos/frontend/src/pages/EntregasPage.jsx
 import { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useSearchParams } from 'react-router-dom'
+import { QRCodeSVG } from 'qrcode.react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import iconUrl from 'leaflet/dist/images/marker-icon.png'
 import iconRetinaUrl from 'leaflet/dist/images/marker-icon-2x.png'
 import shadowUrl from 'leaflet/dist/images/marker-shadow.png'
 import api from '../services/api.js'
-import { PageHeader, StateBadge, Spinner, GasDot, EmptyState } from '../components/ui.jsx'
+import { PageHeader, StateBadge, Spinner, GasDot, EmptyState, Modal } from '../components/ui.jsx'
 import { useToast } from '../components/ui.jsx'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
@@ -19,8 +21,10 @@ L.Icon.Default.mergeOptions({ iconUrl, iconRetinaUrl, shadowUrl })
 const EMPTY = {
   clienteId: '', direccionEntrega: '', tipoOperacion: 'ENTREGA_SIMPLE',
   repartidorId: '', observaciones: '', tubosIds: [],
+  tubosDetalles: [],
   fechaVencimiento: '', referencia: '',
   latitud: null, longitud: null,
+  costoDelivery: '',
 }
 
 export default function EntregasPage() {
@@ -38,6 +42,47 @@ export default function EntregasPage() {
   const [tuboBuscando, setTuboBuscando] = useState(false)
   const busqRef = useRef(null)
 
+  // Sugerencias de dirección (OpenStreetMap Nominatim)
+  const [addrSugs, setAddrSugs] = useState([])
+  const [addrBuscando, setAddrBuscando] = useState(false)
+  const addrRef = useRef(null)
+  const lastSelectedAddress = useRef('')
+
+  // Función para buscar direcciones
+  const fetchDirecciones = async (query) => {
+    if (!query || query.trim().length < 3) {
+      setAddrSugs([])
+      return
+    }
+    setAddrBuscando(true)
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5&addressdetails=1&countrycodes=py`)
+      const data = await res.json()
+      setAddrSugs(data || [])
+    } catch (err) {
+      console.error('Error fetching address suggestions', err)
+      setAddrSugs([])
+    } finally {
+      setAddrBuscando(false)
+    }
+  }
+
+  // Debounce para dirección de entrega
+  useEffect(() => {
+    const q = form.direccionEntrega || ''
+    if (q === lastSelectedAddress.current) {
+      return
+    }
+    if (q.trim().length < 3) {
+      setAddrSugs([])
+      return
+    }
+    const t = setTimeout(() => {
+      fetchDirecciones(q)
+    }, 500)
+    return () => clearTimeout(t)
+  }, [form.direccionEntrega])
+
   // GPS / Mapa picker
   const [gpsLoading, setGpsLoading]           = useState(false)
   const [mapaPickerAbierto, setMapaPickerAbierto] = useState(false)
@@ -51,6 +96,19 @@ export default function EntregasPage() {
   const [mapaHistAbierto, setMapaHistAbierto] = useState(false)
   const mapaHistRef      = useRef(null)
   const mapaHistInstance = useRef(null)
+
+  // Detalle de entrega y control de ticket
+  const [modalDetalle, setModalDetalle] = useState(false)
+  const [entregaSeleccionada, setEntregaSeleccionada] = useState(null)
+
+  const verDetalle = (entrega) => {
+    setEntregaSeleccionada(entrega)
+    setModalDetalle(true)
+  }
+
+  const handlePrintTicket = () => {
+    window.print()
+  }
 
   useEffect(() => {
     api.get('/clientes').then(r => setClientes(r.data)).catch(() => {})
@@ -67,7 +125,7 @@ export default function EntregasPage() {
   const fetchSugerencias = async (q = '') => {
     setTuboBuscando(true)
     try {
-      const r = await api.get(`/tubos?q=${encodeURIComponent(q)}&limit=20`)
+      const r = await api.get(`/tubos?q=${encodeURIComponent(q)}&limit=20&disponibles=true`)
       setTuboSugs(r.data.tubos || [])
     } catch { 
       setTuboSugs([]) 
@@ -203,6 +261,7 @@ export default function EntregasPage() {
   useEffect(() => {
     const handler = e => {
       if (busqRef.current && !busqRef.current.contains(e.target)) setTuboSugs([])
+      if (addrRef.current && !addrRef.current.contains(e.target)) setAddrSugs([])
       if (exportRef.current && !exportRef.current.contains(e.target)) setExportMenuAbierto(false)
     }
     document.addEventListener('mousedown', handler)
@@ -214,6 +273,7 @@ export default function EntregasPage() {
       const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`)
       const data = await res.json()
       if (data.display_name) {
+        lastSelectedAddress.current = data.display_name
         setForm(f => ({ ...f, direccionEntrega: data.display_name }))
       }
     } catch (err) {
@@ -313,6 +373,19 @@ export default function EntregasPage() {
     } catch { } finally { setLoadingH(false) }
   }
 
+  async function cancelarEntrega(id, numero) {
+    if (!window.confirm(`¿Estás seguro de que deseas marcar la entrega ${numero} como NO CONCRETADA/CANCELADA? Esto devolverá los cilindros al depósito con su estado anterior.`)) return
+    const motivo = window.prompt("Ingrese el motivo de cancelación (ej. Cliente no responde, Dirección incorrecta, etc.):")
+    if (motivo === null) return
+    try {
+      await api.put(`/entregas/${id}/cancelar`, { motivo: motivo || 'Cancelada en oficina' })
+      toast('Entrega cancelada e inventario devuelto correctamente', 'success')
+      loadEntregas()
+    } catch (err) {
+      toast(err.response?.data?.error || 'Error al cancelar la entrega', 'error')
+    }
+  }
+
   async function agregarTubo(id) {
     if (form.tubosIds.includes(id)) return toast('El tubo ya está en la lista')
     try {
@@ -320,14 +393,41 @@ export default function EntregasPage() {
       if (!['DISPONIBLE', 'CARGADO', 'RESERVADO'].includes(r.data.estado)) {
         return toast(`Tubo en estado ${r.data.estado}, no disponible para entrega`, 'error')
       }
-      setForm(f => ({ ...f, tubosIds: [...f.tubosIds, id] }))
+      
+      let defaultCant = 0
+      let defaultUnidad = 'KG'
+      if (r.data.cargas && r.data.cargas.length > 0) {
+        defaultCant = Number(r.data.cargas[0].cantidad)
+        defaultUnidad = r.data.cargas[0].unidad
+      } else {
+        defaultCant = r.data.capacidadLitros || 0
+      }
+
+      setForm(f => ({ 
+        ...f, 
+        tubosIds: [...f.tubosIds, id],
+        tubosDetalles: [...(f.tubosDetalles || []), { tuboId: id, cantidadGas: defaultCant, unidadGas: defaultUnidad }]
+      }))
       setTuboSugs([])
       setTuboBusq('')
     } catch { toast('Tubo no encontrado', 'error') }
   }
 
   function quitarTubo(id) {
-    setForm(f => ({ ...f, tubosIds: f.tubosIds.filter(x => x !== id) }))
+    setForm(f => ({ 
+      ...f, 
+      tubosIds: f.tubosIds.filter(x => x !== id),
+      tubosDetalles: (f.tubosDetalles || []).filter(x => x.tuboId !== id)
+    }))
+  }
+
+  function updateTuboDetail(tuboId, key, value) {
+    setForm(f => ({
+      ...f,
+      tubosDetalles: (f.tubosDetalles || []).map(d => 
+        d.tuboId === tuboId ? { ...d, [key]: value } : d
+      )
+    }))
   }
 
   function handleGPS() {
@@ -376,10 +476,12 @@ export default function EntregasPage() {
         referencia:       form.referencia || undefined,
         latitud:          form.latitud ?? undefined,
         longitud:         form.longitud ?? undefined,
+        costoDelivery:    Number(form.costoDelivery) || 0,
       })
       toast('Entrega registrada correctamente', 'success')
       setForm(EMPTY)
       setMapaPickerAbierto(false)
+      loadEntregas()
     } catch (err) {
       toast(err.response?.data?.error || 'Error al registrar entrega', 'error')
     } finally { setSaving(false) }
@@ -427,8 +529,64 @@ export default function EntregasPage() {
                     {/* Dirección + Geolocalización */}
                     <div className="form-group col-span-2">
                       <label className="form-label">Dirección de entrega <span className="form-required">*</span></label>
-                      <input value={form.direccionEntrega} onChange={f('direccionEntrega')}
-                        placeholder={clienteSeleccionado?.direccion || 'Calle, ciudad...'} required />
+                      <div ref={addrRef} style={{ position: 'relative' }}>
+                        <input type="text" value={form.direccionEntrega} onChange={f('direccionEntrega')}
+                          placeholder={clienteSeleccionado?.direccion || 'Calle, ciudad...'} required
+                          style={{ paddingRight: addrBuscando ? '30px' : '10px' }}
+                          onKeyDown={e => {
+                            if (e.key === 'Escape') setAddrSugs([])
+                          }}
+                        />
+
+                        {addrBuscando && (
+                          <div style={{
+                            position: 'absolute', right: 10, top: '50%',
+                            transform: 'translateY(-50%)', zIndex: 10,
+                            display: 'flex', alignItems: 'center'
+                          }}>
+                            <span className="spinner" style={{ width: 14, height: 14 }} />
+                          </div>
+                        )}
+
+                        {/* Dropdown de sugerencias de dirección */}
+                        {addrSugs.length > 0 && (
+                          <div className="address-autocomplete-dropdown">
+                            {addrSugs.map((item, i) => (
+                              <div key={i}
+                                onClick={() => {
+                                  lastSelectedAddress.current = item.display_name;
+                                  setForm(f => ({
+                                    ...f,
+                                    direccionEntrega: item.display_name,
+                                    latitud: parseFloat(item.lat),
+                                    longitud: parseFloat(item.lon)
+                                  }));
+                                  setAddrSugs([]);
+                                }}
+                                style={{
+                                  padding: '10px 12px',
+                                  cursor: 'pointer',
+                                  borderBottom: i < addrSugs.length - 1 ? '1px solid var(--border)' : 'none',
+                                  fontSize: 12,
+                                  color: 'var(--text)',
+                                  transition: 'background .12s',
+                                  whiteSpace: 'normal',
+                                  wordBreak: 'break-word',
+                                  textAlign: 'left',
+                                  display: 'flex',
+                                  alignItems: 'flex-start',
+                                  gap: 6
+                                }}
+                                onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                              >
+                                <i className="ti ti-map-pin" style={{ marginTop: 2, color: 'var(--text-secondary)' }} />
+                                <span style={{ flex: 1 }}>{item.display_name}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
 
                       {/* Controles de ubicación */}
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8, alignItems: 'center' }}>
@@ -483,6 +641,10 @@ export default function EntregasPage() {
                         <option value="">Sin asignar</option>
                         {usuarios.map(u => <option key={u.id} value={u.id}>{u.nombre}</option>)}
                       </select>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Costo de Delivery (GS)</label>
+                      <input type="number" min="0" value={form.costoDelivery} onChange={f('costoDelivery')} placeholder="0" />
                     </div>
                     {form.tipoOperacion === 'ALQUILER' && (
                       <div className="form-group">
@@ -590,9 +752,18 @@ export default function EntregasPage() {
                       Buscá tubos por código, gas o serie y agregálos aquí
                     </div>
                   ) : (
-                    form.tubosIds.map(tuboId => (
-                      <TuboChip key={tuboId} tuboId={tuboId} onRemove={quitarTubo} />
-                    ))
+                    form.tubosIds.map(tuboId => {
+                      const detail = form.tubosDetalles?.find(d => d.tuboId === tuboId)
+                      return (
+                        <TuboChip 
+                          key={tuboId} 
+                          tuboId={tuboId} 
+                          detail={detail}
+                          onChange={updateTuboDetail}
+                          onRemove={quitarTubo} 
+                        />
+                      )
+                    })
                   )}
                 </div>
               </div>
@@ -634,7 +805,7 @@ export default function EntregasPage() {
                   <button type="submit" className="btn btn-primary"
                     style={{ width: '100%', marginTop: 4 }}
                     disabled={saving || form.tubosIds.length === 0}>
-                    {saving ? 'Registrando...' : <><i className="ti ti-check" /> Confirmar entrega</>}
+                    {saving ? 'Registrando...' : <><i className="ti ti-check" /> Crear entrega</>}
                   </button>
                 </div>
               </div>
@@ -731,7 +902,19 @@ export default function EntregasPage() {
                         <tbody>
                           {entregas.map(e => (
                             <tr key={e.id}>
-                              <td className="td-code">{e.numero}</td>
+                              <td className="td-code">
+                                {e.numero}
+                                <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                  {e.confirmada && <span style={{ background: '#DEF7EC', color: '#03543F', fontSize: 9, padding: '2px 6px', borderRadius: 4, width: 'fit-content', fontWeight: 600 }}>Entregado</span>}
+                                  {e.cancelada && <span style={{ background: '#FDE8E8', color: '#9B1C1C', fontSize: 9, padding: '2px 6px', borderRadius: 4, width: 'fit-content', fontWeight: 600 }} title={e.motivoCancelacion}>No Concretado</span>}
+                                  {!e.confirmada && !e.cancelada && <span style={{ background: '#FEF08A', color: '#713F12', fontSize: 9, padding: '2px 6px', borderRadius: 4, width: 'fit-content', fontWeight: 600 }}>Pendiente</span>}
+                                </div>
+                                {e.cancelada && e.motivoCancelacion && (
+                                  <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2, fontStyle: 'italic', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={e.motivoCancelacion}>
+                                    Motivo: {e.motivoCancelacion}
+                                  </div>
+                                )}
+                              </td>
                               <td style={{ fontWeight: 500 }}>{e.cliente?.nombre}</td>
                               <td>
                                 <span className={`badge badge-${e.tipoOperacion === 'ALQUILER' ? 'ALQUILADO' : e.tipoOperacion === 'VENTA' ? 'VENDIDO' : 'ENTREGADO'}`}>
@@ -772,6 +955,13 @@ export default function EntregasPage() {
                                     </div>
                                   )}
                                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                                    <button className="btn-icon" title="Ver Ticket / Imprimir"
+                                      onClick={() => verDetalle(e)}>
+                                      <i className="ti ti-printer" style={{ color: 'var(--blue)' }} />
+                                    </button>
+                                    <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-muted)' }}>Ticket</span>
+                                  </div>
+                                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
                                     <button className="btn-icon" title="Descargar PDF"
                                       onClick={() => handleExport('individual', 'pdf', e.id)}>
                                       <i className="ti ti-file-type-pdf" style={{ color: '#e11d48' }} />
@@ -785,6 +975,15 @@ export default function EntregasPage() {
                                     </button>
                                     <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-muted)' }}>Excel</span>
                                   </div>
+                                  {!e.confirmada && (
+                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                                      <button className="btn-icon" title="Cancelar entrega"
+                                        onClick={() => cancelarEntrega(e.id, e.numero)}>
+                                        <i className="ti ti-trash" style={{ color: 'var(--red)' }} />
+                                      </button>
+                                      <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-muted)' }}>Cancelar</span>
+                                    </div>
+                                  )}
                                 </div>
                               </td>
                             </tr>
@@ -803,13 +1002,26 @@ export default function EntregasPage() {
                   entregas.map(e => (
                     <div key={e.id} className="list-card">
                       <div className="list-card-header">
-                        <div className="list-card-title">{e.numero}</div>
+                        <div className="list-card-title">
+                          {e.numero}
+                          <div style={{ fontSize: 10, fontWeight: 500, marginTop: 4, display: 'flex', gap: 6 }}>
+                            {e.confirmada && <span style={{ background: '#DEF7EC', color: '#03543F', padding: '2px 6px', borderRadius: 4, fontWeight: 600 }}>Entregado</span>}
+                            {e.cancelada && <span style={{ background: '#FDE8E8', color: '#9B1C1C', padding: '2px 6px', borderRadius: 4, fontWeight: 600 }}>No Concretado</span>}
+                            {!e.confirmada && !e.cancelada && <span style={{ background: '#FEF08A', color: '#713F12', padding: '2px 6px', borderRadius: 4, fontWeight: 600 }}>Pendiente</span>}
+                          </div>
+                        </div>
                         <span className={`badge badge-${e.tipoOperacion === 'ALQUILER' ? 'ALQUILADO' : e.tipoOperacion === 'VENTA' ? 'VENDIDO' : 'ENTREGADO'}`}>
                           {e.tipoOperacion.replace('_', ' ')}
                         </span>
                       </div>
                       
                       <div className="list-card-body">
+                        {e.cancelada && e.motivoCancelacion && (
+                          <div className="list-card-item col-span-2" style={{ background: '#FDF2F2', border: '1px solid #FDE8E8', padding: 8, borderRadius: 6, marginBottom: 8 }}>
+                            <span className="list-card-label" style={{ color: '#9B1C1C', fontWeight: 600 }}>Motivo de no entrega:</span>
+                            <span className="list-card-value" style={{ fontStyle: 'italic', color: '#9B1C1C' }}>{e.motivoCancelacion}</span>
+                          </div>
+                        )}
                         <div className="list-card-item col-span-2">
                           <span className="list-card-label">Cliente</span>
                           <span className="list-card-value">{e.cliente?.nombre}</span>
@@ -840,6 +1052,13 @@ export default function EntregasPage() {
                           </div>
                         )}
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                          <button className="btn-icon" onClick={() => verDetalle(e)}
+                            style={{ width: 44, height: 44, fontSize: 20 }}>
+                            <i className="ti ti-printer" style={{ color: 'var(--blue)' }} />
+                          </button>
+                          <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)' }}>Ticket</span>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
                           <button className="btn-icon" onClick={() => handleExport('individual', 'pdf', e.id)}
                             style={{ width: 44, height: 44, fontSize: 20 }}>
                             <i className="ti ti-file-type-pdf" style={{ color: '#e11d48' }} />
@@ -853,6 +1072,15 @@ export default function EntregasPage() {
                           </button>
                           <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)' }}>Excel</span>
                         </div>
+                        {!e.confirmada && !e.cancelada && (
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                            <button className="btn-icon" onClick={() => cancelarEntrega(e.id, e.numero)}
+                              style={{ width: 44, height: 44, fontSize: 20 }}>
+                              <i className="ti ti-trash" style={{ color: 'var(--red)' }} />
+                            </button>
+                            <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)' }}>Cancelar</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))
@@ -862,27 +1090,242 @@ export default function EntregasPage() {
           )
         )}
       </div>
+
+      {/* Modal de Detalle / Previsualización del Ticket */}
+      <Modal
+        open={modalDetalle}
+        title={`Detalle de Entrega: ${entregaSeleccionada?.numero}`}
+        onClose={() => setModalDetalle(false)}
+        width={400}
+        footer={
+          <>
+            <button className="btn" onClick={() => setModalDetalle(false)}>
+              Cerrar
+            </button>
+            <button className="btn btn-primary" onClick={handlePrintTicket} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <i className="ti ti-printer" /> Imprimir Remisión
+            </button>
+          </>
+        }
+      >
+        {entregaSeleccionada && (
+          <div className="ticket-preview">
+            <div className="ticket-header">
+              <h3 style={{ margin: '0 0 4px', fontSize: '14px', fontWeight: 'bold' }}>GasTubos</h3>
+              <p style={{ margin: 0, fontSize: '10px', color: '#666' }}>Gestión de Gases Industriales</p>
+              <p style={{ margin: '6px 0 0', fontSize: '11px', fontWeight: 'bold' }}>REMISIÓN: {entregaSeleccionada.numero}</p>
+            </div>
+            
+            <div style={{ margin: '10px 0', fontSize: '11px', borderBottom: '1px dashed #ddd', paddingBottom: '8px' }}>
+              <strong>Cliente:</strong> {entregaSeleccionada.cliente?.nombre}<br />
+              <strong>RUC/CI:</strong> {entregaSeleccionada.cliente?.ruc || '—'}<br />
+              <strong>Dirección:</strong> {entregaSeleccionada.direccionEntrega}<br />
+              <strong>Fecha:</strong> {new Date(entregaSeleccionada.fechaEntrega).toLocaleString('es-PY')}<br />
+              <strong>Chofer:</strong> {entregaSeleccionada.repartidor?.nombre || 'Sin asignar'}<br />
+              <strong>Tipo:</strong> {entregaSeleccionada.tipoOperacion.replace('_', ' ')}
+            </div>
+            
+            <table className="ticket-table">
+              <thead>
+                <tr>
+                  <th style={{ textAlign: 'left' }}>Tubo / Gas</th>
+                  <th style={{ textAlign: 'center' }}>Cant.</th>
+                  <th style={{ textAlign: 'right' }}>Subtotal</th>
+                </tr>
+              </thead>
+              <tbody>
+                {entregaSeleccionada.detalles?.map(d => (
+                  <tr key={d.id}>
+                    <td>
+                      <strong>{d.tuboId}</strong><br />
+                      <span style={{ fontSize: '10px', color: '#666' }}>
+                        {d.tubo?.gas} {d.tubo?.talla}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'center' }}>
+                      {Number(d.cantidadGas)} {d.unidadGas}<br />
+                      <span style={{ fontSize: '9px', color: '#888' }}>
+                        x {Number(d.precioUnitario).toLocaleString('es-PY')}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'right', fontWeight: '500' }}>
+                      {Number(d.subtotal).toLocaleString('es-PY')} GS
+                    </td>
+                  </tr>
+                ))}
+                <tr style={{ borderTop: '1px dashed #000' }}>
+                  <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>DELIVERY:</td>
+                  <td style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>
+                    {Number(entregaSeleccionada.costoDelivery || 0).toLocaleString('es-PY')} GS
+                  </td>
+                </tr>
+                <tr>
+                  <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px' }}>TOTAL:</td>
+                  <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px', color: 'var(--blue)' }}>
+                    {(
+                      (entregaSeleccionada.detalles?.reduce((acc, d) => acc + Number(d.subtotal), 0) || 0) +
+                      Number(entregaSeleccionada.costoDelivery || 0)
+                    ).toLocaleString('es-PY')} GS
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: '14px 0', borderTop: '1px dashed #ddd', paddingTop: '10px' }}>
+              <QRCodeSVG value={entregaSeleccionada.numero} size={80} level="M" />
+              <span style={{ fontSize: '9px', color: '#666', marginTop: '4px', fontFamily: 'monospace' }}>
+                {entregaSeleccionada.numero}
+              </span>
+            </div>
+            
+            {entregaSeleccionada.observaciones && (
+              <div style={{ margin: '8px 0', fontSize: '10px', fontStyle: 'italic', borderTop: '1px dashed #ddd', paddingTop: '6px', color: '#555' }}>
+                <strong>Obs:</strong> {entregaSeleccionada.observaciones}
+              </div>
+            )}
+            
+            <div className="ticket-signatures">
+              <div className="signature-line">Firma Chofer</div>
+              <div className="signature-line">Firma Cliente</div>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Elemento que solo se muestra para la impresión física (80mm) */}
+      {entregaSeleccionada && createPortal(
+        <div className="print-ticket-container">
+          <div className="ticket-header">
+            <h3 style={{ margin: '0 0 4px', fontSize: '14px', fontWeight: 'bold' }}>GasTubos</h3>
+            <p style={{ margin: 0, fontSize: '10px' }}>Gestión de Gases Industriales</p>
+            <p style={{ margin: '4px 0 0', fontSize: '11px', fontWeight: 'bold' }}>REMISIÓN: {entregaSeleccionada.numero}</p>
+          </div>
+          
+          <div style={{ margin: '8px 0', fontSize: '11px' }}>
+            <strong>Cliente:</strong> {entregaSeleccionada.cliente?.nombre}<br />
+            <strong>RUC/CI:</strong> {entregaSeleccionada.cliente?.ruc || '—'}<br />
+            <strong>Dirección:</strong> {entregaSeleccionada.direccionEntrega}<br />
+            <strong>Fecha:</strong> {new Date(entregaSeleccionada.fechaEntrega).toLocaleString('es-PY')}<br />
+            <strong>Chofer:</strong> {entregaSeleccionada.repartidor?.nombre || 'Sin asignar'}<br />
+            <strong>Tipo:</strong> {entregaSeleccionada.tipoOperacion.replace('_', ' ')}
+          </div>
+          
+          <table className="ticket-table">
+            <thead>
+              <tr>
+                <th style={{ textAlign: 'left' }}>Tubo / Gas</th>
+                <th style={{ textAlign: 'center' }}>Cant.</th>
+                <th style={{ textAlign: 'right' }}>Precio</th>
+                <th style={{ textAlign: 'right' }}>Subtotal</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entregaSeleccionada.detalles?.map(d => (
+                <tr key={d.id}>
+                  <td>
+                    {d.tuboId}<br />
+                    <span style={{ fontSize: '10px', color: '#555' }}>
+                      {d.tubo?.gas} {d.tubo?.talla}
+                    </span>
+                  </td>
+                  <td style={{ textAlign: 'center' }}>
+                    {Number(d.cantidadGas)} {d.unidadGas}
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    {Number(d.precioUnitario).toLocaleString('es-PY')}
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    {Number(d.subtotal).toLocaleString('es-PY')}
+                  </td>
+                </tr>
+              ))}
+              <tr style={{ borderTop: '1px dashed #000' }}>
+                <td colSpan="3" style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>DELIVERY:</td>
+                <td style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>
+                  {Number(entregaSeleccionada.costoDelivery || 0).toLocaleString('es-PY')} GS
+                </td>
+              </tr>
+              <tr>
+                <td colSpan="3" style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px' }}>TOTAL:</td>
+                <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px' }}>
+                  {(
+                    (entregaSeleccionada.detalles?.reduce((acc, d) => acc + Number(d.subtotal), 0) || 0) +
+                    Number(entregaSeleccionada.costoDelivery || 0)
+                  ).toLocaleString('es-PY')} GS
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: '12px 0', borderTop: '1px dashed #000', paddingTop: '8px' }}>
+            <QRCodeSVG value={entregaSeleccionada.numero} size={80} level="M" />
+            <span style={{ fontSize: '9px', marginTop: '2px', fontFamily: 'monospace' }}>
+              {entregaSeleccionada.numero}
+            </span>
+          </div>
+          
+          {entregaSeleccionada.observaciones && (
+            <div style={{ margin: '8px 0', fontSize: '10px', fontStyle: 'italic', borderTop: '1px dashed #000', paddingTop: '4px' }}>
+              <strong>Obs:</strong> {entregaSeleccionada.observaciones}
+            </div>
+          )}
+          
+          <div className="ticket-signatures">
+            <div className="signature-line">Firma Chofer</div>
+            <div className="signature-line">Firma Cliente (Acuse)</div>
+          </div>
+          
+          <div className="ticket-footer">
+            ¡Gracias por su preferencia!
+          </div>
+        </div>,
+        document.body
+      )}
     </>
   )
 }
 
-function TuboChip({ tuboId, onRemove }) {
+function TuboChip({ tuboId, detail, onChange, onRemove }) {
   const [tubo, setTubo] = useState(null)
   useEffect(() => {
     api.get(`/tubos/${tuboId}`).then(r => setTubo(r.data)).catch(() => {})
   }, [tuboId])
   return (
     <div style={{
-      display: 'flex', alignItems: 'center', gap: 8,
-      padding: '8px 10px', background: 'var(--surface-2)',
-      borderRadius: 8, marginBottom: 6, fontSize: 12,
+      display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12,
+      padding: '10px 14px', background: 'var(--surface-2)',
+      borderRadius: 8, marginBottom: 8, fontSize: 12,
+      border: '1px solid var(--border)'
     }}>
-      {tubo && <GasDot gas={tubo.gas} />}
-      <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--blue)' }}>{tuboId}</span>
-      {tubo && <><span style={{ color: 'var(--text-secondary)' }}>{tubo.gas}</span><StateBadge estado={tubo.estado} /></>}
-      <button type="button" className="btn-icon" style={{ marginLeft: 'auto' }} onClick={() => onRemove(tuboId)}>
-        <i className="ti ti-x" />
-      </button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 200px' }}>
+        {tubo && <GasDot gas={tubo.gas} />}
+        <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--blue)' }}>{tuboId}</span>
+        {tubo && <><span style={{ color: 'var(--text-secondary)' }}>{tubo.gas}</span><StateBadge estado={tubo.estado} /></>}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '0 0 auto' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <label style={{ fontSize: 10, color: 'var(--text-muted)' }}>CANTIDAD:</label>
+          <input 
+            type="number" 
+            min="0" 
+            step="0.001"
+            value={detail?.cantidadGas ?? ''} 
+            onChange={e => onChange(tuboId, 'cantidadGas', e.target.value)}
+            style={{ width: 80, minHeight: 32, padding: '4px 8px', fontSize: 13 }}
+          />
+        </div>
+        <select 
+          value={detail?.unidadGas ?? 'KG'} 
+          onChange={e => onChange(tuboId, 'unidadGas', e.target.value)}
+          style={{ width: 68, minHeight: 32, padding: '4px 6px', fontSize: 13 }}
+        >
+          <option value="KG">KG</option>
+          <option value="M3">M³</option>
+        </select>
+        <button type="button" className="btn-icon" onClick={() => onRemove(tuboId)} title="Quitar">
+          <i className="ti ti-x" />
+        </button>
+      </div>
     </div>
   )
 }

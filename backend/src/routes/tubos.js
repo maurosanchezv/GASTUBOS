@@ -30,9 +30,12 @@ const tuboSchema = z.object({
 // ─── GET /api/tubos ───────────────────────────────────────────────────────────
 router.get('/', async (req, res, next) => {
   try {
-    const { estado, gas, propietario, clienteId, q, page = 1, limit = 50 } = req.query
+    const { estado, gas, propietario, clienteId, q, page = 1, limit = 50, disponibles } = req.query
     const where = { activo: true }
     if (estado)      where.estado      = estado
+    if (disponibles === 'true') {
+      where.estado = { in: ['DISPONIBLE', 'CARGADO'] }
+    }
     if (gas)         where.gas         = { contains: gas, mode: 'insensitive' }
     if (propietario) where.propietario = propietario
     if (clienteId)   where.clienteId   = clienteId
@@ -92,18 +95,27 @@ router.get('/:id', async (req, res, next) => {
 router.post('/', requireRol('ADMIN', 'OPERADOR'), async (req, res, next) => {
   try {
     const data = tuboSchema.parse(req.body)
-    const id   = await generarIdTubo()
 
-    const tubo = await prisma.tubo.create({
-      data: { ...data, id, fechaCompra: data.fechaCompra ? new Date(data.fechaCompra) : null },
-    })
+    // Contador + creación + auditoría en la misma transacción: si falla la
+    // creación (p. ej. `serie` duplicada), el incremento del contador se revierte.
+    const tubo = await prisma.$transaction(async (tx) => {
+      const id = await generarIdTubo(tx)
 
-    await registrarAuditoria({
-      tuboId:     id,
-      usuarioId:  req.user.id,
-      accion:     'Tubo creado',
-      estadoNuevo: tubo.estado,
-      observaciones: data.observaciones,
+      const creado = await tx.tubo.create({
+        data: { ...data, id, fechaCompra: data.fechaCompra ? new Date(data.fechaCompra) : null },
+      })
+
+      await tx.auditoria.create({
+        data: {
+          tuboId:        id,
+          usuarioId:     req.user.id,
+          accion:        'Tubo creado',
+          estadoNuevo:   creado.estado,
+          observaciones: data.observaciones,
+        },
+      })
+
+      return creado
     })
 
     res.status(201).json(tubo)

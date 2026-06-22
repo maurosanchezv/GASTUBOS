@@ -5,10 +5,9 @@ import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { z } from 'zod'
 import { prisma } from '../utils/prisma.js'
-import { requireAuth } from '../middleware/auth.js'
+import { requireAuth, JWT_SECRET } from '../middleware/auth.js'
 
 const router = Router()
-const JWT_SECRET  = process.env.JWT_SECRET  || 'cambiar-en-produccion'
 const JWT_EXPIRES = process.env.JWT_EXPIRES || '8h'
 
 const loginSchema = z.object({

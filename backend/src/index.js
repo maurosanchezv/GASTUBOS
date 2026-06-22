@@ -17,6 +17,7 @@ import usuarioRoutes  from './routes/usuarios.js'
 import reporteRoutes  from './routes/reportes.js'
 import cargaRoutes    from './routes/cargas.js'
 import publicRoutes   from './routes/public.js'   // ruta pública para QR sin auth
+import precioRoutes   from './routes/precios.js'
 
 const app  = express()
 const PORT = process.env.PORT || 3001
@@ -63,6 +64,7 @@ app.use('/api/auditoria',  auditoriaRoutes)
 app.use('/api/usuarios',   usuarioRoutes)
 app.use('/api/cargas',     cargaRoutes)
 app.use('/api/reportes',   reporteRoutes)
+app.use('/api/precios',    precioRoutes)
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => res.json({ ok: true, version: '1.0.0' }))
