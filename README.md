@@ -1,138 +1,175 @@
 # GasTubos — Sistema de Gestión de Tubos Industriales
 
-Sistema web para gestionar tubos de gases industriales (CO₂, Oxígeno, Argón, Nitrógeno, Acetileno y mezclas especiales). Incluye gestión de tubos propios y de clientes, QR por tubo, historial de movimientos, entregas, devoluciones, alquileres y ventas.
+Sistema web y móvil para gestionar tubos de gases industriales (CO₂, Oxígeno, Argón, Nitrógeno, Acetileno, Aire comprimido y mezclas especiales). Permite el seguimiento de la propiedad del tubo (Propio o de Cliente), estados, ubicación física, historial de auditorías, cargas de gas, entregas, devoluciones, alquileres y ventas.
 
 ---
 
-## Stack
+## ⚡ Características Principales
+
+- **Gestión de Tubos:** Control de stock, números de serie, capacidades, ubicación y estados.
+- **Códigos QR:** Generación de códigos QR por tubo para escaneo e impresión de etiquetas.
+- **Roles de Usuario:** 
+  - `ADMIN`: Control total del sistema, precios de gas, gestión de usuarios.
+  - `SUPERVISOR`: Monitoreo y reportes administrativos.
+  - `OPERADOR`: Carga de datos, registro de tubos, clientes y remisiones.
+  - `REPARTIDOR`: Interfaz móvil simplificada para visualización de su hoja de ruta y confirmación de entregas mediante escaneo QR.
+- **Logística Integrada:** Registro de entregas (simples, alquileres, ventas), cancelaciones con reversión de estados, control de cargas de gas y devoluciones de tubos vacíos.
+- **Exportación:** Generación de reportes y comprobantes de entregas en PDF.
+- **Compatibilidad Móvil:** Compilado como aplicación nativa Android mediante Capacitor.
+
+---
+
+## 🛠️ Stack Tecnológico
 
 | Capa | Tecnología |
 |------|-----------|
-| Backend | Node.js 20 + Express + Prisma ORM |
-| Base de datos | PostgreSQL 16 |
-| Frontend | React 18 + Vite + React Router 6 |
-| Auth | JWT (8h) + bcrypt |
-| QR | `qrcode` (servidor) + `html5-qrcode` (escaneo en celular) |
+| **Backend** | Node.js 20 (ESM) + Express + Prisma ORM |
+| **Base de datos** | PostgreSQL 16 |
+| **Frontend** | React 18 + Vite + React Router 6 + Zustand (Estado) + Axios (API) |
+| **Mobile Wrapper**| Capacitor 7/8 (Android Nativo) |
+| **Lector QR** | `html5-qrcode` (Cámara web y móvil) |
+| **Reportes** | `jspdf` + `jspdf-autotable` |
+| **Seguridad** | JWT (8h) + BcryptJS + Helmet + Rate Limiters |
 
 ---
 
-## Estructura del proyecto
+## 📂 Estructura del Proyecto
 
 ```
 gastubos/
 ├── backend/
 │   ├── prisma/
-│   │   └── schema.prisma          ← Esquema de BD completo
+│   │   ├── schema.prisma          ← Modelos de base de datos PostgreSQL
+│   │   └── seed.js                ← Datos iniciales para pruebas
 │   ├── src/
-│   │   ├── index.js               ← Entry point Express
+│   │   ├── index.js               ← Inicialización de Express y middlewares
 │   │   ├── middleware/
-│   │   │   └── auth.js            ← JWT guard + roles
-│   │   ├── routes/
-│   │   │   ├── auth.js            ← login, /me
-│   │   │   ├── tubos.js           ← CRUD + cambio estado + QR
-│   │   │   ├── clientes.js
-│   │   │   ├── entregas.js        ← flujo completo con transacción
-│   │   │   ├── devoluciones.js
-│   │   │   ├── alquileres.js
-│   │   │   ├── ventas.js
-│   │   │   ├── auditoria.js
-│   │   │   ├── usuarios.js
-│   │   │   ├── reportes.js        ← dashboard + reportes
-│   │   │   └── public.js          ← sin auth, para QR
+│   │   │   └── auth.js            ← Guard de autenticación JWT y roles
+│   │   ├── routes/                ← Controladores y endpoints
+│   │   │   ├── auth.js            ← Autenticación (Login, Perfil)
+│   │   │   ├── tubos.js           ← ABM de Tubos y generación de QR
+│   │   │   ├── clientes.js        ← Gestión de clientes
+│   │   │   ├── entregas.js        ← Transacciones de remisión (Iniciar, Confirmar, Cancelar)
+│   │   │   ├── devoluciones.js    ← Gestión de retornos de cilindros
+│   │   │   ├── alquileres.js      ← Control de contratos de alquiler
+│   │   │   ├── ventas.js          ← Registro de ventas de tubos
+│   │   │   ├── cargas.js          ← Refill/Recargas de gas de los tubos
+│   │   │   ├── precios.js         ← Tarifario de gases
+│   │   │   ├── auditoria.js       ← Historial de acciones sobre tubos
+│   │   │   ├── usuarios.js        ← CRUD de cuentas de usuarios
+│   │   │   ├── reportes.js        ← Indicadores clave de rendimiento
+│   │   │   └── public.js          ← Endpoint público para landing page de QR
 │   │   └── utils/
-│   │       ├── prisma.js          ← cliente singleton
-│   │       ├── helpers.js         ← generador de IDs/números
-│   │       ├── auditoria.js       ← helper para registrar auditoría
-│   │       ├── estadosTubo.js     ← reglas de transición de estados
-│   │       └── seed.js            ← datos iniciales
-│   ├── .env.example
+│   │       ├── prisma.js          ← Cliente Prisma unificado
+│   │       ├── helpers.js         ← Contadores atómicos secuenciales
+│   │       ├── auditoria.js       ← Registro rápido en historial
+│   │       └── estadosTubo.js     ← Máquina de estados y transiciones válidas
 │   └── package.json
 │
 ├── frontend/
+│   ├── android/                   ← Proyecto nativo Android (Capacitor)
 │   ├── src/
-│   │   ├── App.jsx                ← Router + rutas protegidas
-│   │   ├── services/api.js        ← axios + interceptors
-│   │   ├── store/authStore.js     ← Zustand auth
-│   │   └── pages/
-│   │       ├── TuboPublicoPage.jsx ← página pública del QR
-│   │       └── ... (resto de páginas)
+│   │   ├── App.jsx                ← Enrutador y guards de sesión
+│   │   ├── components/            ← Componentes UI comunes y Layout
+│   │   ├── services/api.js        ← Cliente Axios configurado con token y proxy
+│   │   ├── store/authStore.js     ← Zustand store para sesión activa
+│   │   └── pages/                 ← Páginas del panel web y vistas móviles
+│   ├── capacitor.config.json      ← Ajustes de compilación de Capacitor
 │   └── package.json
 │
-└── docker-compose.yml
+├── docs/                          ← Guías y manuales de desarrollo
+└── docker-compose.yml             ← Orquestación de PostgreSQL local
 ```
 
 ---
 
-## Setup rápido (desarrollo)
+## ⚡ Guía de Inicio Rápido (Desarrollo local)
 
-### 1. Requisitos
-- Node.js 20+
-- Docker + Docker Compose (para PostgreSQL)
-- Git
+Para una explicación exhaustiva de las terminales y del flujo en Android, consulta la [Guía de Desarrollo Detallada](file:///home/machine/chobi-gas/GASTUBOS/docs/guia_inicio_rapido_desarrollo.md).
 
-### 2. Clonar y configurar
-
+### 1. Iniciar Base de Datos y Backend (WSL2)
 ```bash
-git clone https://github.com/tu-usuario/gastubos.git
-cd gastubos
+# Levantar la base de datos
+docker compose up -d postgres
 
-# Levantar PostgreSQL con Docker
-docker-compose up -d postgres
-```
-
-### 3. Backend
-
-```bash
+# Levantar backend
 cd backend
-cp .env.example .env
-# Editar .env con tu JWT_SECRET
-
+cp .env.example .env     # Configura tu DATABASE_URL y JWT_SECRET
 npm install
-npm run db:migrate    # Crea las tablas en PostgreSQL
-npm run db:seed       # Carga datos iniciales
-npm run dev           # Servidor en http://localhost:3001
+npm run db:migrate       # Aplicar esquema
+npm run db:seed          # Inyectar datos de prueba
+npm run dev              # Correr backend en http://localhost:3001
 ```
 
-**Usuarios de prueba:**
-- `admin` / `admin1234` — Administrador
-- `operador1` / `operador123` — Operador
-
-### 4. Frontend
-
+### 2. Iniciar Frontend (Web)
 ```bash
 cd frontend
 cp .env.example .env
 npm install
-npm run dev           # App en http://localhost:5173
+npm run dev              # Correr frontend en http://localhost:5173
 ```
 
----
-
-## API — Referencia rápida
-
-| Método | Endpoint | Descripción | Rol mínimo |
-|--------|---------|-------------|-----------|
-| POST | `/api/auth/login` | Login | — |
-| GET | `/api/auth/me` | Usuario autenticado | cualquiera |
-| GET | `/tubos/:id` | Info pública del tubo (QR) | sin auth |
-| GET | `/api/tubos` | Listar tubos (filtros) | cualquiera |
-| POST | `/api/tubos` | Crear tubo | OPERADOR |
-| PATCH | `/api/tubos/:id` | Editar tubo | OPERADOR |
-| POST | `/api/tubos/:id/cambiar-estado` | Cambiar estado | cualquiera |
-| GET | `/api/tubos/:id/qr` | Obtener QR en base64 | cualquiera |
-| GET | `/api/clientes` | Listar clientes | cualquiera |
-| POST | `/api/clientes` | Crear cliente | OPERADOR |
-| POST | `/api/entregas` | Registrar entrega | OPERADOR |
-| POST | `/api/devoluciones` | Registrar devolución | OPERADOR |
-| GET | `/api/alquileres/vencidos` | Alertas de vencidos | cualquiera |
-| GET | `/api/reportes/dashboard` | Indicadores del dashboard | cualquiera |
-| GET | `/api/auditoria` | Historial de auditoría | cualquiera |
-| GET | `/api/usuarios` | Listar usuarios | ADMIN |
-| POST | `/api/usuarios` | Crear usuario | ADMIN |
+### 3. Exponer el Entorno para Pruebas Remotas o Celular (ngrok + APK)
+Para probar la aplicación en tu celular o hacerle una demostración a un cliente externo:
+```bash
+# Exponer el puerto del frontend mediante ngrok
+ngrok http 5173
+```
+Copia la URL pública generada (ej: `https://monument-radio-rearview.ngrok-free.dev`) y configúrala en `frontend/.env.production`:
+```env
+VITE_API_URL=https://<TU-URL-DE-NGROK-AQUI>.ngrok-free.dev/api
+```
+Luego, compila y sincroniza con Capacitor para generar el APK nativo:
+```bash
+cd frontend
+npm run build && npx cap sync android
+cd android
+JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 ANDROID_HOME=/mnt/c/Users/TavaTeam/AppData/Local/Android/Sdk ./gradlew assembleDebug
+```
+*El APK de depuración se generará en:* `frontend/android/app/build/outputs/apk/debug/app-debug.apk`
 
 ---
 
-## Reglas de transición de estados
+## 👥 Usuarios de Prueba (Seed)
+
+| Usuario | Contraseña | Rol | Acceso principal |
+|---------|------------|-----|------------------|
+| `admin` | `admin1234` | `ADMIN` | Dashboard completo, CRUD de usuarios y tarifas |
+| `operador1` | `operador123` | `OPERADOR` | Registro de tubos, clientes y remisiones |
+| `repartidor1` | `repartidor123` | `REPARTIDOR` | Hoja de reparto móvil (módulo de entregas y QR) |
+
+---
+
+## 📊 Endpoints de la API
+
+| Método | Endpoint | Descripción | Rol Mínimo |
+|--------|---------|-------------|------------|
+| **POST** | `/api/auth/login` | Inicio de sesión | — |
+| **GET** | `/api/auth/me` | Datos de perfil autenticado | Cualquiera |
+| **GET** | `/api/public/tubos/:id` | Consulta pública del estado del tubo | Sin auth |
+| **GET** | `/api/tubos` | Listar tubos con filtros | Cualquiera |
+| **POST** | `/api/tubos` | Crear un tubo nuevo | `OPERADOR` |
+| **PATCH** | `/api/tubos/:id` | Editar propiedades de tubo | `OPERADOR` |
+| **GET** | `/api/tubos/:id/qr` | Obtener código QR en base64 | Cualquiera |
+| **GET** | `/api/clientes` | Listar clientes registrados | Cualquiera |
+| **POST** | `/api/clientes` | Registrar un nuevo cliente | `OPERADOR` |
+| **POST** | `/api/entregas` | Crear una remisión de entrega | `OPERADOR` |
+| **PUT** | `/api/entregas/:id/confirmar` | Confirmar entrega realizada | `REPARTIDOR` |
+| **PUT** | `/api/entregas/:id/cancelar` | Cancelar remisión y revertir estados | `OPERADOR` |
+| **GET** | `/api/alquileres` | Listar contratos de alquiler | Cualquiera |
+| **POST** | `/api/cargas` | Registrar recarga de gas a un tubo | `OPERADOR` |
+| **GET** | `/api/precios` | Obtener tarifario actual por gas | Cualquiera |
+| **PUT** | `/api/precios` | Actualizar tarifas de gas | `ADMIN` |
+| **GET** | `/api/auditoria` | Listar historial de auditoría global | Cualquiera |
+| **GET** | `/api/usuarios` | Listar cuentas de usuario | `ADMIN` |
+| **POST** | `/api/usuarios` | Crear cuenta de usuario | `ADMIN` |
+| **GET** | `/api/health` | Estado del backend | — |
+
+---
+
+## 🔄 Transiciones de Estados de Tubos
+
+La aplicación restringe las transiciones mediante una máquina de estados para evitar inconsistencias lógicas en el inventario:
 
 ```
 DISPONIBLE  → CARGADO, RESERVADO, EN_REVISION, VENDIDO
@@ -140,7 +177,7 @@ CARGADO     → DISPONIBLE, ENTREGADO, ALQUILADO, RESERVADO, EN_REVISION
 VACIO       → EN_REVISION, CARGADO
 ENTREGADO   → DEVUELTO, EN_REVISION, PERDIDO
 ALQUILADO   → DEVUELTO, EN_REVISION, PERDIDO
-VENDIDO     → (estado final, sin salida)
+VENDIDO     → (Estado final inmutable)
 RESERVADO   → DISPONIBLE, CARGADO, ENTREGADO, ALQUILADO
 PERDIDO     → EN_REVISION
 DEVUELTO    → DISPONIBLE, VACIO, EN_REVISION, CARGADO
@@ -149,21 +186,11 @@ EN_REVISION → DISPONIBLE, VACIO, CARGADO
 
 ---
 
-## Deploy en producción (Railway o Render)
+## 🔮 Roadmap / Próximas Versiones
 
-1. Crear proyecto PostgreSQL en Railway
-2. Deploy del backend como servicio Node.js — configurar variables de entorno
-3. Deploy del frontend como sitio estático (Vercel o Netlify) o mismo Railway
-4. Configurar `FRONTEND_URL` en el backend con el dominio real
-5. Ejecutar `npm run db:migrate` en producción (Railway lo puede hacer automático)
-
----
-
-## Próximas versiones
-
-- [ ] PWA / instalable en Android (manifest + service worker)
-- [ ] Escaneo QR nativo desde la app (sin browser extra)
-- [ ] Comprobantes PDF de entrega
-- [ ] Cron job automático para marcar alquileres vencidos
-- [ ] Notificaciones (email/WhatsApp) por vencimiento
-- [ ] Facturación y formas de pago
+- [x] PWA / Aplicación nativa instalable en Android (Implementado vía Capacitor)
+- [x] Escaneo QR nativo desde la cámara móvil (Implementado vía `html5-qrcode` adaptado a Android)
+- [x] Generación y descarga de comprobantes en PDF (Implementado vía `jspdf`)
+- [ ] Tareas cron automatizadas para la alerta y vencimiento de alquileres.
+- [ ] Envío automático de notificaciones por WhatsApp/Email al cliente ante vencimientos.
+- [ ] Módulo de facturación directa y registro de métodos de pago.
