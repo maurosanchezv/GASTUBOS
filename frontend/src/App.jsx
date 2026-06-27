@@ -26,6 +26,14 @@ import CargasPage      from './pages/CargasPage.jsx'
 import RepartoPage     from './pages/RepartoPage.jsx'
 import TuboPublicoPage from './pages/TuboPublicoPage.jsx'  // sin auth
 
+// El REPARTIDOR no debe ver el Dashboard administrativo; lo desviamos
+// directo a su hoja de ruta. El resto de los roles entra al Dashboard.
+function HomeRedirect() {
+  const { user } = useAuthStore()
+  if (user?.rol === 'REPARTIDOR') return <Navigate to="/reparto" replace />
+  return <DashboardPage />
+}
+
 // Guard: redirige a /login si no hay token
 function PrivateRoute({ children, roles }) {
   const { token, user } = useAuthStore()
@@ -52,7 +60,7 @@ export default function App() {
 
         {/* App principal */}
         <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
-          <Route index element={<DashboardPage />} />
+          <Route index element={<HomeRedirect />} />
           <Route path="tubos" element={<TubosPage />} />
           <Route path="tubos/:id/detalle" element={<TuboDetallePage />} />
           <Route path="clientes" element={<ClientesPage />} />

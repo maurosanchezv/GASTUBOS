@@ -15,7 +15,9 @@ export default function LoginPage() {
     setError('')
     const res = await login(form.username, form.password)
     if (res.ok) {
-      navigate(params.get('redirect') || '/', { replace: true })
+      const rol = useAuthStore.getState().user?.rol
+      const destinoPorRol = rol === 'REPARTIDOR' ? '/reparto' : '/'
+      navigate(params.get('redirect') || destinoPorRol, { replace: true })
     } else {
       setError(res.error)
     }

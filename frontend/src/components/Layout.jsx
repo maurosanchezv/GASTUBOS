@@ -46,7 +46,7 @@ const NAV = [
 
 // Items del bottom-nav móvil. El REPARTIDOR ve un layout simplificado.
 const BOTTOM_NAV = [
-  { to: '/',         icon: 'ti-layout-dashboard',  label: 'Inicio' },
+  { to: '/',         icon: 'ti-layout-dashboard',  label: 'Inicio',   restrictedTo: OFICINA },
   { to: '/tubos',    icon: 'ti-cylinder',          label: 'Tubos',    restrictedTo: OFICINA },
   { to: '/reparto',  icon: 'ti-route',             label: 'Ruta',     restrictedTo: ['REPARTIDOR'] },
   { to: '/entregas', icon: 'ti-truck-delivery',    label: 'Entregas', restrictedTo: OFICINA },
@@ -122,7 +122,7 @@ export default function Layout() {
               <div className="user-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user?.nombre}</div>
               <div className="user-role">{user?.rol}</div>
             </div>
-            <button className="btn-icon" onClick={(e) => { e.stopPropagation(); logout(); navigate('/login') }} title="Salir">
+            <button className="btn-icon" onClick={(e) => { e.stopPropagation(); logout(); navigate('/login') }} title="Salir" style={{ color: 'var(--red)', background: 'var(--red-light)', borderColor: 'rgba(185, 28, 28, 0.2)' }}>
               <i className="ti ti-logout" />
             </button>
           </div>

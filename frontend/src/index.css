@@ -77,8 +77,10 @@ input, select, textarea { font-family: inherit; }
   display: flex;
   flex-direction: column;
   position: fixed;
-  top: 0; left: 0; height: 100vh;
-  z-index: 100;
+  top: 0; left: 0;
+  height: 100vh;
+  height: 100dvh;
+  z-index: 120;
   transition: transform .22s ease;
 }
 .app-main {
@@ -702,8 +704,16 @@ textarea { resize: vertical; min-height: 72px; }
   grid-template-columns: 1fr 280px;
   gap: 16px;
 }
+.responsive-grid > * {
+  min-width: 0;
+}
 @media (max-width: 1024px) {
-  .entregas-grid, .responsive-grid { grid-template-columns: 1fr; }
+  .entregas-grid { grid-template-columns: 1fr; }
+  .responsive-grid {
+    display: flex;
+    flex-direction: column-reverse;
+    gap: 16px;
+  }
 }
 
 /* ── Estilos de Impresión para Remisión Térmica (80mm) ───────────────── */
@@ -837,5 +847,23 @@ textarea { resize: vertical; min-height: 72px; }
     width: 100% !important; /* full width on mobile */
   }
 }
+
+/* ── Display Helper Classes ────────────────────────────────────── */
+.desktop-only {
+  display: block !important;
+}
+.mobile-only {
+  display: none !important;
+}
+
+@media (max-width: 768px) {
+  .desktop-only {
+    display: none !important;
+  }
+  .mobile-only {
+    display: block !important;
+  }
+}
+
 
 

@@ -352,6 +352,23 @@ export default function RepartoPage() {
                         <span>{e.direccionEntrega}</span>
                       </div>
 
+                      {(e.cliente?.contacto || e.cliente?.telefono) && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>
+                          {e.cliente?.contacto && (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                              <i className="ti ti-user" style={{ color: 'var(--blue)' }} />
+                              {e.cliente.contacto}
+                            </span>
+                          )}
+                          {e.cliente?.telefono && (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                              <i className="ti ti-phone" style={{ color: 'var(--green)' }} />
+                              <a href={`tel:${e.cliente.telefono}`} style={{ color: 'var(--blue)', fontWeight: 500 }}>{e.cliente.telefono}</a>
+                            </span>
+                          )}
+                        </div>
+                      )}
+
                       <div className="reparto-card-meta">
                         <span><i className="ti ti-cylinder" /> {e.detalles?.length || 0} tubo{e.detalles?.length === 1 ? '' : 's'}</span>
                         {tieneGps && <span><i className="ti ti-gps" /> GPS</span>}
@@ -414,6 +431,50 @@ export default function RepartoPage() {
                         <i className="ti ti-map-pin" style={{ marginTop: 2 }} />
                         <span>{activeEntrega.direccionEntrega}</span>
                       </div>
+                      
+                      {(activeEntrega.cliente?.contacto || activeEntrega.cliente?.telefono) && (
+                        <div style={{
+                          marginTop: 8,
+                          padding: '8px 10px',
+                          background: 'var(--blue-light)',
+                          border: '1px solid rgba(26, 95, 168, 0.15)',
+                          borderRadius: 8,
+                          fontSize: 12,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 6
+                        }}>
+                          {activeEntrega.cliente?.contacto && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-secondary)' }}>
+                              <i className="ti ti-user" style={{ color: 'var(--blue)', fontSize: 14 }} />
+                              <span><strong>Contacto:</strong> {activeEntrega.cliente.contacto}</span>
+                            </div>
+                          )}
+                          {activeEntrega.cliente?.telefono && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <i className="ti ti-phone" style={{ color: 'var(--green)', fontSize: 14 }} />
+                              <span>
+                                <strong>Teléfono:</strong>{' '}
+                                <a 
+                                  href={`tel:${activeEntrega.cliente.telefono}`} 
+                                  style={{ 
+                                    color: 'var(--blue)', 
+                                    textDecoration: 'underline', 
+                                    fontWeight: 600,
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 2
+                                  }}
+                                >
+                                  {activeEntrega.cliente.telefono}
+                                  <i className="ti ti-external-link" style={{ fontSize: 10 }} />
+                                </a>
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       {activeEntrega.observaciones && (
                         <div style={{ fontSize: 11, fontStyle: 'italic', background: 'var(--surface-2)', padding: '6px 10px', borderRadius: 6, marginTop: 8 }}>
                           <strong>Obs:</strong> {activeEntrega.observaciones}

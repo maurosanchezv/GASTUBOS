@@ -25,6 +25,7 @@ export default function TuboDetallePage() {
   const [loading, setLoading] = useState(true)
   const [saving,  setSaving]  = useState(false)
   const [cambioModal, setCambioModal] = useState(false)
+  const [qrModal,     setQrModal]     = useState(false)
   const [nuevoEstado, setNuevoEstado] = useState('')
   const [obsEstado,   setObsEstado]   = useState('')
 
@@ -33,7 +34,17 @@ export default function TuboDetallePage() {
   const handlePrint = useReactToPrint({ content: () => printRef.current })
 
   useEffect(() => { load() }, [id])
-  useEffect(() => { if (params.get('qr') === '1') setTimeout(handlePrint, 800) }, [])
+  
+  useEffect(() => {
+    if (params.get('qr') === '1' && tubo) {
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768 || window.Capacitor
+      if (isMobile) {
+        setQrModal(true)
+      } else {
+        setTimeout(handlePrint, 800)
+      }
+    }
+  }, [params, tubo])
 
   async function load() {
     setLoading(true)
@@ -78,10 +89,17 @@ export default function TuboDetallePage() {
             <button className="btn btn-sm" onClick={() => navigate('/tubos')}>
               <i className="ti ti-arrow-left" /> Volver
             </button>
-            <button className="btn btn-sm" onClick={handlePrint}>
-              <i className="ti ti-printer" /> Imprimir QR
-            </button>
+            {window.Capacitor || window.innerWidth < 768 ? (
+              <button className="btn btn-sm" onClick={() => setQrModal(true)}>
+                <i className="ti ti-qrcode" /> Ver QR
+              </button>
+            ) : (
+              <button className="btn btn-sm" onClick={handlePrint}>
+                <i className="ti ti-printer" /> Imprimir QR
+              </button>
+            )}
             <button className="btn btn-sm btn-primary" onClick={() => setCambioModal(true)}>
+
               <i className="ti ti-refresh" /> Cambiar estado
             </button>
           </>
@@ -125,7 +143,8 @@ export default function TuboDetallePage() {
                   <div className="card-title">Historial de cargas</div>
                   <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{tubo.cargas.length} registro{tubo.cargas.length !== 1 ? 's' : ''}</span>
                 </div>
-                <div className="table-wrap">
+                {/* Vista Desktop: Tabla Completa */}
+                <div className="desktop-only table-wrap">
                   <table>
                     <thead>
                       <tr><th>Fecha</th><th>Gas</th><th>Cantidad</th><th>Operador</th><th>Obs.</th></tr>
@@ -151,6 +170,46 @@ export default function TuboDetallePage() {
                     </tbody>
                   </table>
                 </div>
+
+                {/* Vista Móvil: Lista de Tarjetas */}
+                <div className="mobile-only" style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '8px 0' }}>
+                  {tubo.cargas.map(c => (
+                    <div
+                      key={c.id}
+                      style={{
+                        background: 'var(--surface-2)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 8,
+                        padding: 12,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 4
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <strong style={{ fontSize: 13, color: 'var(--text-primary)' }}>
+                          {GAS_LABELS[c.tipoGas] || c.tipoGas}
+                        </strong>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--blue)' }}>
+                          {Number(c.cantidad).toLocaleString('es-PY')} {c.unidad === 'KG' ? 'kg' : 'm³'}
+                        </span>
+                      </div>
+                      
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-secondary)' }}>
+                        <span>Operador: {c.operador?.nombre || c.operador?.username}</span>
+                        <span style={{ fontFamily: 'var(--font-mono)' }}>
+                          {new Date(c.fechaCarga).toLocaleDateString('es-PY')}
+                        </span>
+                      </div>
+                      
+                      {c.observaciones && (
+                        <div style={{ fontSize: 10, fontStyle: 'italic', color: 'var(--text-muted)', borderTop: '0.5px solid var(--border)', paddingTop: 4, marginTop: 2 }}>
+                          {c.observaciones}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
@@ -163,27 +222,72 @@ export default function TuboDetallePage() {
               {tubo.auditoria?.length === 0 ? (
                 <p style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', padding: '16px 0' }}>Sin movimientos registrados</p>
               ) : (
-                <div className="table-wrap">
-                  <table>
-                    <thead>
-                      <tr><th>Fecha</th><th>Acción</th><th>Usuario</th><th>Anterior</th><th>Nuevo</th><th>Obs.</th></tr>
-                    </thead>
-                    <tbody>
-                      {tubo.auditoria?.map(a => (
-                        <tr key={a.id}>
-                          <td style={{ fontFamily: 'var(--font-mono)', fontSize: 10, whiteSpace: 'nowrap' }}>
+                <>
+                  {/* Vista Desktop: Tabla Completa */}
+                  <div className="desktop-only table-wrap">
+                    <table>
+                      <thead>
+                        <tr><th>Fecha</th><th>Acción</th><th>Usuario</th><th>Anterior</th><th>Nuevo</th><th>Obs.</th></tr>
+                      </thead>
+                      <tbody>
+                        {tubo.auditoria?.map(a => (
+                          <tr key={a.id}>
+                            <td style={{ fontFamily: 'var(--font-mono)', fontSize: 10, whiteSpace: 'nowrap' }}>
+                              {new Date(a.createdAt).toLocaleString('es-PY', { dateStyle: 'short', timeStyle: 'short' })}
+                            </td>
+                            <td>{a.accion}</td>
+                            <td style={{ color: 'var(--text-secondary)' }}>{a.usuario?.username}</td>
+                            <td>{a.estadoAnterior ? <StateBadge estado={a.estadoAnterior} /> : '—'}</td>
+                            <td>{a.estadoNuevo    ? <StateBadge estado={a.estadoNuevo}    /> : '—'}</td>
+                            <td style={{ color: 'var(--text-secondary)', fontSize: 11, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.observaciones || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Vista Móvil: Lista de Tarjetas */}
+                  <div className="mobile-only" style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '8px 0' }}>
+                    {tubo.auditoria?.map(a => (
+                      <div
+                        key={a.id}
+                        style={{
+                          background: 'var(--surface-2)',
+                          border: '1px solid var(--border)',
+                          borderRadius: 8,
+                          padding: 12,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 6
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <strong style={{ fontSize: 13, color: 'var(--text-primary)' }}>{a.accion}</strong>
+                          <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
                             {new Date(a.createdAt).toLocaleString('es-PY', { dateStyle: 'short', timeStyle: 'short' })}
-                          </td>
-                          <td>{a.accion}</td>
-                          <td style={{ color: 'var(--text-secondary)' }}>{a.usuario?.username}</td>
-                          <td>{a.estadoAnterior ? <StateBadge estado={a.estadoAnterior} /> : '—'}</td>
-                          <td>{a.estadoNuevo    ? <StateBadge estado={a.estadoNuevo}    /> : '—'}</td>
-                          <td style={{ color: 'var(--text-secondary)', fontSize: 11, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.observaciones || '—'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                          </span>
+                        </div>
+                        
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 11 }}>
+                          <span style={{ color: 'var(--text-secondary)' }}>Estado:</span>
+                          {a.estadoAnterior ? <StateBadge estado={a.estadoAnterior} /> : '—'}
+                          <i className="ti ti-arrow-right" style={{ color: 'var(--text-muted)', fontSize: 12 }} />
+                          {a.estadoNuevo ? <StateBadge estado={a.estadoNuevo} /> : '—'}
+                        </div>
+
+                        <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                          Usuario: <strong>{a.usuario?.username}</strong>
+                        </div>
+                        
+                        {a.observaciones && (
+                          <div style={{ fontSize: 10, fontStyle: 'italic', color: 'var(--text-muted)', borderTop: '0.5px solid var(--border)', paddingTop: 4 }}>
+                            {a.observaciones}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </>
               )}
             </div>
           </div>
@@ -209,10 +313,17 @@ export default function TuboDetallePage() {
               <div style={{ fontSize: 11, color: 'var(--text-muted)', margin: '10px 0 14px', wordBreak: 'break-all' }}>
                 {tuboUrl}
               </div>
-              <button className="btn btn-primary" style={{ width: '100%' }} onClick={handlePrint}>
-                <i className="ti ti-printer" /> Imprimir etiqueta
-              </button>
+              {window.Capacitor || window.innerWidth < 768 ? (
+                <button className="btn btn-primary" style={{ width: '100%' }} onClick={() => setQrModal(true)}>
+                  <i className="ti ti-qrcode" /> Ampliar código QR
+                </button>
+              ) : (
+                <button className="btn btn-primary" style={{ width: '100%' }} onClick={handlePrint}>
+                  <i className="ti ti-printer" /> Imprimir etiqueta
+                </button>
+              )}
             </div>
+
 
             {/* Cambio rápido de estado */}
             <div className="card">
@@ -277,6 +388,51 @@ export default function TuboDetallePage() {
           />
         </FormGroup>
       </Modal>
+
+      {/* Modal visor de QR para móviles */}
+      <Modal
+        open={qrModal}
+        title="Código QR del Cilindro"
+        onClose={() => { setQrModal(false); navigate(`/tubos/${id}/detalle`, { replace: true }) }}
+        footer={
+          <>
+            <button className="btn" onClick={() => { setQrModal(false); navigate(`/tubos/${id}/detalle`, { replace: true }) }}>
+              Cerrar
+            </button>
+            {!window.Capacitor && (
+              <button className="btn btn-primary" onClick={handlePrint}>
+                <i className="ti ti-printer" /> Imprimir
+              </button>
+            )}
+          </>
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '10px 0' }}>
+          <div style={{
+            border: '2px solid #000', borderRadius: 8,
+            padding: 16, display: 'inline-block',
+            background: '#fff',
+            boxShadow: '0 4px 12px rgba(0,0,0,.08)',
+            marginBottom: 16
+          }}>
+            <QRCodeSVG value={tuboUrl} size={180} level="M" />
+            <div style={{ marginTop: 10, fontSize: 14, fontWeight: 700, fontFamily: 'var(--font-mono)', textAlign: 'center', color: '#000' }}>
+              {tubo.id}
+            </div>
+            <div style={{ fontSize: 11, textAlign: 'center', color: 'var(--text-secondary)', marginTop: 2 }}>
+              {tubo.gas} · {tubo.capacidadLitros}L
+            </div>
+          </div>
+          
+          <div style={{ textAlign: 'center', fontSize: 12, color: 'var(--text-secondary)', maxWidth: 280, margin: '0 auto 8px' }}>
+            Escanea este código QR con la cámara de otro dispositivo para acceder directamente a la ficha del cilindro.
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', wordBreak: 'break-all', fontFamily: 'var(--font-mono)' }}>
+            {tuboUrl}
+          </div>
+        </div>
+      </Modal>
     </>
   )
 }
+

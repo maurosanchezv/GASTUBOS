@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">GasTubos Repartidor</string>
+    <string name="title_activity_main">GasTubos Repartidor</string>
+    <string name="package_name">com.gastubos.repartidor</string>
+    <string name="custom_url_scheme">com.gastubos.repartidor</string>
+</resources>

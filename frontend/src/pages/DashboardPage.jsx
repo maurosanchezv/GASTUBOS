@@ -105,36 +105,83 @@ export default function DashboardPage() {
               Sin entregas registradas
             </div>
           ) : (
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Nro</th>
-                    <th>Cliente</th>
-                    <th>Tipo</th>
-                    <th>Tubos</th>
-                    <th>Fecha</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {entregasRecientes.map(e => (
-                    <tr key={e.id} style={{ cursor: 'pointer' }} onClick={() => navigate('/entregas?tab=historial')}>
-                      <td className="td-code">{e.numero}</td>
-                      <td style={{ fontWeight: 500 }}>{e.cliente?.nombre}</td>
-                      <td>
-                        <span className={`badge badge-${e.tipoOperacion === 'ALQUILER' ? 'ALQUILADO' : e.tipoOperacion === 'VENTA' ? 'VENDIDO' : 'ENTREGADO'}`}>
+            <>
+              {/* Vista Desktop: Tabla Completa */}
+              <div className="desktop-only table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Nro</th>
+                      <th>Cliente</th>
+                      <th>Tipo</th>
+                      <th>Tubos</th>
+                      <th>Fecha</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {entregasRecientes.map(e => (
+                      <tr key={e.id} style={{ cursor: 'pointer' }} onClick={() => navigate('/entregas?tab=historial')}>
+                        <td className="td-code">{e.numero}</td>
+                        <td style={{ fontWeight: 500 }}>{e.cliente?.nombre}</td>
+                        <td>
+                          <span className={`badge badge-${e.tipoOperacion === 'ALQUILER' ? 'ALQUILADO' : e.tipoOperacion === 'VENTA' ? 'VENDIDO' : 'ENTREGADO'}`}>
+                            {e.tipoOperacion.replace('_', ' ')}
+                          </span>
+                        </td>
+                        <td>{e.detalles?.length ?? 0}</td>
+                        <td style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
+                          {new Date(e.fechaEntrega).toLocaleDateString('es-PY')}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Vista Móvil: Lista de Tarjetas Claras */}
+              <div className="mobile-only" style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 12 }}>
+                {entregasRecientes.map(e => {
+                  const tipoCls = e.tipoOperacion === 'ALQUILER' ? 'ALQUILADO' : e.tipoOperacion === 'VENTA' ? 'VENDIDO' : 'ENTREGADO'
+                  return (
+                    <div
+                      key={e.id}
+                      onClick={() => navigate('/entregas?tab=historial')}
+                      style={{
+                        background: 'var(--surface-2)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 8,
+                        padding: 12,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 6
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--blue)', fontSize: 12 }}>{e.numero}</span>
+                        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                          {new Date(e.fechaEntrega).toLocaleDateString('es-PY')}
+                        </span>
+                      </div>
+                      
+                      <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-primary)' }}>
+                        {e.cliente?.nombre}
+                      </div>
+                      
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 }}>
+                        <span className={`badge badge-${tipoCls}`} style={{ margin: 0, fontSize: 10 }}>
                           {e.tipoOperacion.replace('_', ' ')}
                         </span>
-                      </td>
-                      <td>{e.detalles?.length ?? 0}</td>
-                      <td style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
-                        {new Date(e.fechaEntrega).toLocaleDateString('es-PY')}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                        <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                          <i className="ti ti-cylinder" style={{ marginRight: 3, verticalAlign: 'middle' }} />
+                          {e.detalles?.length ?? 0} tubo{e.detalles?.length === 1 ? '' : 's'}
+                        </span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </>
           )}
         </div>
       </div>

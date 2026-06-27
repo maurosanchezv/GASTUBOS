@@ -22,12 +22,20 @@ import precioRoutes   from './routes/precios.js'
 const app  = express()
 const PORT = process.env.PORT || 3001
 
+app.set('trust proxy', 1) // Habilitar trust proxy para ngrok / proxies externos
+
 // ─── Seguridad básica ─────────────────────────────────────────────────────────
 app.use(helmet())
+const rawOrigins = process.env.FRONTEND_URL || '';
+const allowedOrigins = rawOrigins
+  ? rawOrigins.split(',').map(o => o.trim().replace(/^['"]|['"]$/g, ''))
+  : ['http://localhost:5173', 'http://127.0.0.1:5173'];
+
+console.log('CORS FRONTEND_URL raw:', process.env.FRONTEND_URL)
+console.log('CORS Allowed Origins (cleaned):', allowedOrigins)
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL
-    ? process.env.FRONTEND_URL.split(',')
-    : ['http://localhost:5173', 'http://127.0.0.1:5173'],
+  origin: allowedOrigins,
   credentials: true,
 }))
 
@@ -68,6 +76,8 @@ app.use('/api/precios',    precioRoutes)
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => res.json({ ok: true, version: '1.0.0' }))
+
+app.get('/', (req, res) => res.json({ ok: true, message: 'GasTubos API Backend is running. Access the app via the frontend or mobile build.' }))
 
 // ─── Error handler global ─────────────────────────────────────────────────────
 app.use((err, req, res, next) => {

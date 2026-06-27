@@ -52,7 +52,7 @@ EOF
 
 npm ci --production
 npm run db:generate
-npm run db:migrate
+npm run db:migrate:prod
 npm run db:seed
 
 pm2 start src/index.js --name gastubos-api --interpreter node

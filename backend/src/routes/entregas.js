@@ -79,7 +79,7 @@ router.get('/', async (req, res, next) => {
       prisma.entrega.findMany({
         where,
         include: {
-          cliente:    { select: { id: true, nombre: true, ruc: true } },
+          cliente:    { select: { id: true, nombre: true, ruc: true, telefono: true, contacto: true } },
           creadoPor:  { select: { username: true, nombre: true } },
           repartidor: { select: { username: true, nombre: true } },
           detalles:   { include: { tubo: { select: { id: true, gas: true, talla: true } } } },

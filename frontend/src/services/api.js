@@ -11,6 +11,10 @@ const api = axios.create({
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('gastubos_token')
   if (token) config.headers.Authorization = `Bearer ${token}`
+  
+  // Evitar la página de advertencia de ngrok en la APK de prueba
+  config.headers['ngrok-skip-browser-warning'] = 'true'
+  
   return config
 })
 
