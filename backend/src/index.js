@@ -39,17 +39,17 @@ app.use(cors({
   credentials: true,
 }))
 
-// Rate limiting global
+// Rate limiting global (Aumentado para evitar bloqueos por IP compartida en ngrok/demos)
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000, // 15 min
-  max: 200,
+  max: 5000,
   message: { error: 'Demasiadas solicitudes, intentá más tarde.' },
 }))
 
-// Rate limiting más estricto para login
+// Rate limiting para login (Aumentado para pruebas de desarrollo)
 app.use('/api/auth/login', rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: 100,
   message: { error: 'Demasiados intentos de login.' },
 }))
 
