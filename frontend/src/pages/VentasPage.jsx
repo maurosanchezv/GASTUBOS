@@ -84,10 +84,13 @@ export default function VentasPage() {
                     <thead><tr><th>Nro</th><th>Tubo</th><th>Cliente</th><th>Referencia</th><th>Fecha</th></tr></thead>
                     <tbody>
                       {ventas.map(v => (
-                        <tr key={v.id}>
+                        <tr key={v.id} style={v.cancelada ? { opacity: 0.6, textDecoration: 'line-through' } : {}}>
                           <td className="td-code">{v.numero}</td>
                           <td className="td-code">{v.tubo?.id}</td>
-                          <td>{v.cliente?.nombre}</td>
+                          <td>
+                            {v.cliente?.nombre}
+                            {v.cancelada && <span className="badge badge-danger" style={{ marginLeft: 6, textDecoration: 'none', display: 'inline-block', fontSize: '9px', padding: '2px 4px', background: 'var(--red)', color: '#fff', borderRadius: '4px' }}>CANCELADA</span>}
+                          </td>
                           <td style={{ color: 'var(--text-secondary)' }}>{v.referencia || '—'}</td>
                           <td style={{ color: 'var(--text-secondary)', fontSize: 11 }}>{new Date(v.fechaVenta).toLocaleDateString('es-PY')}</td>
                         </tr>

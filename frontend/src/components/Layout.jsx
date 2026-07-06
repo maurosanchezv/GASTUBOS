@@ -23,6 +23,7 @@ const NAV = [
   ]},
   { group: 'Operaciones', items: [
     { to: '/tubos',      icon: 'ti-cylinder',         label: 'Tubos',        restrictedTo: OFICINA },
+    { to: '/camiones',   icon: 'ti-truck',            label: 'Camiones',     restrictedTo: OFICINA },
     { to: '/reparto',    icon: 'ti-route',            label: 'Hoja de Ruta' },
     { to: '/entregas',   icon: 'ti-truck-delivery',   label: 'Entregas',     restrictedTo: OFICINA },
     { to: '/cargas',     icon: 'ti-gas-station',      label: 'Cargas',       restrictedTo: OFICINA },

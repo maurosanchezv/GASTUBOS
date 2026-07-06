@@ -57,7 +57,7 @@ export default function TuboPublicoPage() {
         <div style={{ background: color, padding: '20px 24px', borderRadius: '12px 12px 0 0' }}>
           <div style={{ fontSize: 22, fontWeight: 600, color: '#fff', fontFamily: 'monospace' }}>{tubo.id}</div>
           <div style={{ fontSize: 13, color: 'rgba(255,255,255,.8)', marginTop: 4 }}>
-            {tubo.gas} · {tubo.capacidadLitros}L · {tubo.talla}
+            {tubo.gas} · {tubo.capacidadLitros ? `${tubo.capacidadLitros}L` : `${Number(tubo.capacidadKg)} kg`} · {tubo.talla}
           </div>
           <span style={{ display:'inline-block', marginTop: 8, background:'rgba(255,255,255,.25)', color:'#fff', padding:'3px 10px', borderRadius:10, fontSize:12, fontWeight:600 }}>
             {tubo.estado.replace('_',' ')}
@@ -67,7 +67,7 @@ export default function TuboPublicoPage() {
         {/* Info */}
         <div style={{ padding: '16px 24px' }}>
           {[
-            ['Propietario', tubo.propietario],
+            ['Propietario', tubo.propietario === 'CLIENTE' ? `CLIENTE - ${tubo.cliente?.nombre || '—'}` : 'PROPIO'],
             ['Ubicación',   tubo.ubicacion   || '—'],
             ['Cliente',     tubo.cliente?.nombre || '—'],
             ['Actualizado', new Date(tubo.updatedAt).toLocaleString('es-PY')],

@@ -112,6 +112,7 @@ model Cliente {
   alquileres  Alquiler[]
   ventas      Venta[]
   entregas    Entrega[]
+  recambios   Recambio[]
 
   @@map("clientes")
 }
@@ -122,7 +123,8 @@ model Tubo {
   id              String          @id  // TUBO-000001, generado en app
   serie           String          @unique
   gas             String          // CO2, Oxígeno, Argón, etc.
-  capacidadLitros Int
+  capacidadLitros Int?
+  capacidadKg     Decimal?        @db.Decimal(5, 2)
   talla           String          // T50, T10, T8
   pesoKg          Decimal?        @db.Decimal(8, 2)
   estado          EstadoTubo      @default(DISPONIBLE)
@@ -141,12 +143,17 @@ model Tubo {
   // Si es tubo de cliente, qué cliente es el dueño
   propietarioClienteId String?
 
+  // camion asignado (null si está en depósito o entregado)
+  camionId        String?
+  camion          Camion?         @relation(fields: [camionId], references: [id])
+
   // relaciones
-  auditoria       Auditoria[]
-  detallesEntrega DetalleEntrega[]
-  alquileres      Alquiler[]
-  ventas          Venta[]
-  cargas          Carga[]
+  auditoria              Auditoria[]
+  detallesEntrega        DetalleEntrega[]
+  alquileres             Alquiler[]
+  ventas                 Venta[]
+  cargas                 Carga[]
+  recambiosComoEntregado Recambio[]       @relation("TuboRetornado")
 
   @@map("tubos")
 }
@@ -173,10 +180,13 @@ model Entrega {
 
   detalles        DetalleEntrega[]
   alquileres      Alquiler[]    // si tipoOperacion = ALQUILER
+  recambios       Recambio[]
   costoDelivery   Decimal       @db.Decimal(10, 2) @default(0.00)
   confirmada      Boolean       @default(false)
   cancelada       Boolean       @default(false)
   motivoCancelacion String?
+  metodoPago      String?
+  montoRecibido   Decimal?      @db.Decimal(10, 2)
 
   createdAt       DateTime      @default(now())
 
@@ -235,6 +245,7 @@ model Venta {
   fechaVenta    DateTime @default(now())
   referencia    String?  // nro. de factura, orden, etc.
   observaciones String?
+  cancelada     Boolean  @default(false)
   createdAt     DateTime @default(now())
 
   @@map("ventas")
@@ -245,8 +256,8 @@ model Venta {
 model Carga {
   id            Int       @id @default(autoincrement())
   numero        String    @unique  // CG-2026-001
-  tuboId        String
-  tubo          Tubo      @relation(fields: [tuboId], references: [id])
+  tuboId        String?
+  tubo          Tubo?     @relation(fields: [tuboId], references: [id])
   tipoGas       TipoGas
   unidad        UnidadGas
   cantidad      Decimal   @db.Decimal(10, 3)
@@ -304,5 +315,33 @@ model PrecioGas {
   createdAt      DateTime  @default(now())
 
   @@map("precios_gas")
+}
+
+model Recambio {
+  id              String   @id @default(cuid())
+  entregaId       String
+  entrega         Entrega  @relation(fields: [entregaId], references: [id])
+  tuboEntregadoId String
+  tuboEntregado   Tubo     @relation("TuboRetornado", fields: [tuboEntregadoId], references: [id])
+  clienteId       String
+  cliente         Cliente  @relation(fields: [clienteId], references: [id])
+  createdAt       DateTime @default(now())
+
+  @@map("recambios")
+}
+
+// ─── CAMIONES ─────────────────────────────────────────────────────────────────
+
+model Camion {
+  id           String   @id @default(cuid())
+  placa        String   @unique // Identificador/Placa/Patente
+  capacidadMax Int
+  activo       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tubos        Tubo[]
+
+  @@map("camiones")
 }
 

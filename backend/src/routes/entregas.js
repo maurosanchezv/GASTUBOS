@@ -83,6 +83,7 @@ router.get('/', async (req, res, next) => {
           creadoPor:  { select: { username: true, nombre: true } },
           repartidor: { select: { username: true, nombre: true } },
           detalles:   { include: { tubo: { select: { id: true, gas: true, talla: true } } } },
+          recambios:  { include: { tuboEntregado: { select: { id: true, gas: true, talla: true, observaciones: true } } } },
         },
         orderBy: { fechaEntrega: 'desc' },
         skip: (Number(page) - 1) * Number(limit),
@@ -92,6 +93,26 @@ router.get('/', async (req, res, next) => {
     ])
 
     res.json({ entregas, total })
+  } catch (err) { next(err) }
+})
+
+// ─── GET /api/entregas/numero/:numero ─────────────────────────────────────────
+// Detalle de una remisión por su número (E-2026-001). Alimenta la landing que
+// se abre al escanear el QR del ticket. Requiere sesión (router.use(requireAuth)).
+router.get('/numero/:numero', async (req, res, next) => {
+  try {
+    const entrega = await prisma.entrega.findUnique({
+      where: { numero: req.params.numero },
+      include: {
+        cliente:    true,
+        creadoPor:  { select: { username: true, nombre: true } },
+        repartidor: { select: { username: true, nombre: true } },
+        detalles:   { include: { tubo: { select: { id: true, gas: true, talla: true, capacidadLitros: true, capacidadKg: true } } } },
+        recambios:  { include: { tuboEntregado: { select: { id: true, gas: true, talla: true, observaciones: true } } } },
+      },
+    })
+    if (!entrega) return res.status(404).json({ error: 'Remisión no encontrada' })
+    res.json(entrega)
   } catch (err) { next(err) }
 })
 
@@ -269,9 +290,17 @@ router.post('/', requireRol('ADMIN', 'OPERADOR'), async (req, res, next) => {
 })
 
 // ─── PUT /api/entregas/:id/confirmar ─────────────────────────────────────────
+const confirmacionSchema = z.object({
+  recambios: z.array(z.string()).optional().default([]),
+  confirmados: z.array(z.string()).optional(), // Si no viene, se confirman todos
+  metodoPago: z.enum(['EFECTIVO', 'TRANSFERENCIA', 'CREDITO', 'PENDIENTE']).optional(),
+  montoRecibido: z.coerce.number().optional(),
+})
+
 router.put('/:id/confirmar', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), async (req, res, next) => {
   try {
     const { id } = req.params
+    const { recambios, confirmados, metodoPago, montoRecibido } = confirmacionSchema.parse(req.body || {})
     const entrega = await prisma.entrega.findUnique({
       where: { id },
       include: { detalles: true }
@@ -284,11 +313,28 @@ router.put('/:id/confirmar', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), asyn
       return res.status(403).json({ error: 'Solo podés confirmar entregas asignadas a vos' })
     }
 
+    const todosTuboIds = entrega.detalles.map(d => d.tuboId)
+    const confirmadosIds = confirmados || todosTuboIds
+    const noConfirmadosIds = todosTuboIds.filter(tId => !confirmadosIds.includes(tId))
+
     const resultado = await prisma.$transaction(async (tx) => {
+      let observacionesActualizadas = entrega.observaciones || ''
+      if (noConfirmadosIds.length > 0) {
+        const nota = `Entrega Parcial: Retornaron ${noConfirmadosIds.length} tubo(s)`
+        observacionesActualizadas = observacionesActualizadas
+          ? `${observacionesActualizadas} | ${nota}`
+          : nota
+      }
+
       // 1. Confirmar la entrega
       const entregaActualizada = await tx.entrega.update({
         where: { id },
-        data: { confirmada: true },
+        data: {
+          confirmada: true,
+          metodoPago: metodoPago || null,
+          montoRecibido: montoRecibido !== undefined ? montoRecibido : null,
+          observaciones: observacionesActualizadas || null,
+        },
         include: { detalles: true }
       })
 
@@ -298,14 +344,23 @@ router.put('/:id/confirmar', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), asyn
         VENTA:          'VENDIDO',
       }[entrega.tipoOperacion]
 
-      // 2. Actualizar estado y ubicación de todos los tubos de la entrega
-      for (const d of entrega.detalles) {
+      // Buscar si algún tubo de esta entrega tiene camionId asignado
+      const primerTuboConCamion = await tx.tubo.findFirst({
+        where: { id: { in: todosTuboIds }, camionId: { not: null } },
+        include: { camion: true }
+      })
+      const camionId = primerTuboConCamion?.camionId
+      const camionAsociado = primerTuboConCamion?.camion
+
+      // 2. Actualizar estado y ubicación de todos los tubos confirmados de la entrega
+      for (const d of entrega.detalles.filter(x => confirmadosIds.includes(x.tuboId))) {
         await tx.tubo.update({
           where: { id: d.tuboId },
           data: {
             estado:    estadoDestino,
             clienteId: entrega.tipoOperacion !== 'VENTA' ? entrega.clienteId : null,
             ubicacion: entrega.tipoOperacion !== 'VENTA' ? 'Cliente' : 'Vendido',
+            camionId:  null, // sale del stock del camión al confirmarse
           }
         })
 
@@ -323,19 +378,168 @@ router.put('/:id/confirmar', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), asyn
         })
       }
 
+      // 3. Procesar tubos NO confirmados (entregas parciales)
+      for (const d of entrega.detalles.filter(x => noConfirmadosIds.includes(x.tuboId))) {
+        const tuboDb = await tx.tubo.findUnique({ where: { id: d.tuboId } })
+        const camionTubo = tuboDb?.camionId ? await tx.camion.findUnique({ where: { id: tuboDb.camionId } }) : null
+
+        if (camionTubo) {
+          // Si estaba en un camión, regresa al camión como RESERVADO
+          await tx.tubo.update({
+            where: { id: d.tuboId },
+            data: {
+              estado:    'RESERVADO',
+              clienteId: null,
+              ubicacion: `Camión ${camionTubo.placa}`,
+            }
+          })
+        } else {
+          // Si no, regresa al depósito
+          let estadoAnterior = d.estadoAnterior || 'CARGADO'
+          await tx.tubo.update({
+            where: { id: d.tuboId },
+            data: {
+              estado:    estadoAnterior,
+              clienteId: null,
+              ubicacion: 'Depósito',
+              camionId:  null,
+            }
+          })
+        }
+
+        // Auditoría
+        await tx.auditoria.create({
+          data: {
+            tuboId:         d.tuboId,
+            usuarioId:      req.user.id,
+            accion:         `Entrega parcial: tubo no entregado`,
+            estadoAnterior: 'RESERVADO',
+            estadoNuevo:    tuboDb?.camionId ? 'RESERVADO' : (d.estadoAnterior || 'CARGADO'),
+            observaciones:  `No entregado en remisión ${entrega.numero}. Queda en stock del camión o depósito.`,
+            metadata:       { entregaId: id, numero: entrega.numero }
+          }
+        })
+
+        // Eliminar detalle de entrega
+        await tx.detalleEntrega.delete({
+          where: {
+            entregaId_tuboId: { entregaId: id, tuboId: d.tuboId }
+          }
+        })
+
+        // Cancelar pre-alquileres si corresponde (soft-cancel)
+        if (entrega.tipoOperacion === 'ALQUILER') {
+          await tx.alquiler.updateMany({
+            where: { entregaId: id, tuboId: d.tuboId },
+            data: {
+              estado: 'CANCELADO',
+              observaciones: 'Cancelado por entrega parcial'
+            }
+          })
+        }
+
+        // Cancelar pre-ventas si corresponde (soft-cancel)
+        if (entrega.tipoOperacion === 'VENTA') {
+          await tx.venta.updateMany({
+            where: {
+              clienteId: entrega.clienteId,
+              tuboId: d.tuboId,
+              cancelada: false
+            },
+            data: {
+              cancelada: true,
+              observaciones: 'Cancelado por entrega parcial'
+            }
+          })
+        }
+      }
+
+      // 2.b. Registrar recambios si existen
+      if (recambios && recambios.length > 0) {
+        for (const retId of recambios) {
+          let tuboRetornado = await tx.tubo.findUnique({
+            where: { id: retId }
+          })
+          
+          if (!tuboRetornado) {
+            // Auto-crear tubo del cliente si no existe en la base de datos
+            // Intentar copiar gas/talla del primer detalle de la entrega como referencia
+            const primerDetalle = entrega.detalles[0]
+            const tuboReferencia = primerDetalle ? await tx.tubo.findUnique({ where: { id: primerDetalle.tuboId } }) : null
+
+            tuboRetornado = await tx.tubo.create({
+              data: {
+                id: retId,
+                serie: retId, // Usamos el ID como serie por defecto
+                gas: tuboReferencia ? tuboReferencia.gas : 'CO2',
+                talla: tuboReferencia ? tuboReferencia.talla : 'T50',
+                capacidadLitros: tuboReferencia ? tuboReferencia.capacidadLitros : 40,
+                estado: 'DEVUELTO',
+                propietario: 'CLIENTE',
+                propietarioClienteId: entrega.clienteId,
+                clienteId: null,
+                ubicacion: camionAsociado ? `Camión ${camionAsociado.placa}` : 'Depósito',
+                camionId: camionId || null,
+              }
+            })
+          } else {
+            // Si el tubo ya existe en el sistema, lo actualizamos a DEVUELTO y lo asociamos al camión/depósito
+            await tx.tubo.update({
+              where: { id: retId },
+              data: {
+                estado: 'DEVUELTO',
+                clienteId: null,
+                ubicacion: camionAsociado ? `Camión ${camionAsociado.placa}` : 'Depósito',
+                camionId: camionId || null,
+                propietarioClienteId: tuboRetornado.propietario === 'CLIENTE' && !tuboRetornado.propietarioClienteId 
+                  ? entrega.clienteId 
+                  : tuboRetornado.propietarioClienteId
+              }
+            })
+          }
+
+          // Finalizar alquileres del tubo retornado si corresponden
+          await tx.alquiler.updateMany({
+            where: { tuboId: retId, estado: { in: ['ACTIVO', 'VENCIDO'] } },
+            data:  { estado: 'FINALIZADO', fechaDevolucion: new Date() },
+          })
+
+          // Crear registro de Recambio
+          await tx.recambio.create({
+            data: {
+              entregaId: id,
+              tuboEntregadoId: retId,
+              clienteId: entrega.clienteId,
+            }
+          })
+
+          // Auditoría del tubo retornado
+          await tx.auditoria.create({
+            data: {
+              tuboId:         retId,
+              usuarioId:      req.user.id,
+              accion:         'Recambio registrado en entrega',
+              estadoAnterior: tuboRetornado.estado,
+              estadoNuevo:    'DEVUELTO',
+              observaciones:  `Recambio devuelto en entrega ${entrega.numero}. Queda en ${camionAsociado ? 'camión ' + camionAsociado.placa : 'depósito'}.`,
+              metadata:       { entregaId: id, numero: entrega.numero, camionId }
+            }
+          })
+        }
+      }
+
       // 4. Actualizar fecha de inicio/venta de los alquileres/ventas asociados a la fecha real de confirmación
       if (entrega.tipoOperacion === 'ALQUILER') {
         await tx.alquiler.updateMany({
-          where: { entregaId: id },
+          where: { entregaId: id, tuboId: { in: confirmadosIds } },
           data: { fechaInicio: new Date() }
         })
       }
 
       if (entrega.tipoOperacion === 'VENTA') {
-        const tuboIds = entrega.detalles.map(d => d.tuboId)
         await tx.venta.updateMany({
           where: {
-            tuboId: { in: tuboIds },
+            tuboId: { in: confirmadosIds },
             clienteId: entrega.clienteId,
           },
           data: { fechaVenta: new Date() }
@@ -347,7 +551,8 @@ router.put('/:id/confirmar', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), asyn
 
     res.json(resultado)
   } catch (err) {
-    next(err)
+    if (err instanceof z.ZodError) return res.status(400).json({ error: err.errors })
+    res.status(400).json({ error: err.message || 'Error al confirmar entrega' })
   }
 })
 
@@ -380,62 +585,249 @@ router.put('/:id/cancelar', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), async
         include: { detalles: true }
       })
 
-      // 2. Eliminar alquileres asociados (si los hay)
-      await tx.alquiler.deleteMany({
-        where: { entregaId: id }
+      // 2. Marcar alquileres asociados como CANCELADOS (si los hay)
+      await tx.alquiler.updateMany({
+        where: { entregaId: id },
+        data: {
+          estado: 'CANCELADO',
+          observaciones: `Alquiler cancelado debido a cancelación de entrega ${entrega.numero}. Motivo: ${motivo || 'No concretada en terreno'}`
+        }
       })
 
-      // 3. Eliminar ventas asociadas (si las hay)
+      // 3. Marcar ventas asociadas como CANCELADAS (si las hay)
       if (entrega.tipoOperacion === 'VENTA') {
         const tuboIds = entrega.detalles.map(d => d.tuboId)
-        await tx.venta.deleteMany({
+        await tx.venta.updateMany({
           where: {
             tuboId: { in: tuboIds },
             clienteId: entrega.clienteId,
+            cancelada: false
+          },
+          data: {
+            cancelada: true,
+            observaciones: `Venta cancelada debido a cancelación de entrega ${entrega.numero}. Motivo: ${motivo || 'No concretada en terreno'}`
           }
         })
       }
 
       // 4. Revertir el estado de los tubos
       for (const d of entrega.detalles) {
-        // Fallback para entregas creadas antes de la migración que añadió el campo.
-        let estadoAnterior = d.estadoAnterior
-        if (!estadoAnterior) {
-          const ultimaAudit = await tx.auditoria.findFirst({
-            where: { tuboId: d.tuboId, metadata: { path: ['entregaId'], equals: id } },
-            orderBy: { createdAt: 'desc' },
+        const tuboDb = await tx.tubo.findUnique({ where: { id: d.tuboId } })
+        const camionTubo = tuboDb?.camionId ? await tx.camion.findUnique({ where: { id: tuboDb.camionId } }) : null
+
+        if (camionTubo) {
+          // Si estaba en un camión, regresa al camión como RESERVADO
+          await tx.tubo.update({
+            where: { id: d.tuboId },
+            data: {
+              estado:    'RESERVADO',
+              clienteId: null,
+              ubicacion: `Camión ${camionTubo.placa}`
+            }
           })
-          estadoAnterior = ultimaAudit?.estadoAnterior || 'CARGADO'
+
+          // Auditoría
+          await tx.auditoria.create({
+            data: {
+              tuboId:         d.tuboId,
+              usuarioId:      req.user.id,
+              accion:         `Entrega cancelada (Retorno a camión)`,
+              estadoAnterior: 'RESERVADO',
+              estadoNuevo:    'RESERVADO',
+              observaciones:  `Entrega ${entrega.numero} cancelada. Cilindro regresa al stock del camión ${camionTubo.placa}.`,
+              metadata:       { entregaId: id, numero: entrega.numero }
+            }
+          })
+        } else {
+          // Si no, regresa al depósito con su estado anterior
+          let estadoAnterior = d.estadoAnterior
+          if (!estadoAnterior) {
+            const ultimaAudit = await tx.auditoria.findFirst({
+              where: { tuboId: d.tuboId, metadata: { path: ['entregaId'], equals: id } },
+              orderBy: { createdAt: 'desc' },
+            })
+            estadoAnterior = ultimaAudit?.estadoAnterior || 'CARGADO'
+          }
+
+          await tx.tubo.update({
+            where: { id: d.tuboId },
+            data: {
+              estado:    estadoAnterior,
+              clienteId: null,
+              ubicacion: 'Depósito',
+              camionId:  null
+            }
+          })
+
+          // Registrar auditoría de cancelación
+          await tx.auditoria.create({
+            data: {
+              tuboId:         d.tuboId,
+              usuarioId:      req.user.id,
+              accion:         `Entrega cancelada (Retorno a depósito)`,
+              estadoAnterior: 'RESERVADO',
+              estadoNuevo:    estadoAnterior,
+              observaciones:  `Entrega ${entrega.numero} cancelada. Motivo: ${motivo || 'No especificado'}`,
+              metadata:       { entregaId: id, numero: entrega.numero }
+            }
+          })
         }
-
-        // Revertir tubo a estado anterior, sin cliente asignado y ubicación depósito
-        await tx.tubo.update({
-          where: { id: d.tuboId },
-          data: {
-            estado:    estadoAnterior,
-            clienteId: null,
-            ubicacion: 'Depósito'
-          }
-        })
-
-        // Registrar auditoría de cancelación
-        await tx.auditoria.create({
-          data: {
-            tuboId:         d.tuboId,
-            usuarioId:      req.user.id,
-            accion:         `Entrega cancelada (Retorno a depósito)`,
-            estadoAnterior: 'RESERVADO',
-            estadoNuevo:    estadoAnterior,
-            observaciones:  `Entrega ${entrega.numero} cancelada. Motivo: ${motivo || 'No especificado'}`,
-            metadata:       { entregaId: id, numero: entrega.numero }
-          }
-        })
       }
 
       return entregaActualizada
     })
 
     res.json({ success: true, message: 'Entrega cancelada y cilindros devueltos correctamente', entrega: resultado })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ─── POST /api/entregas/:id/agregar-tubo ─────────────────────────────────────
+// Permite al repartidor (u operador) añadir un tubo extra a una entrega en tránsito (no confirmada)
+router.post('/:id/agregar-tubo', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), async (req, res, next) => {
+  try {
+    const { id } = req.params
+    const { tuboId, cantidadGas, unidadGas } = req.body
+
+    if (!tuboId) {
+      return res.status(400).json({ error: 'Debe especificar el tuboId' })
+    }
+
+    // 1. Obtener la entrega
+    const entrega = await prisma.entrega.findUnique({
+      where: { id },
+      include: { detalles: true }
+    })
+
+    if (!entrega) return res.status(404).json({ error: 'Entrega no encontrada' })
+    if (entrega.confirmada) return res.status(400).json({ error: 'No se puede modificar una entrega ya confirmada' })
+    if (entrega.cancelada) return res.status(400).json({ error: 'No se puede modificar una entrega cancelada' })
+
+    // Verificar si el tubo ya está en la entrega
+    if (entrega.detalles.some(d => d.tuboId === tuboId)) {
+      return res.status(400).json({ error: 'El tubo ya se encuentra en esta entrega' })
+    }
+
+    // 2. Obtener el tubo
+    const tubo = await prisma.tubo.findUnique({
+      where: { id: tuboId, activo: true }
+    })
+
+    if (!tubo) return res.status(404).json({ error: 'Tubo no encontrado o inactivo' })
+
+    // Estados permitidos para agregar
+    const estadosPermitidos = ['DISPONIBLE', 'CARGADO', 'RESERVADO']
+    if (!estadosPermitidos.includes(tubo.estado)) {
+      return res.status(400).json({ error: `El tubo no está disponible para entrega (Estado: ${tubo.estado})` })
+    }
+
+    const resultado = await prisma.$transaction(async (tx) => {
+      // 3. Determinar precio unitario y cantidad de gas
+      const tipoGas = mapTuboGasToTipoGas(tubo.gas)
+      const precioGasInfo = await tx.precioGas.findFirst({
+        where: { gas: tipoGas }
+      })
+
+      const precioUnitario = precioGasInfo ? Number(precioGasInfo.precioUnitario) : 0
+      let finalCantidadGas = 0
+      let finalUnidadGas = precioGasInfo ? precioGasInfo.unidad : 'KG'
+
+      if (cantidadGas !== undefined) {
+        finalCantidadGas = Number(cantidadGas)
+        if (unidadGas) finalUnidadGas = unidadGas
+      } else {
+        // Buscar última carga
+        const ultimaCarga = await tx.carga.findFirst({
+          where: { tuboId },
+          orderBy: { fechaCarga: 'desc' }
+        })
+        if (ultimaCarga) {
+          finalCantidadGas = Number(ultimaCarga.cantidad)
+          finalUnidadGas = ultimaCarga.unidad
+        }
+      }
+
+      const subtotal = finalCantidadGas * precioUnitario
+
+      // 4. Crear el detalle de la entrega
+      const nuevoDetalle = await tx.detalleEntrega.create({
+        data: {
+          entregaId: id,
+          tuboId,
+          cantidadGas: finalCantidadGas,
+          unidadGas: finalUnidadGas,
+          precioUnitario,
+          subtotal,
+          estadoAnterior: tubo.estado
+        },
+        include: {
+          tubo: {
+            select: {
+              id: true,
+              gas: true,
+              talla: true
+            }
+          }
+        }
+      })
+
+      // 5. Actualizar el tubo
+      await tx.tubo.update({
+        where: { id: tuboId },
+        data: {
+          estado: 'RESERVADO',
+          clienteId: entrega.clienteId,
+          ubicacion: 'En Tránsito'
+        }
+      })
+
+      // 6. Crear alquiler o venta si corresponde
+      if (entrega.tipoOperacion === 'ALQUILER') {
+        const numeroAlquiler = await generarNumero('AL', tx)
+        const fechaVencimiento = new Date()
+        fechaVencimiento.setDate(fechaVencimiento.getDate() + 30) // 30 días de plazo por defecto
+
+        await tx.alquiler.create({
+          data: {
+            numero: numeroAlquiler,
+            clienteId: entrega.clienteId,
+            tuboId,
+            entregaId: id,
+            fechaInicio: new Date(),
+            fechaVencimiento,
+            estado: 'ACTIVO'
+          }
+        })
+      }
+
+      if (entrega.tipoOperacion === 'VENTA') {
+        const numeroVenta = await generarNumero('V', tx)
+        await tx.venta.create({
+          data: {
+            numero: numeroVenta,
+            clienteId: entrega.clienteId,
+            tuboId
+          }
+        })
+      }
+
+      // 7. Registrar auditoría
+      await tx.auditoria.create({
+        data: {
+          tuboId,
+          usuarioId: req.user.id,
+          accion: `Tubo agregado a entrega en tránsito (${entrega.tipoOperacion})`,
+          estadoAnterior: tubo.estado,
+          estadoNuevo: 'RESERVADO',
+          metadata: { entregaId: id, numero: entrega.numero }
+        }
+      })
+
+      return nuevoDetalle
+    })
+
+    res.status(201).json({ message: 'Tubo agregado con éxito a la entrega', detalle: resultado })
   } catch (err) {
     next(err)
   }

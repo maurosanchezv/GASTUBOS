@@ -111,24 +111,40 @@ export default function CargasPage() {
     setForm(prev => ({ ...prev, tipoGas, unidad: TIPO_GAS_UNIDAD[tipoGas] || '' }))
   }
 
+  function abrirModalSalon() {
+    setTuboSeleccionado(null)
+    setForm({
+      ...FORM_INICIAL,
+      tuboId: '',
+      tipoGas: 'CO2',
+      unidad: 'KG',
+    })
+    setModal(true)
+  }
+
   async function handleSubmit() {
-    if (!form.tuboId || !form.tipoGas || !form.cantidad || !form.fechaCarga) {
+    if (tuboSeleccionado && !form.tuboId) {
+      toast('Completá los campos obligatorios', 'error')
+      return
+    }
+    if (!form.tipoGas || !form.cantidad || !form.fechaCarga) {
       toast('Completá los campos obligatorios', 'error')
       return
     }
     setSaving(true)
     try {
       await api.post('/cargas', {
-        tuboId:        form.tuboId,
+        tuboId:        tuboSeleccionado ? form.tuboId : undefined,
         tipoGas:       form.tipoGas,
         unidad:        form.unidad,
         cantidad:      Number(form.cantidad),
         fechaCarga:    new Date(form.fechaCarga).toISOString(),
         observaciones: form.observaciones || undefined,
       })
-      toast('Carga registrada — tubo pasó a estado CARGADO', 'success')
+      toast(tuboSeleccionado ? 'Carga registrada — tubo pasó a estado CARGADO' : 'Carga en salón registrada con éxito', 'success')
       setModal(false)
-      loadTubos()
+      if (tab === 'pendientes') loadTubos()
+      else loadHistorial()
     } catch (err) {
       toast(err.response?.data?.error || 'Error al registrar la carga', 'error')
     } finally { setSaving(false) }
@@ -143,6 +159,13 @@ export default function CargasPage() {
         subtitle={tab === 'pendientes'
           ? `${tubos.length} tubo${tubos.length !== 1 ? 's' : ''} para cargar`
           : `${total} registro${total !== 1 ? 's' : ''} en historial`}
+        actions={
+          (user?.rol === 'ADMIN' || user?.rol === 'OPERADOR') && (
+            <button className="btn btn-primary btn-sm" onClick={abrirModalSalon}>
+              <i className="ti ti-plus" /> Carga en salón
+            </button>
+          )
+        }
       />
 
       <div className="app-content">
@@ -317,8 +340,14 @@ export default function CargasPage() {
                         <tr key={c.id}>
                           <td style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{c.numero}</td>
                           <td>
-                            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600 }}>{c.tubo?.id}</div>
-                            <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{c.tubo?.serie}</div>
+                            {c.tubo ? (
+                              <>
+                                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600 }}>{c.tubo.id}</div>
+                                <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{c.tubo.serie}</div>
+                              </>
+                            ) : (
+                              <span style={{ fontSize: 12, fontStyle: 'italic', color: 'var(--text-muted)' }}>Carga en salón</span>
+                            )}
                           </td>
                           <td>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -357,7 +386,7 @@ export default function CargasPage() {
                       <div className="list-card-body">
                         <div className="list-card-item">
                           <span className="list-card-label">Tubo</span>
-                          <span className="list-card-value">{c.tubo?.id}</span>
+                          <span className="list-card-value">{c.tubo?.id || 'Carga en salón'}</span>
                         </div>
                         <div className="list-card-item">
                           <span className="list-card-label">Gas</span>
@@ -399,7 +428,7 @@ export default function CargasPage() {
       {/* Modal de carga */}
       <Modal
         open={modal}
-        title={`Registrar carga — ${tuboSeleccionado?.id}`}
+        title={tuboSeleccionado ? `Registrar carga — ${tuboSeleccionado.id}` : 'Registrar Carga en Salón'}
         onClose={() => setModal(false)}
         width={520}
         footer={

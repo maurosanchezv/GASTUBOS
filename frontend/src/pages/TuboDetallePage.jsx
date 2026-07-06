@@ -14,6 +14,105 @@ const GAS_LABELS = {
   MEZCLA_CO2_ARGON: 'Mezcla CO₂/Argón', ACETILENO: 'Acetileno',
 }
 
+// --- ESC/POS Binary Command Builder ---
+class EscPosBuilder {
+  constructor() {
+    this.buffer = [];
+  }
+
+  addBytes(bytes) {
+    if (Array.isArray(bytes)) {
+      this.buffer.push(...bytes);
+    } else {
+      this.buffer.push(bytes);
+    }
+    return this;
+  }
+
+  addText(text) {
+    const cleanText = text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/ñ/g, "n").replace(/Ñ/g, "N");
+    for (let i = 0; i < cleanText.length; i++) {
+      this.buffer.push(cleanText.charCodeAt(i));
+    }
+    return this;
+  }
+
+  addTextLine(text = '') {
+    this.addText(text);
+    this.buffer.push(13, 10); // CR, LF
+    return this;
+  }
+
+  initialize() {
+    return this.addBytes([0x1B, 0x40]);
+  }
+
+  alignCenter() {
+    return this.addBytes([0x1B, 0x61, 0x01]);
+  }
+
+  alignLeft() {
+    return this.addBytes([0x1B, 0x61, 0x00]);
+  }
+
+  alignRight() {
+    return this.addBytes([0x1B, 0x61, 0x02]);
+  }
+
+  boldOn() {
+    return this.addBytes([0x1B, 0x45, 0x01]);
+  }
+
+  boldOff() {
+    return this.addBytes([0x1B, 0x45, 0x00]);
+  }
+
+  doubleSizeOn() {
+    return this.addBytes([0x1D, 0x21, 0x11]);
+  }
+
+  doubleSizeOff() {
+    return this.addBytes([0x1D, 0x21, 0x00]);
+  }
+
+  feed(lines = 3) {
+    return this.addBytes([0x1B, 0x64, lines]);
+  }
+
+  addQRCode(data) {
+    // 1. Método Epson Estándar (GS ( k) - para impresoras de escritorio standard
+    this.addBytes([0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x43, 0x03]); // Tamaño 3
+    this.addBytes([0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x45, 0x30]); // ECC L
+    
+    const dataLength = data.length;
+    const totalLength = dataLength + 3;
+    const pL = totalLength % 256;
+    const pH = Math.floor(totalLength / 256);
+
+    this.addBytes([0x1D, 0x28, 0x6B, pL, pH, 0x31, 0x50, 0x30]);
+    for (let i = 0; i < dataLength; i++) {
+      this.buffer.push(data.charCodeAt(i));
+    }
+    this.addBytes([0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x51, 0x30]); // Imprimir
+
+    // 2. Método ESC Z (1B 5A) - utilizado por impresoras portátiles HPRT / Rongta / Genéricas
+    // Comando: ESC Z [m] [n] [k] [dL] [dH] [datos]
+    // m = 2 (QR code), n = 2 (ECC Level M), k = 4 (tamaño de módulo)
+    const dL = dataLength % 256;
+    const dH = Math.floor(dataLength / 256);
+    this.addBytes([0x1B, 0x5A, 0x02, 0x02, 0x04, dL, dH]);
+    for (let i = 0; i < dataLength; i++) {
+      this.buffer.push(data.charCodeAt(i));
+    }
+
+    return this;
+  }
+
+  getBuffer() {
+    return new Uint8Array(this.buffer);
+  }
+}
+
 export default function TuboDetallePage() {
   const { id }       = useParams()
   const [params]     = useSearchParams()
@@ -28,10 +127,173 @@ export default function TuboDetallePage() {
   const [qrModal,     setQrModal]     = useState(false)
   const [nuevoEstado, setNuevoEstado] = useState('')
   const [obsEstado,   setObsEstado]   = useState('')
+  const [clientes, setClientes] = useState([])
+  const [clienteIdReserva, setClienteIdReserva] = useState('')
 
-  const tuboUrl = `${window.location.origin}/tubos/${id}`
+  // Impresión Bluetooth
+  const [printerModalOpen, setPrinterModalOpen] = useState(false)
+  const [pairedDevices, setPairedDevices] = useState([])
+  const [connectingPrinter, setConnectingPrinter] = useState(false)
+  const [selectedDeviceAddress, setSelectedDeviceAddress] = useState('')
 
-  const handlePrint = useReactToPrint({ content: () => printRef.current })
+  const buscarImpresoras = () => {
+    if (!window.bluetoothSerial) {
+      toast('Bluetooth no disponible en este dispositivo', 'error')
+      return
+    }
+    setConnectingPrinter(true)
+    setPrinterModalOpen(true)
+    window.bluetoothSerial.list(
+      (devices) => {
+        setPairedDevices(devices)
+        setConnectingPrinter(false)
+        const autoDevice = devices.find(d => d.name && d.name.toUpperCase().includes('HM-A300'))
+        if (autoDevice) {
+          setSelectedDeviceAddress(autoDevice.address || autoDevice.id)
+        }
+      },
+      (err) => {
+        toast('Error al buscar dispositivos: ' + err, 'error')
+        setConnectingPrinter(false)
+      }
+    )
+  }
+
+  const imprimirTuboBluetooth = (t, deviceAddress) => {
+    if (!window.bluetoothSerial) return
+    if (!deviceAddress) {
+      toast('Por favor, selecciona una impresora', 'warning')
+      return
+    }
+    setConnectingPrinter(true)
+    
+    window.bluetoothSerial.connect(
+      deviceAddress,
+      () => {
+        try {
+          const clean = (str) => {
+            if (!str) return ''
+            return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/ñ/g, "n").replace(/Ñ/g, "N")
+          }
+
+          const gasDesc = clean(`${t.gas} - Talla: ${t.talla || '—'}`)
+          const capDesc = clean(`Capacidad: ${t.capacidadLitros ? `${t.capacidadLitros}L` : `${Number(t.capacidadKg || 0)}kg`}`)
+          const ownerDesc = clean(t.propietario === 'CLIENTE' ? `PROPIETARIO: CLIENTE - ${t.cliente?.nombre || 'Desconocido'}` : 'PROPIETARIO: PROPIO')
+          const nroSerie = t.serie ? clean(`Nro Serie: ${t.serie}`) : ''
+
+          // El ancho de etiqueta para 80mm es de 640 dots a 203 dpi
+          // Altura total de etiqueta: 640 dots (aprox 80mm) para que sea cuadrada
+          let cpcl = '';
+          cpcl += '! 0 200 200 640 1\r\n'; // Header (offset, horizontal dpi, vertical dpi, height, qty)
+          cpcl += 'PAGE-WIDTH 640\r\n';
+          
+          // Título (inicia en y=50 para dejar margen arriba)
+          cpcl += 'ALIGN CENTER\r\n';
+          cpcl += 'SETBOLD 1\r\n';
+          cpcl += 'TEXT 4 0 0 50 ETIQUETA DE CILINDRO\r\n';
+          cpcl += 'SETBOLD 0\r\n';
+          
+          // ID del tubo (Grande, y=95)
+          cpcl += 'SETMAG 2 2\r\n';
+          cpcl += `TEXT 4 0 0 95 ${clean(t.id)}\r\n`;
+          cpcl += 'SETMAG 1 1\r\n';
+          
+          // Detalles (alineados a la izquierda con un margen de 20 dots)
+          cpcl += 'ALIGN LEFT\r\n';
+          cpcl += `TEXT 4 0 20 170 ${gasDesc}\r\n`;
+          cpcl += `TEXT 4 0 20 200 ${capDesc}\r\n`;
+          
+          let nextY = 230;
+          if (nroSerie) {
+            cpcl += `TEXT 4 0 20 ${nextY} ${nroSerie}\r\n`;
+            nextY += 30;
+          }
+          cpcl += `TEXT 4 0 20 ${nextY} ${ownerDesc}\r\n`;
+          nextY += 40; // Espaciado cómodo antes del QR
+          
+          // Código QR grande (U 8, tamaño módulo = 8, ancho aprox 264 dots)
+          // x=188 centra el código en el ancho de 640 dots ((640 - 264) / 2 = 188)
+          cpcl += 'ALIGN CENTER\r\n';
+          cpcl += `B QR 188 ${nextY} M 2 U 8\r\n`;
+          cpcl += `${tuboUrl}\r\n`;
+          cpcl += 'ENDQR\r\n';
+          nextY += 270; // Espaciado para el tamaño del QR (33 * 8 = 264 dots)
+          
+          // Texto de URL abajo
+          cpcl += 'ALIGN CENTER\r\n';
+          cpcl += `TEXT 4 0 0 ${nextY} ${clean(tuboUrl).slice(0, 48)}\r\n`;
+          if (clean(tuboUrl).length > 48) {
+            cpcl += `TEXT 4 0 0 ${nextY + 20} ${clean(tuboUrl).slice(48)}\r\n`;
+          }
+
+          cpcl += 'PRINT\r\n';
+
+          // Convertir string de CPCL a Uint8Array
+          const encoder = new TextEncoder();
+          const binaryBuffer = encoder.encode(cpcl);
+          
+          window.bluetoothSerial.write(
+            binaryBuffer,
+            () => {
+              toast('Etiqueta enviada correctamente', 'success')
+              setConnectingPrinter(false)
+              setPrinterModalOpen(false)
+              window.bluetoothSerial.disconnect()
+            },
+            (err) => {
+              toast('Error al enviar a impresora: ' + err, 'error')
+              setConnectingPrinter(false)
+              window.bluetoothSerial.disconnect()
+            }
+          )
+        } catch (e) {
+          toast('Error de formato: ' + e.message, 'error')
+          setConnectingPrinter(false)
+          window.bluetoothSerial.disconnect()
+        }
+      },
+      (err) => {
+        toast('No se pudo conectar a la impresora', 'error')
+        setConnectingPrinter(false)
+      }
+    )
+  }
+
+  useEffect(() => {
+    api.get('/clientes')
+      .then(res => setClientes(res.data))
+      .catch(() => {})
+  }, [])
+
+  const getPublicTuboUrl = () => {
+    const apiUrl = import.meta.env.VITE_API_URL || '';
+    if (apiUrl.startsWith('http')) {
+      const base = apiUrl.replace('/api', '');
+      return `${base}/tubos/${id}`;
+    }
+    return `${window.location.origin}/tubos/${id}`;
+  };
+  const tuboUrl = getPublicTuboUrl();
+
+  const handlePrint = useReactToPrint({
+    content: () => printRef.current,
+    pageStyle: `
+      @page {
+        size: 80mm auto;
+        margin: 0mm;
+      }
+      @media print {
+        html, body {
+          margin: 0 !important;
+          padding: 0 !important;
+          height: auto !important;
+          background: #fff;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+      }
+    `
+  })
 
   useEffect(() => { load() }, [id])
   
@@ -59,10 +321,14 @@ export default function TuboDetallePage() {
     if (!nuevoEstado) return
     setSaving(true)
     try {
-      await api.post(`/tubos/${id}/cambiar-estado`, { estadoNuevo: nuevoEstado, observaciones: obsEstado })
+      await api.post(`/tubos/${id}/cambiar-estado`, {
+        estadoNuevo: nuevoEstado,
+        observaciones: obsEstado,
+        clienteId: nuevoEstado === 'RESERVADO' ? (clienteIdReserva || null) : null
+      })
       toast('Estado actualizado', 'success')
       setCambioModal(false)
-      setNuevoEstado(''); setObsEstado('')
+      setNuevoEstado(''); setObsEstado(''); setClienteIdReserva('')
       load()
     } catch (err) {
       toast(err.response?.data?.error || 'Error al cambiar estado', 'error')
@@ -83,7 +349,7 @@ export default function TuboDetallePage() {
     <>
       <PageHeader
         title={tubo.id}
-        subtitle={`${tubo.gas} · ${tubo.capacidadLitros}L · ${tubo.talla}`}
+        subtitle={`${tubo.gas} · ${tubo.capacidadLitros ? `${tubo.capacidadLitros}L` : `${Number(tubo.capacidadKg)} kg`} · ${tubo.talla}`}
         actions={
           <>
             <button className="btn btn-sm" onClick={() => navigate('/tubos')}>
@@ -120,7 +386,7 @@ export default function TuboDetallePage() {
                   ['Código interno', tubo.id],
                   ['Número de serie', tubo.serie],
                   ['Tipo de gas', tubo.gas],
-                  ['Capacidad', `${tubo.capacidadLitros}L`],
+                  ['Capacidad', tubo.capacidadLitros ? `${tubo.capacidadLitros}L` : `${Number(tubo.capacidadKg)} kg`],
                   ['Talla', tubo.talla],
                   ['Peso', tubo.pesoKg ? `${tubo.pesoKg} kg` : '—'],
                   ['Propietario', tubo.propietario],
@@ -298,30 +564,52 @@ export default function TuboDetallePage() {
               <div className="card-title" style={{ marginBottom: 14 }}>Código QR</div>
 
               {/* Printable label */}
-              <div ref={printRef} style={{ padding: 8 }}>
+              <div ref={printRef} style={{ width: '74mm', maxWidth: '100%', padding: '10px', boxSizing: 'border-box', textAlign: 'center', margin: '0 auto', background: '#fff' }}>
                 <div style={{
                   border: '2px solid #000', borderRadius: 8,
-                  padding: 14, display: 'inline-block',
+                  padding: 12, display: 'block',
                   fontFamily: 'var(--font-mono)',
+                  background: '#fff'
                 }}>
-                  <QRCodeSVG value={tuboUrl} size={140} level="M" />
-                  <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700 }}>{tubo.id}</div>
-                  <div style={{ fontSize: 10 }}>{tubo.gas} · {tubo.capacidadLitros}L</div>
+                  <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
+                    <QRCodeSVG value={tuboUrl} size={150} level="M" />
+                  </div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: '#000' }}>{tubo.id}</div>
+                  <div style={{ fontSize: 10, color: '#000', marginTop: 2 }}>{tubo.gas} · {tubo.capacidadLitros ? `${tubo.capacidadLitros} L` : `${Number(tubo.capacidadKg)} kg`}</div>
+                  <div style={{ fontSize: 10, fontWeight: 'bold', marginTop: 4, color: '#000' }}>
+                    {tubo.propietario === 'CLIENTE' ? `CLIENTE - ${tubo.cliente?.nombre || 'Desconocido'}` : 'PROPIO'}
+                  </div>
                 </div>
               </div>
 
               <div style={{ fontSize: 11, color: 'var(--text-muted)', margin: '10px 0 14px', wordBreak: 'break-all' }}>
                 {tuboUrl}
               </div>
-              {window.Capacitor || window.innerWidth < 768 ? (
-                <button className="btn btn-primary" style={{ width: '100%' }} onClick={() => setQrModal(true)}>
-                  <i className="ti ti-qrcode" /> Ampliar código QR
-                </button>
-              ) : (
-                <button className="btn btn-primary" style={{ width: '100%' }} onClick={handlePrint}>
-                  <i className="ti ti-printer" /> Imprimir etiqueta
-                </button>
-              )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {window.Capacitor || window.innerWidth < 768 ? (
+                  <>
+                    <button className="btn btn-secondary" style={{ width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }} onClick={() => setQrModal(true)}>
+                      <i className="ti ti-qrcode" /> Ampliar código QR
+                    </button>
+                    {(window.Capacitor || window.bluetoothSerial) && (
+                      <button className="btn btn-primary" style={{ width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }} onClick={buscarImpresoras}>
+                        <i className="ti ti-printer" /> Imprimir etiqueta (Bluetooth)
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <button className="btn btn-primary" style={{ width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }} onClick={handlePrint}>
+                      <i className="ti ti-printer" /> Imprimir etiqueta (PC)
+                    </button>
+                    {window.bluetoothSerial && (
+                      <button className="btn btn-secondary" style={{ width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }} onClick={buscarImpresoras}>
+                        <i className="ti ti-printer" /> Imprimir (Bluetooth)
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
 
 
@@ -379,6 +667,16 @@ export default function TuboDetallePage() {
             {transiciones.map(s => <option key={s} value={s}>{s.replace('_',' ')}</option>)}
           </select>
         </FormGroup>
+        {nuevoEstado === 'RESERVADO' && (
+          <FormGroup label="Reservar para cliente" required>
+            <select value={clienteIdReserva} onChange={e => setClienteIdReserva(e.target.value)}>
+              <option value="">Seleccionar cliente...</option>
+              {clientes.map(c => (
+                <option key={c.id} value={c.id}>{c.nombre}</option>
+              ))}
+            </select>
+          </FormGroup>
+        )}
         <FormGroup label="Observación">
           <textarea
             value={obsEstado}
@@ -420,7 +718,10 @@ export default function TuboDetallePage() {
               {tubo.id}
             </div>
             <div style={{ fontSize: 11, textAlign: 'center', color: 'var(--text-secondary)', marginTop: 2 }}>
-              {tubo.gas} · {tubo.capacidadLitros}L
+              {tubo.gas} · {tubo.capacidadLitros ? `${tubo.capacidadLitros}L` : `${Number(tubo.capacidadKg)} kg`}
+            </div>
+            <div style={{ fontSize: 11, textAlign: 'center', fontWeight: 'bold', color: '#000', marginTop: 4 }}>
+              {tubo.propietario === 'CLIENTE' ? `CLIENTE - ${tubo.cliente?.nombre || 'Desconocido'}` : 'PROPIO'}
             </div>
           </div>
           
@@ -430,6 +731,96 @@ export default function TuboDetallePage() {
           <div style={{ fontSize: 10, color: 'var(--text-muted)', wordBreak: 'break-all', fontFamily: 'var(--font-mono)' }}>
             {tuboUrl}
           </div>
+        </div>
+      </Modal>
+
+      {/* Modal para selección de Impresora Bluetooth (HM-A300E) */}
+      <Modal
+        open={printerModalOpen}
+        title="Impresoras Bluetooth Vinculadas"
+        onClose={() => setPrinterModalOpen(false)}
+        footer={
+          <div style={{ display: 'flex', gap: 10, width: '100%' }}>
+            <button 
+              className="btn btn-secondary" 
+              onClick={() => setPrinterModalOpen(false)}
+              style={{ flex: 1 }}
+            >
+              Cancelar
+            </button>
+            <button
+              className="btn btn-primary"
+              onClick={() => imprimirTuboBluetooth(tubo, selectedDeviceAddress)}
+              disabled={connectingPrinter || !selectedDeviceAddress}
+              style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+            >
+              {connectingPrinter ? <Spinner size="sm" /> : <i className="ti ti-printer" />}
+              Imprimir Etiqueta
+            </button>
+          </div>
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>
+            Asegúrate de que la impresora <strong>HM-A300E</strong> esté encendida y vinculada en los Ajustes de Bluetooth de tu celular.
+          </p>
+
+          {connectingPrinter && pairedDevices.length === 0 ? (
+            <div style={{ padding: '20px 0', textAlign: 'center' }}>
+              <Spinner />
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>Buscando dispositivos vinculados...</div>
+            </div>
+          ) : pairedDevices.length === 0 ? (
+            <div style={{ padding: '20px 0', textAlign: 'center', border: '1px dashed var(--border)', borderRadius: 8 }}>
+              <i className="ti ti-bluetooth-off" style={{ fontSize: 24, color: 'var(--text-muted)' }} />
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 8 }}>No se encontraron impresoras vinculadas.</div>
+              <button 
+                className="btn btn-sm btn-secondary" 
+                onClick={buscarImpresoras}
+                style={{ marginTop: 10 }}
+              >
+                Buscar de nuevo
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 200, overflowY: 'auto' }}>
+              {pairedDevices.map(device => {
+                const esHMA300 = device.name && device.name.toUpperCase().includes('HM-A300')
+                const esSeleccionado = selectedDeviceAddress === (device.address || device.id)
+                return (
+                  <div
+                    key={device.address || device.id}
+                    onClick={() => setSelectedDeviceAddress(device.address || device.id)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '12px 14px',
+                      borderRadius: 8,
+                      border: `1px solid ${esSeleccionado ? 'var(--blue)' : 'var(--border)'}`,
+                      background: esSeleccionado ? 'var(--blue-light)' : 'var(--surface-2)',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s'
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: esSeleccionado ? 600 : 500, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <i className="ti ti-bluetooth" style={{ color: esHMA300 ? 'var(--blue)' : 'var(--text-muted)' }} />
+                        {device.name || 'Dispositivo sin nombre'}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                        {device.address || device.id}
+                      </div>
+                    </div>
+                    <i 
+                      className={`ti ${esSeleccionado ? 'ti-circle-dot' : 'ti-circle'}`} 
+                      style={{ color: esSeleccionado ? 'var(--blue)' : 'var(--text-muted)', fontSize: 18 }} 
+                    />
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       </Modal>
     </>

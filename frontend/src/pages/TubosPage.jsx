@@ -9,8 +9,8 @@ const ESTADOS = ['DISPONIBLE','CARGADO','VACIO','ENTREGADO','ALQUILADO','VENDIDO
 const GASES   = ['CO2','Oxígeno','Argón','Nitrógeno','Acetileno','Mezcla Ar+CO2','Mezcla especial']
 
 const EMPTY_TUBO = {
-  serie: '', gas: 'CO2', capacidadLitros: 50, talla: 'T50',
-  pesoKg: '', propietario: 'PROPIO', estado: 'DISPONIBLE',
+  serie: '', gas: 'CO2', capacidadLitros: 50, capacidadKg: '', talla: 'T50',
+  pesoKg: '', propietario: 'PROPIO', propietarioClienteId: '', estado: 'DISPONIBLE',
   ubicacion: 'Depósito A', fechaCompra: '', observaciones: '',
 }
 
@@ -24,8 +24,15 @@ export default function TubosPage() {
   const [q,       setQ]       = useState('')
   const [params]  = useSearchParams()
   const [estadoFilter, setEstadoFilter] = useState(params.get('estado') || '')
+  const [clientes, setClientes] = useState([])
   const navigate  = useNavigate()
   const { toast } = useToast()
+
+  useEffect(() => {
+    api.get('/clientes')
+      .then(res => setClientes(res.data))
+      .catch(() => {})
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -41,14 +48,25 @@ export default function TubosPage() {
 
   const handleCreate = async (e) => {
     e.preventDefault()
+
+    if (form.propietario === 'CLIENTE' && !form.propietarioClienteId) {
+      toast('Debe seleccionar un cliente propietario', 'error')
+      return
+    }
+
     setSaving(true)
     try {
-      await api.post('/tubos', {
+      const isAcetileno = form.gas.toLowerCase() === 'acetileno'
+      const payload = {
         ...form,
-        capacidadLitros: Number(form.capacidadLitros),
+        capacidadLitros: isAcetileno ? undefined : Number(form.capacidadLitros),
+        capacidadKg: isAcetileno ? Number(form.capacidadKg) : undefined,
         pesoKg: form.pesoKg ? Number(form.pesoKg) : undefined,
         fechaCompra: form.fechaCompra ? new Date(form.fechaCompra).toISOString() : undefined,
-      })
+        propietarioClienteId: form.propietario === 'CLIENTE' ? form.propietarioClienteId : undefined,
+      }
+
+      await api.post('/tubos', payload)
       toast('Tubo creado correctamente', 'success')
       setModal(false)
       setForm(EMPTY_TUBO)
@@ -56,6 +74,17 @@ export default function TubosPage() {
     } catch (err) {
       toast(err.response?.data?.error || 'Error al crear tubo', 'error')
     } finally { setSaving(false) }
+  }
+
+  const handleGasChange = (e) => {
+    const val = e.target.value
+    const isAcetileno = val.toLowerCase() === 'acetileno'
+    setForm(prev => ({
+      ...prev,
+      gas: val,
+      capacidadLitros: isAcetileno ? '' : 50,
+      capacidadKg: isAcetileno ? 1 : '',
+    }))
   }
 
   const f = (k) => (e) => setForm(prev => ({ ...prev, [k]: e.target.value }))
@@ -130,7 +159,9 @@ export default function TubosPage() {
                             <GasDot gas={t.gas} /> {t.gas}
                           </span>
                         </td>
-                        <td style={{ color: 'var(--text-secondary)' }}>{t.capacidadLitros}L</td>
+                        <td style={{ color: 'var(--text-secondary)' }}>
+                          {t.capacidadLitros ? `${t.capacidadLitros}L` : `${Number(t.capacidadKg)} kg`}
+                        </td>
                         <td><StateBadge estado={t.estado} /></td>
                         <td>
                           <span className={`badge badge-${t.propietario}`}>{t.propietario}</span>
@@ -171,7 +202,7 @@ export default function TubosPage() {
                       <div className="list-card-item">
                         <span className="list-card-label">Gas / Capacidad</span>
                         <span className="list-card-value">
-                          <GasDot gas={t.gas} /> {t.gas} · {t.capacidadLitros}L
+                          <GasDot gas={t.gas} /> {t.gas} · {t.capacidadLitros ? `${t.capacidadLitros}L` : `${Number(t.capacidadKg)} kg`}
                         </span>
                       </div>
                       <div className="list-card-item">
@@ -219,17 +250,28 @@ export default function TubosPage() {
               <input value={form.serie} onChange={f('serie')} placeholder="SN-2025-001" required />
             </FormGroup>
             <FormGroup label="Tipo de gas" required>
-              <select value={form.gas} onChange={f('gas')}>
+              <select value={form.gas} onChange={handleGasChange}>
                 {GASES.map(g => <option key={g}>{g}</option>)}
               </select>
             </FormGroup>
-            <FormGroup label="Capacidad (litros)" required>
-              <select value={form.capacidadLitros} onChange={f('capacidadLitros')}>
-                <option value={8}>8 L</option>
-                <option value={10}>10 L</option>
-                <option value={50}>50 L</option>
-              </select>
-            </FormGroup>
+            {form.gas.toLowerCase() === 'acetileno' ? (
+              <FormGroup label="Capacidad (kg)" required>
+                <select value={form.capacidadKg} onChange={f('capacidadKg')}>
+                  <option value="">Seleccionar...</option>
+                  {[1, 1.2, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 7, 8].map(kg => (
+                    <option key={kg} value={kg}>{kg} kg</option>
+                  ))}
+                </select>
+              </FormGroup>
+            ) : (
+              <FormGroup label="Capacidad (litros)" required>
+                <select value={form.capacidadLitros} onChange={f('capacidadLitros')}>
+                  <option value={8}>8 L</option>
+                  <option value={10}>10 L</option>
+                  <option value={50}>50 L</option>
+                </select>
+              </FormGroup>
+            )}
             <FormGroup label="Talla">
               <input value={form.talla} onChange={f('talla')} placeholder="T50" />
             </FormGroup>
@@ -247,6 +289,16 @@ export default function TubosPage() {
                 <option value="CLIENTE">Cliente</option>
               </select>
             </FormGroup>
+            {form.propietario === 'CLIENTE' && (
+              <FormGroup label="Cliente Propietario" required>
+                <select value={form.propietarioClienteId} onChange={f('propietarioClienteId')} required>
+                  <option value="">Seleccionar cliente...</option>
+                  {clientes.map(c => (
+                    <option key={c.id} value={c.id}>{c.nombre} (RUC: {c.ruc})</option>
+                  ))}
+                </select>
+              </FormGroup>
+            )}
             <FormGroup label="Fecha de compra">
               <input type="date" value={form.fechaCompra} onChange={f('fechaCompra')} />
             </FormGroup>

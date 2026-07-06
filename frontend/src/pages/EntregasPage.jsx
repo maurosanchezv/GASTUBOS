@@ -27,6 +27,15 @@ const EMPTY = {
   costoDelivery: '',
 }
 
+// URL pública de la remisión que codifica el QR del ticket. Al escanearla (con
+// login) abre la página de detalle /remision/:numero. Misma lógica que en la app
+// del repartidor, para que ambos QR abran la misma página.
+function getRemisionUrl(numero) {
+  const apiUrl = import.meta.env.VITE_API_URL || ''
+  const base = apiUrl.startsWith('http') ? apiUrl.replace('/api', '') : window.location.origin
+  return `${base}/remision/${numero}`
+}
+
 export default function EntregasPage() {
   const [params] = useSearchParams()
   const { toast } = useToast()
@@ -400,7 +409,9 @@ export default function EntregasPage() {
         defaultCant = Number(r.data.cargas[0].cantidad)
         defaultUnidad = r.data.cargas[0].unidad
       } else {
-        defaultCant = r.data.capacidadLitros || 0
+        defaultCant = r.data.capacidadKg ? Number(r.data.capacidadKg) : (r.data.capacidadLitros || 0)
+        const gasNorm = r.data.gas?.toLowerCase() || ''
+        defaultUnidad = (gasNorm.includes('oxigeno') || gasNorm.includes('argon') || gasNorm.includes('nitrogeno') || gasNorm.includes('aire') || gasNorm.includes('mezcla')) ? 'M3' : 'KG'
       }
 
       setForm(f => ({ 
@@ -730,7 +741,7 @@ export default function EntregasPage() {
                               <div style={{ flex: 1, minWidth: 0 }}>
                                 <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600 }}>{t.id}</div>
                                 <div style={{ fontSize: 11, color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                  {t.gas} · {t.capacidadLitros}L
+                                  {t.gas} · {t.capacidadLitros ? `${t.capacidadLitros}L` : `${Number(t.capacidadKg)} kg`}
                                   {t.cliente ? <span style={{ color: 'var(--text-muted)' }}> · {t.cliente.nombre}</span> : ''}
                                 </div>
                               </div>
@@ -1172,12 +1183,27 @@ export default function EntregasPage() {
             </table>
 
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: '14px 0', borderTop: '1px dashed #ddd', paddingTop: '10px' }}>
-              <QRCodeSVG value={entregaSeleccionada.numero} size={80} level="M" />
+              <QRCodeSVG value={getRemisionUrl(entregaSeleccionada.numero)} size={80} level="M" />
               <span style={{ fontSize: '9px', color: '#666', marginTop: '4px', fontFamily: 'monospace' }}>
                 {entregaSeleccionada.numero}
               </span>
             </div>
             
+            {entregaSeleccionada.recambios && entregaSeleccionada.recambios.length > 0 && (
+              <div style={{ margin: '8px 0', fontSize: '10px', borderTop: '1px dashed #ddd', paddingTop: '6px' }}>
+                <strong style={{ display: 'block', marginBottom: 4 }}>Recambios Recibidos:</strong>
+                <ul style={{ paddingLeft: 14, margin: 0, color: '#555' }}>
+                  {entregaSeleccionada.recambios.map(r => {
+                    const tubo = r.tuboEntregado
+                    const desc = tubo.observaciones && (tubo.observaciones.includes(' ') || tubo.observaciones.length > 15)
+                      ? tubo.observaciones 
+                      : `${tubo.id} (${tubo.gas} ${tubo.talla || ''})`
+                    return <li key={r.id}>{desc}</li>
+                  })}
+                </ul>
+              </div>
+            )}
+
             {entregaSeleccionada.observaciones && (
               <div style={{ margin: '8px 0', fontSize: '10px', fontStyle: 'italic', borderTop: '1px dashed #ddd', paddingTop: '6px', color: '#555' }}>
                 <strong>Obs:</strong> {entregaSeleccionada.observaciones}
@@ -1258,12 +1284,27 @@ export default function EntregasPage() {
           </table>
 
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: '12px 0', borderTop: '1px dashed #000', paddingTop: '8px' }}>
-            <QRCodeSVG value={entregaSeleccionada.numero} size={80} level="M" />
+            <QRCodeSVG value={getRemisionUrl(entregaSeleccionada.numero)} size={80} level="M" />
             <span style={{ fontSize: '9px', marginTop: '2px', fontFamily: 'monospace' }}>
               {entregaSeleccionada.numero}
             </span>
           </div>
           
+          {entregaSeleccionada.recambios && entregaSeleccionada.recambios.length > 0 && (
+            <div style={{ margin: '8px 0', fontSize: '10px', borderTop: '1px dashed #000', paddingTop: '4px' }}>
+              <strong>Recambios Recibidos:</strong>
+              <ul style={{ paddingLeft: 14, margin: 0 }}>
+                {entregaSeleccionada.recambios.map(r => {
+                  const tubo = r.tuboEntregado
+                  const desc = tubo.observaciones && (tubo.observaciones.includes(' ') || tubo.observaciones.length > 15)
+                    ? tubo.observaciones 
+                    : `${tubo.id} (${tubo.gas} ${tubo.talla || ''})`
+                  return <li key={r.id}>{desc}</li>
+                })}
+              </ul>
+            </div>
+          )}
+
           {entregaSeleccionada.observaciones && (
             <div style={{ margin: '8px 0', fontSize: '10px', fontStyle: 'italic', borderTop: '1px dashed #000', paddingTop: '4px' }}>
               <strong>Obs:</strong> {entregaSeleccionada.observaciones}

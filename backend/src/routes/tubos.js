@@ -16,15 +16,38 @@ router.use(requireAuth)
 const tuboSchema = z.object({
   serie:            z.string().min(1),
   gas:              z.string().min(1),
-  capacidadLitros:  z.number().int().positive(),
+  capacidadLitros:  z.number().int().positive().optional().nullable(),
+  capacidadKg:      z.number().positive().optional().nullable(),
   talla:            z.string().min(1),
   pesoKg:           z.number().positive().optional(),
   propietario:      z.enum(['PROPIO', 'CLIENTE']).default('PROPIO'),
-  propietarioClienteId: z.string().optional(),
-  fechaCompra:      z.string().datetime().optional(),
+  propietarioClienteId: z.string().optional().nullable(),
+  fechaCompra:      z.string().datetime().optional().nullable(),
   ubicacion:        z.string().optional(),
   observaciones:    z.string().optional(),
   estado:           z.enum(['DISPONIBLE','CARGADO','VACIO']).default('DISPONIBLE'),
+}).refine(data => {
+  if (data.propietario === 'CLIENTE' && !data.propietarioClienteId) {
+    return false
+  }
+  return true
+}, {
+  message: "Debe seleccionar un cliente si el tubo es propiedad de un cliente",
+  path: ["propietarioClienteId"]
+}).refine(data => {
+  const isAcetileno = data.gas.toLowerCase() === 'acetileno'
+  if (isAcetileno) {
+    if (data.capacidadLitros) return false
+    const allowedSizes = [1, 1.2, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 7, 8]
+    if (!data.capacidadKg || !allowedSizes.includes(data.capacidadKg)) return false
+  } else {
+    if (!data.capacidadLitros) return false
+    if (data.capacidadKg) return false
+  }
+  return true
+}, {
+  message: "Configuración de capacidad incorrecta para el tipo de gas",
+  path: ["capacidadLitros"]
 })
 
 // ─── GET /api/tubos ───────────────────────────────────────────────────────────
@@ -34,7 +57,15 @@ router.get('/', async (req, res, next) => {
     const where = { activo: true }
     if (estado)      where.estado      = estado
     if (disponibles === 'true') {
-      where.estado = { in: ['DISPONIBLE', 'CARGADO'] }
+      where.estado = { in: ['DISPONIBLE', 'CARGADO', 'RESERVADO'] }
+      where.detallesEntrega = {
+        none: {
+          entrega: {
+            confirmada: false,
+            cancelada: false
+          }
+        }
+      }
     }
     if (gas)         where.gas         = { contains: gas, mode: 'insensitive' }
     if (propietario) where.propietario = propietario
@@ -153,11 +184,12 @@ router.patch('/:id', requireRol('ADMIN', 'OPERADOR'), async (req, res, next) => 
 const cambioEstadoSchema = z.object({
   estadoNuevo:   z.string(),
   observaciones: z.string().optional(),
+  clienteId:     z.string().optional().nullable(),
 })
 
 router.post('/:id/cambiar-estado', async (req, res, next) => {
   try {
-    const { estadoNuevo, observaciones } = cambioEstadoSchema.parse(req.body)
+    const { estadoNuevo, observaciones, clienteId } = cambioEstadoSchema.parse(req.body)
     const tubo = await prisma.tubo.findUnique({ where: { id: req.params.id } })
     if (!tubo) return res.status(404).json({ error: 'Tubo no encontrado' })
 
@@ -170,9 +202,19 @@ router.post('/:id/cambiar-estado', async (req, res, next) => {
       })
     }
 
+    const updateData = { estado: estadoNuevo }
+    if (clienteId !== undefined) {
+      updateData.clienteId = clienteId
+      if (estadoNuevo === 'RESERVADO' && clienteId) {
+        updateData.ubicacion = 'Reservado'
+      } else if (!clienteId) {
+        updateData.ubicacion = 'Depósito'
+      }
+    }
+
     const actualizado = await prisma.tubo.update({
       where: { id: req.params.id },
-      data:  { estado: estadoNuevo },
+      data:  updateData,
     })
 
     await registrarAuditoria({

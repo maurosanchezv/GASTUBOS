@@ -12,7 +12,7 @@ const router = Router()
 router.use(requireAuth)
 
 const cargaSchema = z.object({
-  tuboId:        z.string().min(1),
+  tuboId:        z.string().min(1).optional().nullable(),
   tipoGas:       z.enum(['CO2','OXIGENO','ARGON','NITROGENO','AIRE_COMPRIMIDO','MEZCLA_CO2_ARGON','ACETILENO']),
   unidad:        z.enum(['KG','M3']),
   cantidad:      z.number().positive(),
@@ -70,13 +70,16 @@ router.post('/', requireRol('ADMIN', 'OPERADOR'), async (req, res, next) => {
   try {
     const data = cargaSchema.parse(req.body)
 
-    const tubo = await prisma.tubo.findUnique({ where: { id: data.tuboId, activo: true } })
-    if (!tubo) return res.status(404).json({ error: 'Tubo no encontrado' })
+    let tubo = null
+    if (data.tuboId) {
+      tubo = await prisma.tubo.findUnique({ where: { id: data.tuboId, activo: true } })
+      if (!tubo) return res.status(404).json({ error: 'Tubo no encontrado' })
 
-    if (!TRANSICIONES_VALIDAS[tubo.estado]?.includes('CARGADO')) {
-      return res.status(400).json({
-        error: `No se puede cargar un tubo en estado ${tubo.estado}`,
-      })
+      if (!TRANSICIONES_VALIDAS[tubo.estado]?.includes('CARGADO')) {
+        return res.status(400).json({
+          error: `No se puede cargar un tubo en estado ${tubo.estado}`,
+        })
+      }
     }
 
     const numero = await generarNumero('CG')
@@ -85,7 +88,7 @@ router.post('/', requireRol('ADMIN', 'OPERADOR'), async (req, res, next) => {
       const nueva = await tx.carga.create({
         data: {
           numero,
-          tuboId:        data.tuboId,
+          tuboId:        data.tuboId || null,
           tipoGas:       data.tipoGas,
           unidad:        data.unidad,
           cantidad:      data.cantidad,
@@ -99,23 +102,27 @@ router.post('/', requireRol('ADMIN', 'OPERADOR'), async (req, res, next) => {
         },
       })
 
-      await tx.tubo.update({
-        where: { id: data.tuboId },
-        data:  { estado: 'CARGADO' },
-      })
+      if (data.tuboId) {
+        await tx.tubo.update({
+          where: { id: data.tuboId },
+          data:  { estado: 'CARGADO' },
+        })
+      }
 
       return nueva
     })
 
-    await registrarAuditoria({
-      tuboId:         data.tuboId,
-      usuarioId:      req.user.id,
-      accion:         'Carga registrada',
-      estadoAnterior: tubo.estado,
-      estadoNuevo:    'CARGADO',
-      observaciones:  data.observaciones,
-      metadata:       { cargaId: carga.id, numero, tipoGas: data.tipoGas, cantidad: data.cantidad, unidad: data.unidad },
-    })
+    if (data.tuboId && tubo) {
+      await registrarAuditoria({
+        tuboId:         data.tuboId,
+        usuarioId:      req.user.id,
+        accion:         'Carga registrada',
+        estadoAnterior: tubo.estado,
+        estadoNuevo:    'CARGADO',
+        observaciones:  data.observaciones,
+        metadata:       { cargaId: carga.id, numero, tipoGas: data.tipoGas, cantidad: data.cantidad, unidad: data.unidad },
+      })
+    }
 
     res.status(201).json(carga)
   } catch (err) {
