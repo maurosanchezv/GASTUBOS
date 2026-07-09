@@ -148,7 +148,7 @@ export function ToastProvider() {
         cleanMsg = String(msg)
       }
       setToasts(t => [...t, { id, msg: cleanMsg, type }])
-      setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3500)
+      setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 1800)
     }
   }, [])
 

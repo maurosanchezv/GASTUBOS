@@ -16,7 +16,7 @@ const devolucionSchema = z.object({
 })
 
 // POST /api/devoluciones
-router.post('/', requireRol('ADMIN', 'OPERADOR'), async (req, res, next) => {
+router.post('/', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), async (req, res, next) => {
   try {
     const { tuboId, estadoDestino, observaciones } = devolucionSchema.parse(req.body)
 

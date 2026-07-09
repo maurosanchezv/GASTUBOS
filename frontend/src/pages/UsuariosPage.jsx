@@ -25,6 +25,7 @@ export default function UsuariosPage() {
   const [modal,   setModal]    = useState(false)
   const [form,    setForm]     = useState(EMPTY)
   const [saving,  setSaving]   = useState(false)
+  const [verPassword, setVerPassword] = useState(false)
   const { toast }              = useToast()
 
   useEffect(() => {
@@ -266,7 +267,35 @@ export default function UsuariosPage() {
             </select>
           </FormGroup>
           <FormGroup label={form.id ? 'Nueva contraseña (dejar vacío para no cambiar)' : 'Contraseña'} required={!form.id}>
-            <input type="password" value={form.password} onChange={f('password')} placeholder="Mínimo 8 caracteres" required={!form.id} />
+            <div style={{ position: 'relative' }}>
+              <input
+                type={verPassword ? "text" : "password"}
+                value={form.password}
+                onChange={f('password')}
+                placeholder="Mínimo 8 caracteres"
+                required={!form.id}
+                style={{ paddingRight: 40 }}
+              />
+              <button
+                type="button"
+                onClick={() => setVerPassword(!verPassword)}
+                style={{
+                  position: 'absolute',
+                  right: 12,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  color: 'var(--text-secondary)'
+                }}
+              >
+                <i className={`ti ti-eye${verPassword ? '-off' : ''}`} style={{ fontSize: 18 }} />
+              </button>
+            </div>
           </FormGroup>
         </div>
       </Modal>

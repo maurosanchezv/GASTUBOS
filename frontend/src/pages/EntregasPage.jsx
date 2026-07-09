@@ -11,6 +11,7 @@ import shadowUrl from 'leaflet/dist/images/marker-shadow.png'
 import api from '../services/api.js'
 import { PageHeader, StateBadge, Spinner, GasDot, EmptyState, Modal } from '../components/ui.jsx'
 import { useToast } from '../components/ui.jsx'
+import { useConfigStore } from '../store/configStore.js'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 
@@ -37,6 +38,7 @@ function getRemisionUrl(numero) {
 }
 
 export default function EntregasPage() {
+  const { nombre_empresa, direccion, telefono } = useConfigStore()
   const [params] = useSearchParams()
   const { toast } = useToast()
 
@@ -353,17 +355,92 @@ export default function EntregasPage() {
       attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a>',
     }).addTo(map)
 
+    // Agrupar entregas por coordenada exacta (6 decimales)
+    const groups = {}
     conCoords.forEach(e => {
-      const popup = `
-        <div style="font-family:sans-serif;font-size:13px;min-width:160px">
+      const key = `${Number(e.latitud).toFixed(6)},${Number(e.longitud).toFixed(6)}`
+      if (!groups[key]) {
+        groups[key] = []
+      }
+      groups[key].push(e)
+    })
+
+    Object.keys(groups).forEach(key => {
+      const groupDeliveries = groups[key]
+      const first = groupDeliveries[0]
+      const lat = Number(first.latitud)
+      const lng = Number(first.longitud)
+
+      let popupContent = `<div style="font-family:sans-serif;font-size:13px;min-width:200px;max-height:280px;overflow-y:auto;padding-right:4px;">`
+
+      if (groupDeliveries.length === 1) {
+        // Un solo pedido en esta ubicación
+        const e = first
+        const tubosList = e.detalles && e.detalles.length > 0
+          ? `<div style="margin-top:6px; border-top:1px solid #E4E4E7; padding-top:6px;">
+              <b style="font-size:11px; color:#52525B">Tubos entregados (${e.detalles.length}):</b>
+              <ul style="margin:4px 0 0; padding-left:14px; font-size:11px; color:#3F3F46; line-height:1.4">
+                ${e.detalles.map(d => `
+                  <li>
+                    <strong style="font-family:monospace; color:#18181B">${d.tuboId}</strong> 
+                    (${d.tubo?.gas || 'N/A'} - ${d.tubo?.talla || 'N/A'})
+                  </li>
+                `).join('')}
+              </ul>
+             </div>`
+          : '';
+
+        popupContent += `
           <b style="color:#1A5FA8">${e.numero}</b><br/>
           <b>${e.cliente?.nombre}</b><br/>
           <span style="color:#52525B">${e.direccionEntrega}</span><br/>
           <small style="color:#A1A1AA">${new Date(e.fechaEntrega).toLocaleDateString('es-PY')}</small><br/>
-          <a href="https://www.google.com/maps?q=${e.latitud},${e.longitud}" target="_blank"
-             style="color:#1A5FA8;font-size:12px">Abrir en Google Maps ↗</a>
-        </div>`
-      L.marker([e.latitud, e.longitud]).addTo(map).bindPopup(popup)
+          ${tubosList}
+        `
+      } else {
+        // Múltiples pedidos en esta misma ubicación (encimados)
+        popupContent += `
+          <div style="margin-bottom:8px; border-bottom:1px solid #E4E4E7; padding-bottom:6px;">
+            <b style="color:#1A5FA8; font-size:14px;">${first.cliente?.nombre || 'Cliente'}</b><br/>
+            <span style="color:#52525B; font-size:11px;">${first.direccionEntrega}</span>
+          </div>
+          <div style="font-size:11px; font-weight:700; color:#71717A; margin-bottom:6px;">
+            Historial de entregas en este punto (${groupDeliveries.length}):
+          </div>
+        `
+
+        groupDeliveries.forEach((e, idx) => {
+          const tubosList = e.detalles && e.detalles.length > 0
+            ? `<ul style="margin:2px 0 0; padding-left:12px; font-size:11px; color:#52525B; list-style-type:circle;">
+                ${e.detalles.map(d => `
+                  <li>
+                    <span style="font-family:monospace; font-weight:600">${d.tuboId}</span> 
+                    (${d.tubo?.gas || 'N/A'} - ${d.tubo?.talla || 'N/A'})
+                  </li>
+                `).join('')}
+              </ul>`
+            : '<span style="font-style:italic;color:#A1A1AA">Sin tubos</span>';
+
+          popupContent += `
+            <div style="padding:6px 0; border-bottom:${idx === groupDeliveries.length - 1 ? 'none' : '1px dashed #E4E4E7'}">
+              <div style="display:flex; justify-content:space-between; font-weight:600; font-size:11px;">
+                <span style="color:#1A5FA8">${e.numero}</span>
+                <span style="color:#71717A">${new Date(e.fechaEntrega).toLocaleDateString('es-PY')}</span>
+              </div>
+              ${tubosList}
+            </div>
+          `
+        })
+      }
+
+      popupContent += `
+        <div style="margin-top:10px; border-top:1px solid #E4E4E7; padding-top:6px; text-align:right;">
+          <a href="https://www.google.com/maps?q=${lat},${lng}" target="_blank"
+             style="color:#1A5FA8;font-size:11px;font-weight:600;text-decoration:none;">Abrir en Google Maps ↗</a>
+        </div>
+      </div>`
+
+      L.marker([lat, lng]).addTo(map).bindPopup(popupContent)
     })
 
     if (conCoords.length > 1) {
@@ -1122,8 +1199,9 @@ export default function EntregasPage() {
         {entregaSeleccionada && (
           <div className="ticket-preview">
             <div className="ticket-header">
-              <h3 style={{ margin: '0 0 4px', fontSize: '14px', fontWeight: 'bold' }}>GasTubos</h3>
-              <p style={{ margin: 0, fontSize: '10px', color: '#666' }}>Gestión de Gases Industriales</p>
+              <h3 style={{ margin: '0 0 4px', fontSize: '14px', fontWeight: 'bold' }}>{(nombre_empresa || 'GasTubos').toUpperCase()}</h3>
+              {direccion ? <p style={{ margin: 0, fontSize: '10px', color: '#666' }}>{direccion}</p> : <p style={{ margin: 0, fontSize: '10px', color: '#666' }}>Gestión de Gases Industriales</p>}
+              {telefono && <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#666' }}>Tel: {telefono}</p>}
               <p style={{ margin: '6px 0 0', fontSize: '11px', fontWeight: 'bold' }}>REMISIÓN: {entregaSeleccionada.numero}</p>
             </div>
             
@@ -1182,12 +1260,7 @@ export default function EntregasPage() {
               </tbody>
             </table>
 
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: '14px 0', borderTop: '1px dashed #ddd', paddingTop: '10px' }}>
-              <QRCodeSVG value={getRemisionUrl(entregaSeleccionada.numero)} size={80} level="M" />
-              <span style={{ fontSize: '9px', color: '#666', marginTop: '4px', fontFamily: 'monospace' }}>
-                {entregaSeleccionada.numero}
-              </span>
-            </div>
+
             
             {entregaSeleccionada.recambios && entregaSeleccionada.recambios.length > 0 && (
               <div style={{ margin: '8px 0', fontSize: '10px', borderTop: '1px dashed #ddd', paddingTop: '6px' }}>
@@ -1222,8 +1295,9 @@ export default function EntregasPage() {
       {entregaSeleccionada && createPortal(
         <div className="print-ticket-container">
           <div className="ticket-header">
-            <h3 style={{ margin: '0 0 4px', fontSize: '14px', fontWeight: 'bold' }}>GasTubos</h3>
-            <p style={{ margin: 0, fontSize: '10px' }}>Gestión de Gases Industriales</p>
+            <h3 style={{ margin: '0 0 4px', fontSize: '14px', fontWeight: 'bold' }}>{(nombre_empresa || 'GasTubos').toUpperCase()}</h3>
+            {direccion ? <p style={{ margin: 0, fontSize: '10px' }}>{direccion}</p> : <p style={{ margin: 0, fontSize: '10px' }}>Gestión de Gases Industriales</p>}
+            {telefono && <p style={{ margin: '2px 0 0', fontSize: '10px' }}>Tel: {telefono}</p>}
             <p style={{ margin: '4px 0 0', fontSize: '11px', fontWeight: 'bold' }}>REMISIÓN: {entregaSeleccionada.numero}</p>
           </div>
           
@@ -1241,7 +1315,6 @@ export default function EntregasPage() {
               <tr>
                 <th style={{ textAlign: 'left' }}>Tubo / Gas</th>
                 <th style={{ textAlign: 'center' }}>Cant.</th>
-                <th style={{ textAlign: 'right' }}>Precio</th>
                 <th style={{ textAlign: 'right' }}>Subtotal</th>
               </tr>
             </thead>
@@ -1249,31 +1322,31 @@ export default function EntregasPage() {
               {entregaSeleccionada.detalles?.map(d => (
                 <tr key={d.id}>
                   <td>
-                    {d.tuboId}<br />
+                    <strong>{d.tuboId}</strong><br />
                     <span style={{ fontSize: '10px', color: '#555' }}>
                       {d.tubo?.gas} {d.tubo?.talla}
                     </span>
                   </td>
                   <td style={{ textAlign: 'center' }}>
-                    {Number(d.cantidadGas)} {d.unidadGas}
+                    {Number(d.cantidadGas)} {d.unidadGas}<br />
+                    <span style={{ fontSize: '9px', color: '#888' }}>
+                      x {Number(d.precioUnitario).toLocaleString('es-PY')}
+                    </span>
                   </td>
-                  <td style={{ textAlign: 'right' }}>
-                    {Number(d.precioUnitario).toLocaleString('es-PY')}
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
-                    {Number(d.subtotal).toLocaleString('es-PY')}
+                  <td style={{ textAlign: 'right', fontWeight: '500' }}>
+                    {Number(d.subtotal).toLocaleString('es-PY')} GS
                   </td>
                 </tr>
               ))}
               <tr style={{ borderTop: '1px dashed #000' }}>
-                <td colSpan="3" style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>DELIVERY:</td>
+                <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>DELIVERY:</td>
                 <td style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>
                   {Number(entregaSeleccionada.costoDelivery || 0).toLocaleString('es-PY')} GS
                 </td>
               </tr>
               <tr>
-                <td colSpan="3" style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px' }}>TOTAL:</td>
-                <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px' }}>
+                <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px' }}>TOTAL:</td>
+                <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px', color: 'var(--blue)' }}>
                   {(
                     (entregaSeleccionada.detalles?.reduce((acc, d) => acc + Number(d.subtotal), 0) || 0) +
                     Number(entregaSeleccionada.costoDelivery || 0)
@@ -1283,12 +1356,8 @@ export default function EntregasPage() {
             </tbody>
           </table>
 
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: '12px 0', borderTop: '1px dashed #000', paddingTop: '8px' }}>
-            <QRCodeSVG value={getRemisionUrl(entregaSeleccionada.numero)} size={80} level="M" />
-            <span style={{ fontSize: '9px', marginTop: '2px', fontFamily: 'monospace' }}>
-              {entregaSeleccionada.numero}
-            </span>
-          </div>
+
+
           
           {entregaSeleccionada.recambios && entregaSeleccionada.recambios.length > 0 && (
             <div style={{ margin: '8px 0', fontSize: '10px', borderTop: '1px dashed #000', paddingTop: '4px' }}>

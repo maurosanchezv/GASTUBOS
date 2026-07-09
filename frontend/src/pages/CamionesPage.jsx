@@ -193,7 +193,15 @@ export default function CamionesPage() {
         subtitle="Administración de flota, capacidades y stock asignado en tránsito"
         actions={
           <>
-            <button className="btn btn-sm" onClick={loadCamiones}><i className="ti ti-refresh" /></button>
+            <button
+              className="btn btn-sm"
+              onClick={loadCamiones}
+              disabled={loading}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              <i className={`ti ti-refresh ${loading ? 'ti-spin' : ''}`} />
+              Actualizar
+            </button>
             <button className="btn btn-sm btn-primary" onClick={() => handleOpenForm()}>
               <i className="ti ti-plus" /> Nuevo Camión
             </button>

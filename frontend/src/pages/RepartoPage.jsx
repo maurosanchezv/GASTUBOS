@@ -4,8 +4,10 @@ import { QRCodeSVG } from 'qrcode.react'
 import { Html5Qrcode } from 'html5-qrcode'
 import api from '../services/api.js'
 import { useAuthStore } from '../store/authStore.js'
+import { useConfigStore } from '../store/configStore.js'
 import { PageHeader, Spinner, EmptyState, StateBadge, Modal } from '../components/ui.jsx'
 import { useToast } from '../components/ui.jsx'
+import { EscPosBuilder } from '../utils/escPosBuilder.js'
 
 const SCANNER_ID = 'reparto-qr-reader'
 
@@ -15,110 +17,15 @@ const TIPO_INFO = {
   VENTA:          { label: 'Venta',    className: 'badge-tipo-VENTA' },
 }
 
-// --- ESC/POS Binary Command Builder ---
-class EscPosBuilder {
-  constructor() {
-    this.buffer = [];
-  }
-
-  addBytes(bytes) {
-    if (Array.isArray(bytes)) {
-      this.buffer.push(...bytes);
-    } else {
-      this.buffer.push(bytes);
-    }
-    return this;
-  }
-
-  addText(text) {
-    const cleanText = text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/ñ/g, "n").replace(/Ñ/g, "N");
-    for (let i = 0; i < cleanText.length; i++) {
-      this.buffer.push(cleanText.charCodeAt(i));
-    }
-    return this;
-  }
-
-  addTextLine(text = '') {
-    this.addText(text);
-    this.buffer.push(13, 10); // CR, LF para asegurar el retorno de carro y salto de línea físico
-    return this;
-  }
-
-  initialize() {
-    return this.addBytes([0x1B, 0x40]);
-  }
-
-  alignCenter() {
-    return this.addBytes([0x1B, 0x61, 0x01]);
-  }
-
-  alignLeft() {
-    return this.addBytes([0x1B, 0x61, 0x00]);
-  }
-
-  alignRight() {
-    return this.addBytes([0x1B, 0x61, 0x02]);
-  }
-
-  boldOn() {
-    return this.addBytes([0x1B, 0x45, 0x01]);
-  }
-
-  boldOff() {
-    return this.addBytes([0x1B, 0x45, 0x00]);
-  }
-
-  doubleSizeOn() {
-    return this.addBytes([0x1D, 0x21, 0x11]);
-  }
-
-  doubleSizeOff() {
-    return this.addBytes([0x1D, 0x21, 0x00]);
-  }
-
-  feed(lines = 3) {
-    return this.addBytes([0x1B, 0x64, lines]);
-  }
-
-  addQRCode(data) {
-    // 1. Método Epson Estándar (GS ( k) - para impresoras de escritorio standard
-    this.addBytes([0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x43, 0x03]); // Tamaño 3
-    this.addBytes([0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x45, 0x30]); // ECC L
-    
-    const dataLength = data.length;
-    const totalLength = dataLength + 3;
-    const pL = totalLength % 256;
-    const pH = Math.floor(totalLength / 256);
-
-    this.addBytes([0x1D, 0x28, 0x6B, pL, pH, 0x31, 0x50, 0x30]);
-    for (let i = 0; i < dataLength; i++) {
-      this.buffer.push(data.charCodeAt(i));
-    }
-    this.addBytes([0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x51, 0x30]); // Imprimir
-
-    // 2. Método ESC Z (1B 5A) - utilizado por impresoras portátiles HPRT / Rongta / Genéricas
-    // Comando: ESC Z [m] [n] [k] [dL] [dH] [datos]
-    // m = 2 (QR code), n = 2 (ECC Level M), k = 4 (tamaño de módulo)
-    const dL = dataLength % 256;
-    const dH = Math.floor(dataLength / 256);
-    this.addBytes([0x1B, 0x5A, 0x02, 0x02, 0x04, dL, dH]);
-    for (let i = 0; i < dataLength; i++) {
-      this.buffer.push(data.charCodeAt(i));
-    }
-
-    return this;
-  }
-
-  getBuffer() {
-    return new Uint8Array(this.buffer);
-  }
-}
-
 export default function RepartoPage() {
   const { user } = useAuthStore()
+  const { nombre_empresa, direccion, telefono } = useConfigStore()
   const { toast } = useToast()
 
   const [entregas, setEntregas] = useState([])
+  const [modalDetalle, setModalDetalle] = useState(false)
+  const [entregaSeleccionada, setEntregaSeleccionada] = useState(null)
+  const [entregaParaImprimir, setEntregaParaImprimir] = useState(null)
   const [loading, setLoading] = useState(true)
   const [offline, setOffline] = useState(!navigator.onLine)
 
@@ -194,9 +101,12 @@ export default function RepartoPage() {
     }
     setConnectingPrinter(true)
     
+    let alreadyPrinted = false
     window.bluetoothSerial.connect(
       deviceAddress,
       () => {
+        if (alreadyPrinted) return
+        alreadyPrinted = true
         try {
           const builder = new EscPosBuilder()
           const width = 48 // Ancho óptimo para ticket de 80mm en HM-A300E
@@ -217,8 +127,9 @@ export default function RepartoPage() {
           builder.initialize()
           
           // Encabezado
-          builder.alignCenter().boldOn().doubleSizeOn().addTextLine('GASTUBOS').doubleSizeOff()
-          builder.addTextLine('Gestion de Gases Industriales')
+          builder.alignCenter().boldOn().doubleSizeOn().addTextLine((nombre_empresa || 'GASTUBOS').toUpperCase()).doubleSizeOff()
+          if (direccion) builder.addTextLine(direccion.slice(0, width))
+          if (telefono) builder.addTextLine('Tel: ' + telefono.slice(0, width - 5))
           builder.addTextLine(doubleLine())
           
           // Información de Remisión
@@ -257,10 +168,6 @@ export default function RepartoPage() {
           builder.boldOn().addTextLine(justify('TOTAL:', (subtotalItems + deliveryCost).toLocaleString('es-PY') + ' GS')).boldOff()
           builder.addTextLine(doubleLine())
 
-          // Código QR de la Remisión (tras los totales, igual que en la computadora)
-          builder.alignCenter().addQRCode(getRemisionUrl(entrega.numero)).addTextLine('').addTextLine(entrega.numero).alignLeft()
-          builder.addTextLine(line())
-
           // Recambios/Devoluciones
           const recsBT = recambiosParaImprimir(entrega)
           if (recsBT.length > 0) {
@@ -277,18 +184,30 @@ export default function RepartoPage() {
             builder.addTextLine(line())
           }
           
-          // Firmas
+          // Firmas side-by-side
           builder.addTextLine('').addTextLine('')
-          builder.addTextLine(padChar('--------------------------------'))
-          builder.addTextLine(padChar('Firma Chofer'))
-          builder.addTextLine('').addTextLine('')
-          builder.addTextLine(padChar('--------------------------------'))
-          builder.addTextLine(padChar('Firma Cliente (Acuse)'))
+          const lineLength = 18
+          const leftLine = '-'.repeat(lineLength)
+          const rightLine = '-'.repeat(lineLength)
+          const spacesBetweenLines = width - (lineLength * 2) // 48 - 36 = 12
+          builder.addTextLine(leftLine + ' '.repeat(spacesBetweenLines) + rightLine)
+          
+          const labelLeft = 'Firma Chofer'
+          const labelRight = 'Firma Cliente'
+          const padLeft = Math.floor((lineLength - labelLeft.length) / 2)
+          const padRight = Math.floor((lineLength - labelRight.length) / 2)
+          
+          const strLeft = ' '.repeat(padLeft) + labelLeft + ' '.repeat(lineLength - labelLeft.length - padLeft)
+          const strRight = ' '.repeat(padRight) + labelRight + ' '.repeat(lineLength - labelRight.length - padRight)
+          
+          builder.addTextLine(strLeft + ' '.repeat(spacesBetweenLines) + strRight)
           builder.addTextLine('')
           
           // Pie de ticket
           builder.alignCenter().boldOn().addTextLine('Gracias por su preferencia!').boldOff()
-          builder.feed(8) // Alimentar 8 líneas al final para un corte cómodo y evitar superposiciones
+          // Espaciado generoso al final para evitar superposiciones con la siguiente impresión
+          builder.addTextLine('').addTextLine('').addTextLine('').addTextLine('').addTextLine('').addTextLine('')
+          builder.feed(4)
           
           const binaryBuffer = builder.getBuffer()
           
@@ -320,6 +239,8 @@ export default function RepartoPage() {
   }
 
   const handlePrintClick = (entrega) => {
+    setEntregaParaImprimir(entrega)
+    setModalDetalle(false) // Close the detail modal first to avoid overlay conflict
     if (window.bluetoothSerial) {
       buscarImpresoras()
     } else {
@@ -329,6 +250,9 @@ export default function RepartoPage() {
   
   // Entrega seleccionada para entrega activa en calle
   const [activeEntrega, setActiveEntrega] = useState(null)
+  const [entregaStep, setEntregaStep] = useState(1)
+  const [calcGas, setCalcGas] = useState('Oxígeno')
+  const [calcCapacidad, setCalcCapacidad] = useState('50 L')
   
   // Escáner QR
   const [escaneando, setEscaneando] = useState(false)
@@ -355,6 +279,120 @@ export default function RepartoPage() {
   const todosListos = totalIds.length > 0 && totalIds.every(id => scannedIds.includes(id))
   const progreso = totalIds.length === 0 ? 0 : Math.round((scannedIds.length / totalIds.length) * 100)
   const activeTipo = activeEntrega ? (TIPO_INFO[activeEntrega.tipoOperacion] || { label: activeEntrega.tipoOperacion, className: 'badge-OPERADOR' }) : null
+
+  // Cargar ruta asignada
+  const fetchRuta = async () => {
+    if (!user) return
+    setLoading(true)
+    try {
+      if (navigator.onLine) {
+        // Si es REPARTIDOR, filtra por su propio repartidorId. Si es ADMIN/OPERADOR, ve todas.
+        const queryParams = user.rol === 'REPARTIDOR' ? `&repartidorId=${user.id}` : ''
+        const res = await api.get(`/entregas?confirmada=false&limit=100${queryParams}`)
+        const data = res.data.entregas || []
+        setEntregas(data)
+        // Guardar copia local de respaldo
+        localStorage.setItem(`ruta_offline_${user.id}`, JSON.stringify(data))
+      } else {
+        // Carga offline
+        setEntregas(safeParseJSON(`ruta_offline_${user.id}`))
+        setOffline(true)
+      }
+    } catch (err) {
+      // Si falla y hay copia local, la cargamos
+      setEntregas(safeParseJSON(`ruta_offline_${user.id}`))
+      setOffline(true)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fetchHistorialHoy = async () => {
+    if (!user) return
+    try {
+      if (navigator.onLine) {
+        const hoy = new Date().toISOString().split('T')[0]
+        const queryParams = user.rol === 'REPARTIDOR' ? `&repartidorId=${user.id}` : ''
+        const resConf = await api.get(`/entregas?confirmada=true&desde=${hoy}&limit=50${queryParams}`)
+        const resCanc = await api.get(`/entregas?cancelada=true&desde=${hoy}&limit=50${queryParams}`)
+        const sorted = [...(resConf.data.entregas || []), ...(resCanc.data.entregas || [])].sort(
+          (a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)
+        )
+        setHistorialHoy(sorted)
+        localStorage.setItem(`historial_hoy_offline_${user.id}`, JSON.stringify(sorted))
+      } else {
+        setHistorialHoy(safeParseJSON(`historial_hoy_offline_${user.id}`))
+      }
+    } catch {
+      setHistorialHoy(safeParseJSON(`historial_hoy_offline_${user.id}`))
+    }
+  }
+
+  // Sincronizar confirmaciones y cancelaciones acumuladas sin señal
+  async function sincronizarConfirmacionesPendientes() {
+    const queueConf = safeParseJSON('confirmaciones_offline')
+    const queueCanc = safeParseJSON('cancelaciones_offline')
+    if (queueConf.length === 0 && queueCanc.length === 0) return
+
+    let exitosos = 0
+    let fallidos = 0
+
+    // Sincronizar confirmaciones
+    if (queueConf.length > 0) {
+      const confFallidas = []
+      for (const item of queueConf) {
+        try {
+          const cId = typeof item === 'object' && item !== null ? item.id : item
+          const recs = typeof item === 'object' && item !== null ? item.recambios : []
+          const confs = typeof item === 'object' && item !== null ? item.confirmados : undefined
+          const met = typeof item === 'object' && item !== null ? item.metodoPago : undefined
+          const mont = typeof item === 'object' && item !== null ? item.montoRecibido : undefined
+          await api.put(`/entregas/${cId}/confirmar`, {
+            recambios: recs,
+            confirmados: confs,
+            metodoPago: met,
+            montoRecibido: mont
+          })
+          exitosos++
+        } catch (err) {
+          fallidos++
+          confFallidas.push(item)
+        }
+      }
+      if (confFallidas.length > 0) {
+        localStorage.setItem('confirmaciones_offline', JSON.stringify(confFallidas))
+      } else {
+        localStorage.removeItem('confirmaciones_offline')
+      }
+    }
+
+    // Sincronizar cancelaciones
+    if (queueCanc.length > 0) {
+      const cancFallidas = []
+      for (const item of queueCanc) {
+        try {
+          await api.put(`/entregas/${item.id}/cancelar`, { motivo: item.motivo })
+          exitosos++
+        } catch (err) {
+          fallidos++
+          cancFallidas.push(item)
+        }
+      }
+      if (cancFallidas.length > 0) {
+        localStorage.setItem('cancelaciones_offline', JSON.stringify(cancFallidas))
+      } else {
+        localStorage.removeItem('cancelaciones_offline')
+      }
+    }
+
+    if (exitosos > 0) {
+      toast(`Se sincronizaron ${exitosos} transacciones realizadas sin conexión.`, 'success')
+      fetchRuta()
+    }
+    if (fallidos > 0) {
+      toast(`Fallo al sincronizar ${fallidos} transacciones. Se reintentará luego.`, 'error')
+    }
+  }
 
   // Sincronizar monto recibido al cambiar los verificados
   useEffect(() => {
@@ -499,51 +537,7 @@ export default function RepartoPage() {
     }
   }, [])
 
-  // Cargar ruta asignada
-  const fetchRuta = async () => {
-    if (!user) return
-    setLoading(true)
-    try {
-      if (navigator.onLine) {
-        // Carga online filtrando por chofer y no confirmadas
-        const res = await api.get(`/entregas?repartidorId=${user.id}&confirmada=false&limit=100`)
-        const data = res.data.entregas || []
-        setEntregas(data)
-        // Guardar copia local de respaldo
-        localStorage.setItem(`ruta_offline_${user.id}`, JSON.stringify(data))
-      } else {
-        // Carga offline
-        setEntregas(safeParseJSON(`ruta_offline_${user.id}`))
-        setOffline(true)
-      }
-    } catch (err) {
-      // Si falla y hay copia local, la cargamos
-      setEntregas(safeParseJSON(`ruta_offline_${user.id}`))
-      setOffline(true)
-    } finally {
-      setLoading(false)
-    }
-  }
 
-  const fetchHistorialHoy = async () => {
-    if (!user) return
-    try {
-      if (navigator.onLine) {
-        const hoy = new Date().toISOString().split('T')[0]
-        const resConf = await api.get(`/entregas?repartidorId=${user.id}&confirmada=true&desde=${hoy}&limit=50`)
-        const resCanc = await api.get(`/entregas?repartidorId=${user.id}&cancelada=true&desde=${hoy}&limit=50`)
-        const sorted = [...(resConf.data.entregas || []), ...(resCanc.data.entregas || [])].sort(
-          (a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)
-        )
-        setHistorialHoy(sorted)
-        localStorage.setItem(`historial_hoy_offline_${user.id}`, JSON.stringify(sorted))
-      } else {
-        setHistorialHoy(safeParseJSON(`historial_hoy_offline_${user.id}`))
-      }
-    } catch {
-      setHistorialHoy(safeParseJSON(`historial_hoy_offline_${user.id}`))
-    }
-  }
 
   const fetchCamiones = async () => {
     try {
@@ -670,9 +664,19 @@ export default function RepartoPage() {
     }
   }, [])
 
+  // Manejar clic en pestañas de navegación con validación de entrega activa
+  const handleTabClick = (nuevaSeccion) => {
+    if (activeEntrega) {
+      toast('Tenés una entrega activa en curso. Confirmá o cancelá la entrega actual para poder cambiar de pestaña.', 'warning')
+      return
+    }
+    setSeccion(nuevaSeccion)
+  }
+
   // Seleccionar remisión para entregar
   const iniciarEntrega = (entrega) => {
     setActiveEntrega(entrega)
+    setEntregaStep(1)
     setScannedIds([])
     setRecambios([])
     setNuevoRecambioId('')
@@ -687,6 +691,7 @@ export default function RepartoPage() {
     stopScanner()
     stopScannerRecambio()
     setActiveEntrega(null)
+    setEntregaStep(1)
     setScannedIds([])
     setRecambios([])
     setNuevoRecambioId('')
@@ -768,71 +773,7 @@ export default function RepartoPage() {
     }
   }
 
-  // Sincronizar confirmaciones y cancelaciones acumuladas sin señal
-  const sincronizarConfirmacionesPendientes = async () => {
-    const queueConf = safeParseJSON('confirmaciones_offline')
-    const queueCanc = safeParseJSON('cancelaciones_offline')
-    if (queueConf.length === 0 && queueCanc.length === 0) return
 
-    let exitosos = 0
-    let fallidos = 0
-
-    // Sincronizar confirmaciones
-    if (queueConf.length > 0) {
-      const confFallidas = []
-      for (const item of queueConf) {
-        try {
-          const cId = typeof item === 'object' && item !== null ? item.id : item
-          const recs = typeof item === 'object' && item !== null ? item.recambios : []
-          const confs = typeof item === 'object' && item !== null ? item.confirmados : undefined
-          const met = typeof item === 'object' && item !== null ? item.metodoPago : undefined
-          const mont = typeof item === 'object' && item !== null ? item.montoRecibido : undefined
-          await api.put(`/entregas/${cId}/confirmar`, {
-            recambios: recs,
-            confirmados: confs,
-            metodoPago: met,
-            montoRecibido: mont
-          })
-          exitosos++
-        } catch (err) {
-          fallidos++
-          confFallidas.push(item)
-        }
-      }
-      if (confFallidas.length > 0) {
-        localStorage.setItem('confirmaciones_offline', JSON.stringify(confFallidas))
-      } else {
-        localStorage.removeItem('confirmaciones_offline')
-      }
-    }
-
-    // Sincronizar cancelaciones
-    if (queueCanc.length > 0) {
-      const cancFallidas = []
-      for (const item of queueCanc) {
-        try {
-          await api.put(`/entregas/${item.id}/cancelar`, { motivo: item.motivo })
-          exitosos++
-        } catch (err) {
-          fallidos++
-          cancFallidas.push(item)
-        }
-      }
-      if (cancFallidas.length > 0) {
-        localStorage.setItem('cancelaciones_offline', JSON.stringify(cancFallidas))
-      } else {
-        localStorage.removeItem('cancelaciones_offline')
-      }
-    }
-
-    if (exitosos > 0) {
-      toast(`Se sincronizaron ${exitosos} transacciones realizadas sin conexión.`, 'success')
-      fetchRuta()
-    }
-    if (fallidos > 0) {
-      toast(`Fallo al sincronizar ${fallidos} transacciones. Se reintentará luego.`, 'error')
-    }
-  }
 
   return (
     <>
@@ -840,15 +781,21 @@ export default function RepartoPage() {
         title="Ruta de Reparto Móvil"
         subtitle={offline ? "TRABAJANDO FUERA DE LÍNEA (MODO LOCAL)" : "Entregas asignadas a tu planilla de ruta"}
         actions={
-          <button className="btn btn-sm" onClick={() => { fetchRuta(); fetchHistorialHoy(); }} disabled={loading} title="Recargar Ruta">
-            <i className="ti ti-refresh" />
+          <button
+            className="btn btn-sm"
+            onClick={() => { fetchRuta(); fetchHistorialHoy(); }}
+            disabled={loading}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            <i className={`ti ti-refresh ${loading ? 'ti-spin' : ''}`} />
+            Actualizar
           </button>
         }
       />
 
       <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', background: 'var(--surface)', padding: '0 16px', position: 'sticky', top: 0, zIndex: 100 }}>
         <button
-          onClick={() => setSeccion('ruta')}
+          onClick={() => handleTabClick('ruta')}
           style={{
             flex: 1,
             padding: '12px',
@@ -857,14 +804,15 @@ export default function RepartoPage() {
             borderBottom: seccion === 'ruta' ? '3px solid var(--blue)' : '3px solid transparent',
             color: seccion === 'ruta' ? 'var(--blue)' : 'var(--text-secondary)',
             fontWeight: 600,
-            cursor: 'pointer',
+            cursor: activeEntrega ? (seccion === 'ruta' ? 'pointer' : 'not-allowed') : 'pointer',
+            opacity: activeEntrega ? (seccion === 'ruta' ? 1 : 0.6) : 1,
             fontSize: '13px'
           }}
         >
           Entregas Activas ({entregas.length})
         </button>
         <button
-          onClick={() => setSeccion('historial')}
+          onClick={() => handleTabClick('historial')}
           style={{
             flex: 1,
             padding: '12px',
@@ -873,14 +821,15 @@ export default function RepartoPage() {
             borderBottom: seccion === 'historial' ? '3px solid var(--blue)' : '3px solid transparent',
             color: seccion === 'historial' ? 'var(--blue)' : 'var(--text-secondary)',
             fontWeight: 600,
-            cursor: 'pointer',
+            cursor: activeEntrega ? (seccion === 'historial' ? 'pointer' : 'not-allowed') : 'pointer',
+            opacity: activeEntrega ? (seccion === 'historial' ? 1 : 0.6) : 1,
             fontSize: '13px'
           }}
         >
           Historial de Hoy ({historialHoy.length})
         </button>
         <button
-          onClick={() => setSeccion('camion')}
+          onClick={() => handleTabClick('camion')}
           style={{
             flex: 1,
             padding: '12px',
@@ -889,7 +838,8 @@ export default function RepartoPage() {
             borderBottom: seccion === 'camion' ? '3px solid var(--blue)' : '3px solid transparent',
             color: seccion === 'camion' ? 'var(--blue)' : 'var(--text-secondary)',
             fontWeight: 600,
-            cursor: 'pointer',
+            cursor: activeEntrega ? (seccion === 'camion' ? 'pointer' : 'not-allowed') : 'pointer',
+            opacity: activeEntrega ? (seccion === 'camion' ? 1 : 0.6) : 1,
             fontSize: '13px'
           }}
         >
@@ -976,6 +926,13 @@ export default function RepartoPage() {
                         {e.observaciones && <span><i className="ti ti-note" /> con obs.</span>}
                       </div>
 
+                      {e.repartidor && (
+                        <div style={{ fontSize: 11, color: 'var(--text-secondary)', background: 'var(--surface-2)', padding: '4px 8px', borderRadius: 4, display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                          <i className="ti ti-truck" style={{ color: 'var(--blue)' }} />
+                          <span>Chofer: <strong>{e.repartidor.nombre}</strong></span>
+                        </div>
+                      )}
+
                       <div className="reparto-card-actions">
                         <a
                           href={tieneGps
@@ -1009,7 +966,15 @@ export default function RepartoPage() {
                   {historialHoy.map(e => {
                     const tipo = TIPO_INFO[e.tipoOperacion] || { label: e.tipoOperacion, className: 'badge-OPERADOR' }
                     return (
-                      <div key={e.id} className="reparto-card" style={{ opacity: 0.85 }}>
+                      <div 
+                        key={e.id} 
+                        className="reparto-card" 
+                        style={{ opacity: 0.85, cursor: 'pointer' }}
+                        onClick={() => {
+                          setEntregaSeleccionada(e)
+                          setModalDetalle(true)
+                        }}
+                      >
                         <div className="reparto-card-head">
                           <span className="reparto-card-num">{e.numero}</span>
                           <div style={{ display: 'flex', gap: 6 }}>
@@ -1031,6 +996,13 @@ export default function RepartoPage() {
                           {e.metodoPago && <span><i className="ti ti-credit-card" /> {e.metodoPago}</span>}
                           {e.montoRecibido !== null && <span><i className="ti ti-currency-dollar" /> {Number(e.montoRecibido).toLocaleString('es-PY')} GS</span>}
                         </div>
+
+                        {e.repartidor && (
+                          <div style={{ fontSize: 11, color: 'var(--text-secondary)', background: 'var(--surface-2)', padding: '4px 8px', borderRadius: 4, display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                            <i className="ti ti-truck" style={{ color: 'var(--blue)' }} />
+                            <span>Chofer: <strong>{e.repartidor.nombre}</strong></span>
+                          </div>
+                        )}
                       </div>
                     )
                   })}
@@ -1052,8 +1024,8 @@ export default function RepartoPage() {
                       ))}
                     </select>
                     {selectedCamionId && (
-                      <button className="btn btn-secondary" onClick={() => fetchCamionStock(selectedCamionId)} disabled={loadingCamion} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 40 }}>
-                        <i className="ti ti-refresh" />
+                      <button className="btn btn-secondary" onClick={() => fetchCamionStock(selectedCamionId)} disabled={loadingCamion} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 40 }} title="Actualizar stock">
+                        <i className={`ti ti-refresh ${loadingCamion ? 'ti-spin' : ''}`} />
                       </button>
                     )}
                   </div>
@@ -1128,303 +1100,530 @@ export default function RepartoPage() {
           // VISTA 2: PROCESO DE ENTREGA ACTIVA
           (
             <div className="reparto-active">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-                  <button className="btn btn-sm" onClick={cancelarEntregaActiva}>
-                    <i className="ti ti-arrow-left" /> Volver
-                  </button>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span className={`badge ${activeTipo?.className}`}>{activeTipo?.label}</span>
-                    <span className="reparto-card-num">{activeEntrega.numero}</span>
-                  </div>
+              {/* Encabezado del ticket */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                <button className="btn btn-sm" onClick={cancelarEntregaActiva}>
+                  <i className="ti ti-arrow-left" /> Volver a Hoja de Ruta
+                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span className={`badge ${activeTipo?.className}`}>{activeTipo?.label}</span>
+                  <span className="reparto-card-num">{activeEntrega.numero}</span>
                 </div>
+              </div>
 
-                <div className="reparto-active-grid">
+              {/* Indicador de pasos */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface-2)', padding: '12px 16px', borderRadius: 8, marginBottom: 16, border: '1px solid var(--border)', flexWrap: 'wrap', gap: 8 }}>
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 12, fontWeight: entregaStep === 1 ? 700 : 500, color: entregaStep === 1 ? 'var(--blue)' : 'var(--text-secondary)' }}>
+                    1. Escanear
+                  </span>
+                  <span style={{ fontSize: 12, fontWeight: entregaStep === 2 ? 700 : 500, color: entregaStep === 2 ? 'var(--blue)' : 'var(--text-secondary)' }}>
+                    2. Retorno
+                  </span>
+                  <span style={{ fontSize: 12, fontWeight: entregaStep === 3 ? 700 : 500, color: entregaStep === 3 ? 'var(--blue)' : 'var(--text-secondary)' }}>
+                    3. Imprimir
+                  </span>
+                  <span style={{ fontSize: 12, fontWeight: entregaStep === 4 ? 700 : 500, color: entregaStep === 4 ? 'var(--blue)' : 'var(--text-secondary)' }}>
+                    4. Confirmar
+                  </span>
+                </div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)' }}>
+                  PASO {entregaStep} DE 4
+                </div>
+              </div>
 
-                  {/* Columna izquierda: datos cliente + checklist */}
-                  <div>
-                    <div style={{ borderBottom: '1px solid var(--border)', paddingBottom: 12, marginBottom: 14 }}>
-                      <div style={{ fontSize: 16, fontWeight: 700 }}>{activeEntrega.cliente?.nombre}</div>
-                      <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4, display: 'flex', alignItems: 'flex-start', gap: 4 }}>
-                        <i className="ti ti-map-pin" style={{ marginTop: 2 }} />
-                        <span>{activeEntrega.direccionEntrega}</span>
-                      </div>
-                      
-                      {(activeEntrega.cliente?.contacto || activeEntrega.cliente?.telefono) && (
-                        <div style={{
-                          marginTop: 8,
-                          padding: '8px 10px',
-                          background: 'var(--blue-light)',
-                          border: '1px solid rgba(26, 95, 168, 0.15)',
-                          borderRadius: 8,
-                          fontSize: 12,
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: 6
-                        }}>
-                          {activeEntrega.cliente?.contacto && (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-secondary)' }}>
-                              <i className="ti ti-user" style={{ color: 'var(--blue)', fontSize: 14 }} />
-                              <span><strong>Contacto:</strong> {activeEntrega.cliente.contacto}</span>
-                            </div>
-                          )}
-                          {activeEntrega.cliente?.telefono && (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                              <i className="ti ti-phone" style={{ color: 'var(--green)', fontSize: 14 }} />
-                              <span>
-                                <strong>Teléfono:</strong>{' '}
-                                <a 
-                                  href={`tel:${activeEntrega.cliente.telefono}`} 
-                                  style={{ 
-                                    color: 'var(--blue)', 
-                                    textDecoration: 'underline', 
-                                    fontWeight: 600,
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: 2
-                                  }}
-                                >
-                                  {activeEntrega.cliente.telefono}
-                                  <i className="ti ti-external-link" style={{ fontSize: 10 }} />
-                                </a>
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {activeEntrega.observaciones && (
-                        <div style={{ fontSize: 11, fontStyle: 'italic', background: 'var(--surface-2)', padding: '6px 10px', borderRadius: 6, marginTop: 8 }}>
-                          <strong>Obs:</strong> {activeEntrega.observaciones}
-                        </div>
-                      )}
+              <div className="reparto-active-grid">
+                {/* Columna izquierda: datos cliente + checklist */}
+                <div>
+                  <div style={{ borderBottom: '1px solid var(--border)', paddingBottom: 12, marginBottom: 14 }}>
+                    <div style={{ fontSize: 16, fontWeight: 700 }}>{activeEntrega.cliente?.nombre}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4, display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+                      <i className="ti ti-map-pin" style={{ marginTop: 2 }} />
+                      <span>{activeEntrega.direccionEntrega}</span>
                     </div>
-
-                    {/* Progreso */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-muted)' }}>
-                      <span>CILINDROS EN LA ORDEN</span>
-                      <span>{scannedIds.length} de {totalIds.length} VERIFICADOS</span>
-                    </div>
-                    <div className="reparto-progress"><div className="reparto-progress-fill" style={{ width: `${progreso}%` }} /></div>
-
-                    {/* Checklist de tubos */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      {activeEntrega.detalles?.map(d => {
-                        const verificado = scannedIds.includes(d.tuboId)
-                        return (
-                          <div
-                            key={d.id}
-                            style={{
-                              display: 'flex', alignItems: 'center',
-                              padding: '10px 12px', background: verificado ? '#ecfdf5' : 'var(--surface-2)',
-                              border: `1px solid ${verificado ? '#10b981' : 'var(--border)'}`,
-                              borderRadius: 8, fontSize: 13, gap: 10,
-                            }}
-                          >
-                            <i
-                              className={`ti ${verificado ? 'ti-circle-check-filled' : 'ti-circle'}`}
-                              style={{ color: verificado ? '#10b981' : 'var(--text-muted)', fontSize: 22 }}
-                            />
-                            <div style={{ flex: 1 }}>
-                              <strong style={{ fontFamily: 'var(--font-mono)' }}>{d.tuboId}</strong>
-                              <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 1 }}>
-                                {d.tubo?.gas} {d.tubo?.talla} · {Number(d.cantidadGas)} {d.unidadGas}
-                              </div>
-                            </div>
-                            <span style={{ fontSize: 11, fontWeight: 600, color: verificado ? '#10b981' : 'var(--text-muted)' }}>
-                              {verificado ? 'Listo' : 'Pendiente'}
-                            </span>
+                    
+                    {(activeEntrega.cliente?.contacto || activeEntrega.cliente?.telefono) && (
+                      <div style={{
+                        marginTop: 8,
+                        padding: '8px 10px',
+                        background: 'var(--blue-light)',
+                        border: '1px solid rgba(26, 95, 168, 0.15)',
+                        borderRadius: 8,
+                        fontSize: 12,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 6
+                      }}>
+                        {activeEntrega.cliente?.contacto && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-secondary)' }}>
+                            <i className="ti ti-user" style={{ color: 'var(--blue)', fontSize: 14 }} />
+                            <span><strong>Contacto:</strong> {activeEntrega.cliente.contacto}</span>
                           </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Columna derecha: scanner + acciones */}
-                  <div>
-                    <div style={{ marginBottom: 16 }}>
-                      <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 8, color: 'var(--text-secondary)' }}>
-                        ESCÁNER DE CILINDROS
-                      </div>
-
-                      {escaneando ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center', background: '#000', padding: 12, borderRadius: 8 }}>
-                          <div id={SCANNER_ID} style={{ width: '100%', maxWidth: '320px', overflow: 'hidden' }} />
-                          <button className="btn btn-sm btn-danger" onClick={stopScanner}>
-                            <i className="ti ti-player-stop" /> Apagar Cámara
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          className="btn btn-primary"
-                          onClick={() => startScanner(activeEntrega)}
-                          style={{ width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, height: 52, fontSize: 14 }}
-                        >
-                          <i className="ti ti-qrcode" style={{ fontSize: 20 }} /> Escanear Código QR
-                        </button>
-                      )}
-                    </div>
-
-                    {/* Ingreso manual alternativo (Req B) */}
-                    <div style={{ marginBottom: 16, background: 'var(--surface-2)', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--border)' }}>
-                      <div style={{ fontWeight: 600, fontSize: 11, marginBottom: 6, color: 'var(--text-secondary)' }}>
-                        INGRESO MANUAL (CÓDIGO QR DAÑADO)
-                      </div>
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        <input
-                          placeholder="Ej: TUBO-00001..."
-                          value={manualTuboId}
-                          onChange={e => setManualTuboId(e.target.value)}
-                          onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), handleManualVerify())}
-                          style={{ flex: 1, textTransform: 'uppercase', minHeight: 36, fontSize: 13 }}
-                        />
-                        <button className="btn btn-secondary btn-sm" onClick={handleManualVerify}>
-                          Validar
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Registro de Cobros (Req D) */}
-                    <div style={{ marginBottom: 16, background: 'var(--surface-2)', padding: '12px 14px', borderRadius: 8, border: '1px solid var(--border)' }}>
-                      <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 10, color: 'var(--text-primary)' }}>
-                        REGISTRO DE COBRO / PAGO
-                      </div>
-                      
-                      <div className="form-group" style={{ marginBottom: 10 }}>
-                        <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>
-                          MÉTODO DE PAGO
-                        </label>
-                        <select
-                          value={metodoPago}
-                          onChange={e => setMetodoPago(e.target.value)}
-                          style={{ width: '100%', minHeight: 36, padding: '4px 8px', fontSize: 13 }}
-                        >
-                          <option value="EFECTIVO">Efectivo</option>
-                          <option value="TRANSFERENCIA">Transferencia bancaria</option>
-                          <option value="CREDITO">Cuenta corriente / Crédito</option>
-                          <option value="PENDIENTE">Pago pendiente / A cobrar en oficina</option>
-                        </select>
-                      </div>
-
-                      <div className="form-group">
-                        <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>
-                          MONTO RECIBIDO (GS)
-                        </label>
-                        <input
-                          type="number"
-                          placeholder="Monto recibido..."
-                          value={montoRecibido}
-                          onChange={e => setMontoRecibido(e.target.value)}
-                          style={{ width: '100%', minHeight: 36, padding: '4px 8px', fontSize: 13 }}
-                        />
-                        {montoRecibido !== '' && Number(montoRecibido) < ((activeEntrega.detalles || []).filter(d => scannedIds.includes(d.tuboId)).reduce((acc, d) => acc + Number(d.subtotal), 0) + Number(activeEntrega.costoDelivery || 0)) && (
-                          <div style={{ fontSize: 10, color: 'var(--amber)', marginTop: 4, fontWeight: 500 }}>
-                            ⚠️ Pago parcial: se registrará un saldo pendiente en la cuenta del cliente.
+                        )}
+                        {activeEntrega.cliente?.telefono && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <i className="ti ti-phone" style={{ color: 'var(--green)', fontSize: 14 }} />
+                            <span>
+                              <strong>Teléfono:</strong>{' '}
+                              <a 
+                                href={`tel:${activeEntrega.cliente.telefono}`} 
+                                style={{ 
+                                  color: 'var(--blue)', 
+                                  textDecoration: 'underline', 
+                                  fontWeight: 600,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 2
+                                }}
+                              >
+                                {activeEntrega.cliente.telefono}
+                                <i className="ti ti-external-link" style={{ fontSize: 10 }} />
+                              </a>
+                            </span>
                           </div>
                         )}
                       </div>
-                    </div>
+                    )}
 
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                      <button
-                        className="btn btn-outline"
-                        onClick={() => handlePrintClick(activeEntrega)}
-                        style={{ width: '100%', height: 44, fontSize: 13, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
-                      >
-                        <i className="ti ti-printer" />
-                        Imprimir Remisión
-                      </button>
-
-                      <button
-                        className={`btn ${todosListos ? 'btn-success' : 'btn-warning'}`}
-                        disabled={scannedIds.length === 0}
-                        onClick={() => confirmarEntrega(activeEntrega.id)}
-                        style={{ width: '100%', height: 50, fontSize: 14, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
-                      >
-                        <i className="ti ti-check" />
-                        {todosListos ? 'Confirmar y Finalizar Entrega' : 'Confirmar Entrega Parcial'}
-                      </button>
-
-                      <button
-                        className="btn btn-outline"
-                        onClick={() => rechazarEntrega(activeEntrega.id)}
-                        style={{ width: '100%', height: 44, fontSize: 13, borderColor: '#ef4444', color: '#ef4444', fontWeight: 600, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: 'transparent' }}
-                      >
-                        <i className="ti ti-x" />
-                        No concretar entrega
-                      </button>
-                    </div>
-                  </div>
-
-                </div>
-
-                {/* Sección de Recambio de Tubos */}
-                <div style={{ marginTop: 20, borderTop: '1px solid var(--border)', paddingTop: 16 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8 }}>Recambio de Tubos / Retorno de Cilindros</div>
-                  
-                  <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-                    <input
-                      placeholder="Código del cilindro o descripción..."
-                      value={nuevoRecambioId}
-                      onChange={e => setNuevoRecambioId(e.target.value)}
-                      onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), agregarRecambioManual())}
-                      style={{ flex: 1 }}
-                    />
-                    <button className="btn btn-secondary btn-sm" onClick={agregarRecambioManual}>
-                      Agregar
-                    </button>
-                    {escaneandoRecambio ? (
-                      <button className="btn btn-danger btn-sm" onClick={stopScannerRecambio}>
-                        Apagar
-                      </button>
-                    ) : (
-                      <button className="btn btn-secondary btn-sm" onClick={startScannerRecambio} title="Escanear QR">
-                        <i className="ti ti-qrcode" />
-                      </button>
+                    {activeEntrega.observaciones && (
+                      <div style={{ fontSize: 11, fontStyle: 'italic', background: 'var(--surface-2)', padding: '6px 10px', borderRadius: 6, marginTop: 8 }}>
+                        <strong>Obs:</strong> {activeEntrega.observaciones}
+                      </div>
                     )}
                   </div>
 
-                  {escaneandoRecambio && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center', background: '#000', padding: 12, borderRadius: 8, marginBottom: 10 }}>
-                      <div id={SCANNER_ID} style={{ width: '100%', maxWidth: '320px', overflow: 'hidden' }} />
-                    </div>
-                  )}
+                  {/* Progreso */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-muted)' }}>
+                    <span>CILINDROS EN LA ORDEN</span>
+                    <span>{scannedIds.length} de {totalIds.length} VERIFICADOS</span>
+                  </div>
+                  <div className="reparto-progress"><div className="reparto-progress-fill" style={{ width: `${progreso}%` }} /></div>
 
-                  {recambios.length > 0 ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {recambios.map(rId => (
-                        <div key={rId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface-2)', border: '1px solid var(--border)', padding: '6px 12px', borderRadius: 8, fontSize: 13 }}>
-                          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{rId}</span>
-                          <button className="btn-icon btn-danger btn-sm" onClick={() => setRecambios(prev => prev.filter(x => x !== rId))}>
-                            <i className="ti ti-trash" style={{ color: 'var(--red)' }} />
-                          </button>
+                  {/* Checklist de tubos */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {activeEntrega.detalles?.map(d => {
+                      const verificado = scannedIds.includes(d.tuboId)
+                      return (
+                        <div
+                          key={d.id}
+                          style={{
+                            display: 'flex', alignItems: 'center',
+                            padding: '10px 12px', background: verificado ? '#ecfdf5' : 'var(--surface-2)',
+                            border: `1px solid ${verificado ? '#10b981' : 'var(--border)'}`,
+                            borderRadius: 8, fontSize: 13, gap: 10,
+                          }}
+                        >
+                          <i
+                            className={`ti ${verificado ? 'ti-circle-check-filled' : 'ti-circle'}`}
+                            style={{ color: verificado ? '#10b981' : 'var(--text-muted)', fontSize: 22 }}
+                          />
+                          <div style={{ flex: 1 }}>
+                            <strong style={{ fontFamily: 'var(--font-mono)' }}>{d.tuboId}</strong>
+                            <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 1 }}>
+                              {d.tubo?.gas} {d.tubo?.talla} · {Number(d.cantidadGas)} {d.unidadGas}
+                            </div>
+                          </div>
+                          <span style={{ fontSize: 11, fontWeight: 600, color: verificado ? '#10b981' : 'var(--text-muted)' }}>
+                            {verificado ? 'Listo' : 'Pendiente'}
+                          </span>
                         </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div style={{ fontSize: 11, fontStyle: 'italic', color: 'var(--text-muted)' }}>Ningún tubo agregado para recambio</div>
-                  )}
+                      )
+                    })}
+                  </div>
                 </div>
 
+                {/* Columna derecha: Lógica por pasos */}
+                <div>
+                  {entregaStep === 1 && (
+                    // PASO 1: ESCANEO Y VALIDACIÓN
+                    <>
+                      <div style={{ marginBottom: 16 }}>
+                        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, color: 'var(--text-primary)' }}>
+                          1. ESCANEAR CILINDROS DE LA ORDEN
+                        </div>
+
+                        {escaneando ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center', background: '#000', padding: 12, borderRadius: 8 }}>
+                            <div id={SCANNER_ID} style={{ width: '100%', maxWidth: '320px', overflow: 'hidden' }} />
+                            <button className="btn btn-sm btn-danger" onClick={stopScanner}>
+                              <i className="ti ti-player-stop" /> Apagar Cámara
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            className="btn btn-primary"
+                            onClick={() => startScanner(activeEntrega)}
+                            style={{ width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, height: 52, fontSize: 14 }}
+                          >
+                            <i className="ti ti-qrcode" style={{ fontSize: 20 }} /> Escanear Código QR
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Ingreso manual alternativo */}
+                      <div style={{ marginBottom: 16, background: 'var(--surface-2)', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--border)' }}>
+                        <div style={{ fontWeight: 600, fontSize: 11, marginBottom: 6, color: 'var(--text-secondary)' }}>
+                          INGRESO MANUAL (CÓDIGO QR DAÑADO)
+                        </div>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <input
+                            placeholder="Ej: TUBO-00001..."
+                            value={manualTuboId}
+                            onChange={e => setManualTuboId(e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), handleManualVerify())}
+                            style={{ flex: 1, textTransform: 'uppercase', minHeight: 36, fontSize: 13 }}
+                          />
+                          <button className="btn btn-secondary btn-sm" onClick={handleManualVerify}>
+                            Validar
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Botón de Siguiente */}
+                      <div style={{ marginTop: 24 }}>
+                        <button
+                          className="btn btn-primary"
+                          onClick={() => setEntregaStep(2)}
+                          disabled={scannedIds.length === 0}
+                          style={{ width: '100%', height: 48, fontSize: 14, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                        >
+                          Siguiente: Retorno de Cilindros <i className="ti ti-arrow-right" />
+                        </button>
+                      </div>
+                    </>
+                  )}
+
+                  {entregaStep === 2 && (
+                    // PASO 2: RETORNO DE CILINDROS (RECAMBIO)
+                    <>
+                      <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, color: 'var(--text-primary)' }}>
+                        2. SELECCIONAR RETORNO DE CILINDROS
+                      </div>
+
+                      {/* CALCULADORA / SELECTOR RÁPIDO */}
+                      <div style={{ background: 'var(--surface-2)', padding: 14, borderRadius: 10, border: '1px solid var(--border)', marginBottom: 12 }}>
+                        {/* Display de selección actual */}
+                        <div style={{ 
+                          background: 'var(--blue-light)', 
+                          border: '1px solid rgba(26, 95, 168, 0.2)', 
+                          borderRadius: 6, 
+                          padding: '10px 12px', 
+                          marginBottom: 12, 
+                          display: 'flex', 
+                          justifyContent: 'space-between', 
+                          alignItems: 'center' 
+                        }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--blue-dark)' }}>SELECCIÓN:</span>
+                          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--blue-dark)' }}>
+                            {calcGas} {calcCapacidad}
+                          </span>
+                        </div>
+
+                        {/* Teclado - Fila 1: Gases */}
+                        <div style={{ marginBottom: 10 }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>1. Seleccionar Gas</div>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+                            {['CO2', 'Oxígeno', 'Argón', 'Nitrógeno', 'Acetileno', 'Mezcla Ar+CO2', 'Mezcla especial'].map(g => (
+                              <button
+                                key={g}
+                                type="button"
+                                onClick={() => {
+                                  setCalcGas(g)
+                                  if (g === 'Acetileno') {
+                                    setCalcCapacidad('6 kg')
+                                  } else {
+                                    setCalcCapacidad('50 L')
+                                  }
+                                }}
+                                style={{
+                                  padding: '8px 4px',
+                                  fontSize: 11,
+                                  fontWeight: calcGas === g ? 700 : 500,
+                                  background: calcGas === g ? 'var(--blue)' : 'var(--surface-1)',
+                                  color: calcGas === g ? '#fff' : 'var(--text-secondary)',
+                                  border: `1px solid ${calcGas === g ? 'var(--blue)' : 'var(--border)'}`,
+                                  borderRadius: 6,
+                                  cursor: 'pointer',
+                                  transition: 'all 0.15s ease',
+                                  boxShadow: calcGas === g ? '0 2px 4px rgba(26, 95, 168, 0.2)' : 'none'
+                                }}
+                              >
+                                {g}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Teclado - Fila 2: Capacidad */}
+                        <div style={{ marginBottom: 14 }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>2. Seleccionar Capacidad</div>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+                            {(calcGas === 'Acetileno' ? ['1 kg', '1.5 kg', '2 kg', '3 kg', '4 kg', '5 kg', '6 kg', '8 kg'] : ['8 L', '10 L', '50 L']).map(cap => (
+                              <button
+                                key={cap}
+                                type="button"
+                                onClick={() => setCalcCapacidad(cap)}
+                                style={{
+                                  padding: '8px 4px',
+                                  fontSize: 11,
+                                  fontWeight: calcCapacidad === cap ? 700 : 500,
+                                  background: calcCapacidad === cap ? 'var(--blue-mid)' : 'var(--surface-1)',
+                                  color: calcCapacidad === cap ? '#fff' : 'var(--text-secondary)',
+                                  border: `1px solid ${calcCapacidad === cap ? 'var(--blue-mid)' : 'var(--border)'}`,
+                                  borderRadius: 6,
+                                  cursor: 'pointer',
+                                  transition: 'all 0.15s ease',
+                                  boxShadow: calcCapacidad === cap ? '0 2px 4px rgba(59, 125, 216, 0.2)' : 'none'
+                                }}
+                              >
+                                {cap}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Botón de Acción Principal */}
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          onClick={() => {
+                            const baseDesc = `${calcGas} ${calcCapacidad}`
+                            let desc = baseDesc
+                            let suffix = 2
+                            while (recambios.includes(desc)) {
+                              desc = `${baseDesc} #${suffix}`
+                              suffix++
+                            }
+                            setRecambios(prev => [...prev, desc])
+                            toast(`Agregado retorno: ${desc}`, 'success')
+                          }}
+                          style={{ width: '100%', height: 44, fontSize: 13, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                        >
+                          <i className="ti ti-plus" /> Agregar Retorno
+                        </button>
+                      </div>
+
+                      {/* Opción Alternativa: Cargar Código QR o Manual */}
+                      <div style={{ background: 'var(--surface-2)', padding: 12, borderRadius: 10, border: '1px solid var(--border)', marginBottom: 16 }}>
+                        <div style={{ fontWeight: 600, fontSize: 11, marginBottom: 8, color: 'var(--text-secondary)' }}>
+                          O ESCANEAR / ESCRIBIR CÓDIGO DEL RETORNO
+                        </div>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <input
+                            placeholder="Ej: CLI-001 o código de tubo..."
+                            value={nuevoRecambioId}
+                            onChange={e => setNuevoRecambioId(e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), agregarRecambioManual())}
+                            style={{ flex: 1, minHeight: 36, fontSize: 13 }}
+                          />
+                          <button className="btn btn-secondary btn-sm" onClick={agregarRecambioManual}>
+                            Agregar
+                          </button>
+                          {escaneandoRecambio ? (
+                            <button className="btn btn-danger btn-sm" onClick={stopScannerRecambio}>
+                              Apagar
+                            </button>
+                          ) : (
+                            <button className="btn btn-secondary btn-sm" onClick={startScannerRecambio} title="Escanear QR">
+                              <i className="ti ti-qrcode" />
+                            </button>
+                          )}
+                        </div>
+
+                        {escaneandoRecambio && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center', background: '#000', padding: 12, borderRadius: 8, marginTop: 10 }}>
+                            <div id={SCANNER_ID} style={{ width: '100%', maxWidth: '320px', overflow: 'hidden' }} />
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Lista de Recambios Agregados */}
+                      <div style={{ marginBottom: 20 }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8 }}>
+                          CILINDROS RETORNADOS:
+                        </div>
+                        {recambios.length > 0 ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {recambios.map(rId => (
+                              <div key={rId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface-2)', border: '1px solid var(--border)', padding: '8px 12px', borderRadius: 8, fontSize: 13 }}>
+                                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{rId}</span>
+                                <button className="btn-icon btn-sm" onClick={() => setRecambios(prev => prev.filter(x => x !== rId))} style={{ background: 'rgba(239, 68, 68, 0.1)', border: 'none', cursor: 'pointer', borderRadius: 4, width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                  <i className="ti ti-trash" style={{ color: 'var(--red)' }} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 11, fontStyle: 'italic', color: 'var(--text-muted)', background: 'var(--surface-2)', padding: '10px 12px', border: '1px dashed var(--border)', borderRadius: 8, textAlign: 'center' }}>
+                            Ningún cilindro agregado para recambio (presiona continuar si no retorna)
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Botones de Navegación */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        <button
+                          className="btn btn-primary"
+                          onClick={() => setEntregaStep(3)}
+                          style={{ width: '100%', height: 48, fontSize: 14, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                        >
+                          Siguiente: Imprimir Remisión <i className="ti ti-arrow-right" />
+                        </button>
+                        <button
+                          className="btn btn-outline"
+                          onClick={() => setEntregaStep(1)}
+                          style={{ width: '100%', height: 44, fontSize: 13, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                        >
+                          <i className="ti ti-arrow-left" /> Volver a Escaneo
+                        </button>
+                      </div>
+                    </>
+                  )}
+
+                  {entregaStep === 3 && (
+                    // PASO 3: IMPRIMIR REMISIÓN
+                    <>
+                      <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, color: 'var(--text-primary)' }}>
+                        3. IMPRIMIR REMISIÓN
+                      </div>
+                      
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px 10px', textAlign: 'center', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 12, marginBottom: 16 }}>
+                        <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'var(--blue-light)', color: 'var(--blue)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
+                          <i className="ti ti-printer" style={{ fontSize: 26 }} />
+                        </div>
+                        <h4 style={{ margin: '0 0 6px', fontSize: 16, fontWeight: 700 }}>Impresión del Recibo</h4>
+                        <p style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--text-secondary)', maxWidth: 240 }}>
+                          Antes de confirmar la entrega, podés imprimir el comprobante de remisión para el cliente.
+                        </p>
+                        
+                        <button
+                          className="btn btn-primary"
+                          onClick={() => handlePrintClick(activeEntrega)}
+                          style={{ width: '100%', height: 44, fontSize: 13, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+                        >
+                          <i className="ti ti-printer" /> Imprimir Remisión (Ticket)
+                        </button>
+                      </div>
+
+                      {/* Botones de Navegación */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        <button
+                          className="btn btn-primary"
+                          onClick={() => setEntregaStep(4)}
+                          style={{ width: '100%', height: 48, fontSize: 14, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                        >
+                          Siguiente: Confirmar y Guardar <i className="ti ti-arrow-right" />
+                        </button>
+                        <button
+                          className="btn btn-outline"
+                          onClick={() => setEntregaStep(2)}
+                          style={{ width: '100%', height: 44, fontSize: 13, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                        >
+                          <i className="ti ti-arrow-left" /> Volver a Retorno
+                        </button>
+                      </div>
+                    </>
+                  )}
+
+                  {entregaStep === 4 && (
+                    // PASO 4: CONFIRMAR Y GUARDAR
+                    <>
+                      <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, color: 'var(--text-primary)' }}>
+                        4. RESUMEN Y CONFIRMACIÓN
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        {/* Resumen Entregas */}
+                        <div style={{ background: '#ecfdf5', border: '1px solid #10b981', padding: '12px 14px', borderRadius: 8 }}>
+                          <div style={{ fontWeight: 700, fontSize: 13, color: '#065f46', display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <i className="ti ti-circle-check-filled" style={{ fontSize: 18 }} />
+                            Entregando ({scannedIds.length} tubos):
+                          </div>
+                          <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            {activeEntrega.detalles?.filter(d => scannedIds.includes(d.tuboId)).map(d => (
+                              <div key={d.id} style={{ fontSize: 12, color: '#047857', fontFamily: 'var(--font-mono)' }}>
+                                • {d.tuboId} ({d.tubo?.gas} {d.tubo?.talla})
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Resumen Retornos */}
+                        <div style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', padding: '12px 14px', borderRadius: 8 }}>
+                          <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <i className="ti ti-arrow-back-up" style={{ fontSize: 18, color: 'var(--blue)' }} />
+                            Retornando ({recambios.length} tubos):
+                          </div>
+                          {recambios.length > 0 ? (
+                            <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              {recambios.map(rId => (
+                                <div key={rId} style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                                  • {rId}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: 11, fontStyle: 'italic', color: 'var(--text-muted)', marginTop: 4 }}>
+                              Ningún cilindro retornado
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Botones de Confirmación */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 14 }}>
+                          <button
+                            className={`btn ${todosListos ? 'btn-success' : 'btn-warning'}`}
+                            disabled={scannedIds.length === 0}
+                            onClick={() => confirmarEntrega(activeEntrega.id)}
+                            style={{ width: '100%', height: 50, fontSize: 14, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                          >
+                            <i className="ti ti-check" />
+                            {todosListos ? 'Confirmar y Finalizar Entrega' : 'Confirmar Entrega Parcial'}
+                          </button>
+
+                          <button
+                            className="btn btn-outline"
+                            onClick={() => rechazarEntrega(activeEntrega.id)}
+                            style={{ width: '100%', height: 44, fontSize: 13, borderColor: '#ef4444', color: '#ef4444', fontWeight: 600, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: 'transparent' }}
+                          >
+                            <i className="ti ti-x" />
+                            No concretar entrega
+                          </button>
+
+                          <button
+                            className="btn btn-outline"
+                            onClick={() => setEntregaStep(3)}
+                            style={{ width: '100%', height: 44, fontSize: 13, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                          >
+                            <i className="ti ti-arrow-left" /> Volver a Impresión
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
+            </div>
             )
         )}
       </div>
 
-      {activeEntrega && createPortal(
+      {(entregaParaImprimir || activeEntrega) && createPortal(
         <div className="print-ticket-container">
           <div className="ticket-header">
-            <h3 style={{ margin: '0 0 4px', fontSize: '14px', fontWeight: 'bold' }}>GasTubos</h3>
-            <p style={{ margin: 0, fontSize: '10px' }}>Gestión de Gases Industriales</p>
-            <p style={{ margin: '4px 0 0', fontSize: '11px', fontWeight: 'bold' }}>REMISIÓN: {activeEntrega.numero}</p>
+            <h3 style={{ margin: '0 0 4px', fontSize: '14px', fontWeight: 'bold' }}>{(nombre_empresa || 'GasTubos').toUpperCase()}</h3>
+            {direccion ? <p style={{ margin: 0, fontSize: '10px' }}>{direccion}</p> : <p style={{ margin: 0, fontSize: '10px' }}>Gestión de Gases Industriales</p>}
+            {telefono && <p style={{ margin: '2px 0 0', fontSize: '10px' }}>Tel: {telefono}</p>}
+            <p style={{ margin: '4px 0 0', fontSize: '11px', fontWeight: 'bold' }}>REMISIÓN: {(entregaParaImprimir || activeEntrega).numero}</p>
           </div>
           
           <div style={{ margin: '8px 0', fontSize: '11px' }}>
-            <strong>Cliente:</strong> {activeEntrega.cliente?.nombre}<br />
-            <strong>RUC/CI:</strong> {activeEntrega.cliente?.ruc || '—'}<br />
-            <strong>Dirección:</strong> {activeEntrega.direccionEntrega}<br />
-            <strong>Fecha:</strong> {new Date(activeEntrega.fechaEntrega).toLocaleString('es-PY')}<br />
-            <strong>Chofer:</strong> {activeEntrega.repartidor?.nombre || 'Sin asignar'}<br />
-            <strong>Tipo:</strong> {activeEntrega.tipoOperacion.replace('_', ' ')}
+            <strong>Cliente:</strong> {(entregaParaImprimir || activeEntrega).cliente?.nombre}<br />
+            <strong>RUC/CI:</strong> {(entregaParaImprimir || activeEntrega).cliente?.ruc || '—'}<br />
+            <strong>Dirección:</strong> {(entregaParaImprimir || activeEntrega).direccionEntrega}<br />
+            <strong>Fecha:</strong> {new Date((entregaParaImprimir || activeEntrega).fechaEntrega).toLocaleString('es-PY')}<br />
+            <strong>Chofer:</strong> {(entregaParaImprimir || activeEntrega).repartidor?.nombre || 'Sin asignar'}<br />
+            <strong>Tipo:</strong> {(entregaParaImprimir || activeEntrega).tipoOperacion.replace('_', ' ')}
           </div>
           
           <table className="ticket-table">
@@ -1432,69 +1631,63 @@ export default function RepartoPage() {
               <tr>
                 <th style={{ textAlign: 'left' }}>Tubo / Gas</th>
                 <th style={{ textAlign: 'center' }}>Cant.</th>
-                <th style={{ textAlign: 'right' }}>Precio</th>
                 <th style={{ textAlign: 'right' }}>Subtotal</th>
               </tr>
             </thead>
             <tbody>
-              {activeEntrega.detalles?.map(d => (
+              {(entregaParaImprimir || activeEntrega).detalles?.map(d => (
                 <tr key={d.id}>
                   <td>
-                    {d.tuboId}<br />
+                    <strong>{d.tuboId}</strong><br />
                     <span style={{ fontSize: '10px', color: '#555' }}>
                       {d.tubo?.gas} {d.tubo?.talla}
                     </span>
                   </td>
                   <td style={{ textAlign: 'center' }}>
-                    {Number(d.cantidadGas)} {d.unidadGas}
+                    {Number(d.cantidadGas)} {d.unidadGas}<br />
+                    <span style={{ fontSize: '9px', color: '#888' }}>
+                      x {Number(d.precioUnitario).toLocaleString('es-PY')}
+                    </span>
                   </td>
-                  <td style={{ textAlign: 'right' }}>
-                    {Number(d.precioUnitario).toLocaleString('es-PY')}
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
+                  <td style={{ textAlign: 'right', fontWeight: '500' }}>
                     {Number(d.subtotal).toLocaleString('es-PY')}
                   </td>
                 </tr>
               ))}
               <tr style={{ borderTop: '1px dashed #000' }}>
-                <td colSpan="3" style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>DELIVERY:</td>
+                <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>DELIVERY:</td>
                 <td style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>
-                  {Number(activeEntrega.costoDelivery || 0).toLocaleString('es-PY')} GS
+                  {Number((entregaParaImprimir || activeEntrega).costoDelivery || 0).toLocaleString('es-PY')} GS
                 </td>
               </tr>
               <tr>
-                <td colSpan="3" style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px' }}>TOTAL:</td>
-                <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px' }}>
+                <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px' }}>TOTAL:</td>
+                <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px', color: 'var(--blue)' }}>
                   {(
-                    (activeEntrega.detalles?.reduce((acc, d) => acc + Number(d.subtotal), 0) || 0) +
-                    Number(activeEntrega.costoDelivery || 0)
+                    ((entregaParaImprimir || activeEntrega).detalles?.reduce((acc, d) => acc + Number(d.subtotal), 0) || 0) +
+                    Number((entregaParaImprimir || activeEntrega).costoDelivery || 0)
                   ).toLocaleString('es-PY')} GS
                 </td>
               </tr>
             </tbody>
           </table>
 
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: '12px 0', borderTop: '1px dashed #000', paddingTop: '8px' }}>
-            <QRCodeSVG value={getRemisionUrl(activeEntrega.numero)} size={80} level="M" />
-            <span style={{ fontSize: '9px', marginTop: '2px', fontFamily: 'monospace' }}>
-              {activeEntrega.numero}
-            </span>
-          </div>
+
           
-          {recambiosParaImprimir(activeEntrega).length > 0 && (
+          {recambiosParaImprimir((entregaParaImprimir || activeEntrega)).length > 0 && (
             <div style={{ margin: '8px 0', fontSize: '10px', borderTop: '1px dashed #000', paddingTop: '4px' }}>
               <strong>Recambios Recibidos:</strong>
               <ul style={{ paddingLeft: 14, margin: 0 }}>
-                {recambiosParaImprimir(activeEntrega).map((desc, i) => (
+                {recambiosParaImprimir((entregaParaImprimir || activeEntrega)).map((desc, i) => (
                   <li key={i}>{desc}</li>
                 ))}
               </ul>
             </div>
           )}
 
-          {activeEntrega.observaciones && (
+          {(entregaParaImprimir || activeEntrega).observaciones && (
             <div style={{ margin: '8px 0', fontSize: '10px', fontStyle: 'italic', borderTop: '1px dashed #000', paddingTop: '4px' }}>
-              <strong>Obs:</strong> {activeEntrega.observaciones}
+              <strong>Obs:</strong> {(entregaParaImprimir || activeEntrega).observaciones}
             </div>
           )}
           
@@ -1509,6 +1702,126 @@ export default function RepartoPage() {
         </div>,
         document.body
       )}
+
+      {/* Modal de Detalle / Previsualización de Ticket desde Historial */}
+      <Modal
+        open={modalDetalle}
+        title={`Detalle de Entrega: ${entregaSeleccionada?.numero}`}
+        onClose={() => setModalDetalle(false)}
+        width={400}
+        footer={
+          <div style={{ display: 'flex', gap: 10, width: '100%' }}>
+            <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setModalDetalle(false)}>
+              Cerrar
+            </button>
+            <button 
+              className="btn btn-primary" 
+              style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }} 
+              onClick={() => handlePrintClick(entregaSeleccionada)}
+            >
+              <i className="ti ti-printer" /> Imprimir Remisión
+            </button>
+          </div>
+        }
+      >
+        {entregaSeleccionada && (
+          <div className="ticket-preview">
+            <div className="ticket-header">
+              <h3 style={{ margin: '0 0 4px', fontSize: '14px', fontWeight: 'bold' }}>{(nombre_empresa || 'GasTubos').toUpperCase()}</h3>
+              {direccion ? <p style={{ margin: 0, fontSize: '10px', color: '#666' }}>{direccion}</p> : <p style={{ margin: 0, fontSize: '10px', color: '#666' }}>Gestión de Gases Industriales</p>}
+              {telefono && <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#666' }}>Tel: {telefono}</p>}
+              <p style={{ margin: '6px 0 0', fontSize: '11px', fontWeight: 'bold' }}>REMISIÓN: {entregaSeleccionada.numero}</p>
+            </div>
+            
+            <div style={{ margin: '10px 0', fontSize: '11px', borderBottom: '1px dashed #ddd', paddingBottom: '8px' }}>
+              <strong>Cliente:</strong> {entregaSeleccionada.cliente?.nombre}<br />
+              <strong>RUC/CI:</strong> {entregaSeleccionada.cliente?.ruc || '—'}<br />
+              <strong>Dirección:</strong> {entregaSeleccionada.direccionEntrega}<br />
+              <strong>Fecha:</strong> {new Date(entregaSeleccionada.fechaEntrega).toLocaleString('es-PY')}<br />
+              <strong>Chofer:</strong> {entregaSeleccionada.repartidor?.nombre || 'Sin asignar'}<br />
+              <strong>Tipo:</strong> {(entregaSeleccionada.tipoOperacion || '').replace('_', ' ')}
+            </div>
+            
+            <table className="ticket-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px dashed #000' }}>
+                  <th style={{ textAlign: 'left', paddingBottom: '4px' }}>Tubo / Gas</th>
+                  <th style={{ textAlign: 'center', paddingBottom: '4px' }}>Cant.</th>
+                  <th style={{ textAlign: 'right', paddingBottom: '4px' }}>Subtotal</th>
+                </tr>
+              </thead>
+              <tbody>
+                {entregaSeleccionada.detalles?.map(d => (
+                  <tr key={d.id}>
+                    <td style={{ paddingTop: '6px', paddingBottom: '4px' }}>
+                      <strong>{d.tuboId}</strong><br />
+                      <span style={{ fontSize: '10px', color: '#555' }}>
+                        {d.tubo?.gas} {d.tubo?.talla}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'center', paddingTop: '6px', paddingBottom: '4px' }}>
+                      {Number(d.cantidadGas)} {d.unidadGas}<br />
+                      <span style={{ fontSize: '9px', color: '#888' }}>
+                        x {Number(d.precioUnitario).toLocaleString('es-PY')}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'right', fontWeight: '500', paddingTop: '6px', paddingBottom: '4px' }}>
+                      {Number(d.subtotal).toLocaleString('es-PY')} GS
+                    </td>
+                  </tr>
+                ))}
+                <tr style={{ borderTop: '1px dashed #000' }}>
+                  <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>DELIVERY:</td>
+                  <td style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>
+                    {Number(entregaSeleccionada.costoDelivery || 0).toLocaleString('es-PY')} GS
+                  </td>
+                </tr>
+                <tr>
+                  <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px' }}>TOTAL:</td>
+                  <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px', color: 'var(--blue)' }}>
+                    {(
+                      (entregaSeleccionada.detalles?.reduce((acc, d) => acc + Number(d.subtotal), 0) || 0) +
+                      Number(entregaSeleccionada.costoDelivery || 0)
+                    ).toLocaleString('es-PY')} GS
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+
+
+            
+            {entregaSeleccionada.recambios && entregaSeleccionada.recambios.length > 0 && (
+              <div style={{ margin: '8px 0', fontSize: '10px', borderTop: '1px dashed #ddd', paddingTop: '6px' }}>
+                <strong style={{ display: 'block', marginBottom: 4 }}>Recambios Recibidos:</strong>
+                <ul style={{ paddingLeft: 14, margin: 0, color: '#555' }}>
+                  {entregaSeleccionada.recambios.map(r => {
+                    const tubo = r.tuboEntregado
+                    const desc = tubo.observaciones && (tubo.observaciones.includes(' ') || tubo.observaciones.length > 15)
+                      ? tubo.observaciones 
+                      : `${tubo.id} (${tubo.gas} ${tubo.talla || ''})`
+                    return <li key={r.id}>{desc}</li>
+                  })}
+                </ul>
+              </div>
+            )}
+
+            {entregaSeleccionada.observaciones && (
+              <div style={{ margin: '8px 0', fontSize: '10px', fontStyle: 'italic', borderTop: '1px dashed #ddd', paddingTop: '6px', color: '#555' }}>
+                <strong>Obs:</strong> {entregaSeleccionada.observaciones}
+              </div>
+            )}
+            
+            <div className="ticket-signatures" style={{ display: 'flex', justifyContent: 'space-between', marginTop: '24px', paddingTop: '10px' }}>
+              <div className="signature-line" style={{ width: '45%', borderTop: '1px solid #000', textAlign: 'center', fontSize: '10px', paddingTop: '4px' }}>Firma Chofer</div>
+              <div className="signature-line" style={{ width: '45%', borderTop: '1px solid #000', textAlign: 'center', fontSize: '10px', paddingTop: '4px' }}>Firma Cliente</div>
+            </div>
+            
+            <div className="ticket-footer" style={{ textAlign: 'center', borderTop: '1px dashed #000', paddingTop: '8px', marginTop: '16px', fontSize: '10px' }}>
+              ¡Gracias por su preferencia!
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/* Modal para selección de Impresora Bluetooth (HM-A300E) */}
       <Modal
@@ -1526,7 +1839,7 @@ export default function RepartoPage() {
             </button>
             <button
               className="btn btn-primary"
-              onClick={() => imprimirBluetooth(activeEntrega, selectedDeviceAddress)}
+              onClick={() => imprimirBluetooth(entregaParaImprimir || activeEntrega, selectedDeviceAddress)}
               disabled={connectingPrinter || !selectedDeviceAddress}
               style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
             >

@@ -345,3 +345,12 @@ model Camion {
   @@map("camiones")
 }
 
+// ─── CONFIGURACION DE EMPRESA (MARCA) ──────────────────────────────────────────
+
+model Config {
+  key   String @id
+  value String
+
+  @@map("config")
+}
+

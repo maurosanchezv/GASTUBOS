@@ -10,6 +10,7 @@ export default function PerfilPage() {
   const [nombre, setNombre] = useState(user?.nombre || '')
   const [email,  setEmail]  = useState(user?.email || '')
   const [pass,   setPass]   = useState('')
+  const [verPassword, setVerPassword] = useState(false)
   const [saving, setSaving] = useState(false)
   const [avatar, setAvatar] = useState(user?.avatar || null)
   
@@ -84,7 +85,34 @@ export default function PerfilPage() {
                 <input value={user?.rol} disabled style={{ background: 'var(--surface-2)', cursor: 'not-allowed' }} />
               </FormGroup>
               <FormGroup label="Nueva contraseña" hint="Dejar en blanco para no cambiar">
-                <input type="password" value={pass} onChange={e => setPass(e.target.value)} placeholder="Mínimo 8 caracteres" />
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type={verPassword ? "text" : "password"}
+                    value={pass}
+                    onChange={e => setPass(e.target.value)}
+                    placeholder="Mínimo 8 caracteres"
+                    style={{ paddingRight: 40 }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setVerPassword(!verPassword)}
+                    style={{
+                      position: 'absolute',
+                      right: 12,
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      padding: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      color: 'var(--text-secondary)'
+                    }}
+                  >
+                    <i className={`ti ti-eye${verPassword ? '-off' : ''}`} style={{ fontSize: 18 }} />
+                  </button>
+                </div>
               </FormGroup>
             </div>
 

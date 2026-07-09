@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import api from '../services/api.js'
 import { PageHeader, StateBadge, Modal, FormGroup, Spinner, EmptyState, GasDot } from '../components/ui.jsx'
+import { useConfigStore } from '../store/configStore.js'
 import { useToast } from '../components/ui.jsx'
 
 const ESTADOS = ['DISPONIBLE','CARGADO','VACIO','ENTREGADO','ALQUILADO','VENDIDO','RESERVADO','PERDIDO','DEVUELTO','EN_REVISION']
@@ -15,6 +16,7 @@ const EMPTY_TUBO = {
 }
 
 export default function TubosPage() {
+  const { nombre_empresa } = useConfigStore()
   const [tubos,   setTubos]   = useState([])
   const [total,   setTotal]   = useState(0)
   const [loading, setLoading] = useState(true)
@@ -96,7 +98,15 @@ export default function TubosPage() {
         subtitle={`${total} tubos registrados`}
         actions={
           <>
-            <button className="btn btn-sm" onClick={load}><i className="ti ti-refresh" /></button>
+            <button
+              className="btn btn-sm"
+              onClick={load}
+              disabled={loading}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              <i className={`ti ti-refresh ${loading ? 'ti-spin' : ''}`} />
+              Actualizar
+            </button>
             <button className="btn btn-sm btn-primary" onClick={() => setModal(true)}>
               <i className="ti ti-plus" /> Nuevo Tubo
             </button>
@@ -285,7 +295,7 @@ export default function TubosPage() {
             </FormGroup>
             <FormGroup label="Propietario">
               <select value={form.propietario} onChange={f('propietario')}>
-                <option value="PROPIO">Propio</option>
+                <option value="PROPIO">{nombre_empresa || 'Propio'}</option>
                 <option value="CLIENTE">Cliente</option>
               </select>
             </FormGroup>

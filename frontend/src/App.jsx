@@ -3,6 +3,7 @@
 import { useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from './store/authStore.js'
+import { useConfigStore } from './store/configStore.js'
 
 // Layout
 import Layout from './components/Layout.jsx'
@@ -23,10 +24,12 @@ import PerfilPage      from './pages/PerfilPage.jsx'
 import UsuariosPage    from './pages/UsuariosPage.jsx'
 import TarifasPage     from './pages/TarifasPage.jsx'
 import CargasPage      from './pages/CargasPage.jsx'
+import ConfiguracionPage from './pages/ConfiguracionPage.jsx'
 import RepartoPage     from './pages/RepartoPage.jsx'
 import RemisionPage    from './pages/RemisionPage.jsx'
 import CamionesPage    from './pages/CamionesPage.jsx'
 import TuboPublicoPage from './pages/TuboPublicoPage.jsx'  // sin auth
+import CilindrosTercerosPage from './pages/CilindrosTercerosPage.jsx'
 
 // El REPARTIDOR no debe ver el Dashboard administrativo; lo desviamos
 // directo a su hoja de ruta. El resto de los roles entra al Dashboard.
@@ -46,9 +49,13 @@ function PrivateRoute({ children, roles }) {
 
 export default function App() {
   const { token, fetchMe } = useAuthStore()
+  const { fetchConfig } = useConfigStore()
 
   useEffect(() => {
-    if (token) fetchMe()
+    if (token) {
+      fetchMe()
+      fetchConfig()
+    }
   }, [token])
 
   return (
@@ -69,6 +76,9 @@ export default function App() {
           <Route path="tubos/:id/detalle" element={
             <PrivateRoute roles={['ADMIN', 'SUPERVISOR', 'OPERADOR']}><TuboDetallePage /></PrivateRoute>
           } />
+          <Route path="cilindros-terceros" element={
+            <PrivateRoute roles={['ADMIN', 'SUPERVISOR', 'OPERADOR']}><CilindrosTercerosPage /></PrivateRoute>
+          } />
           <Route path="clientes" element={
             <PrivateRoute roles={['ADMIN', 'SUPERVISOR', 'OPERADOR']}><ClientesPage /></PrivateRoute>
           } />
@@ -79,7 +89,7 @@ export default function App() {
             <PrivateRoute roles={['ADMIN', 'SUPERVISOR', 'OPERADOR']}><CargasPage /></PrivateRoute>
           } />
           <Route path="devoluciones" element={
-            <PrivateRoute roles={['ADMIN', 'SUPERVISOR', 'OPERADOR']}><DevolucionesPage /></PrivateRoute>
+            <PrivateRoute roles={['ADMIN', 'SUPERVISOR', 'OPERADOR', 'REPARTIDOR']}><DevolucionesPage /></PrivateRoute>
           } />
           <Route path="alquileres" element={
             <PrivateRoute roles={['ADMIN', 'SUPERVISOR', 'OPERADOR']}><AlquileresPage /></PrivateRoute>
@@ -101,7 +111,10 @@ export default function App() {
           } />
           <Route path="reparto" element={<RepartoPage />} />
           <Route path="remision/:numero" element={<RemisionPage />} />
-          <Route path="perfil" element={<PerfilPage />} />
+           <Route path="perfil" element={<PerfilPage />} />
+          <Route path="configuracion" element={
+            <PrivateRoute roles={['ADMIN']}><ConfiguracionPage /></PrivateRoute>
+          } />
           <Route path="usuarios" element={
             <PrivateRoute roles={['ADMIN']}><UsuariosPage /></PrivateRoute>
           } />

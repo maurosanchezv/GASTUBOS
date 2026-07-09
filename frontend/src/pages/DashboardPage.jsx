@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api.js'
-import { PageHeader, StateBadge, Spinner } from '../components/ui.jsx'
+import { PageHeader, Spinner } from '../components/ui.jsx'
 
 const ESTADO_META = {
   DISPONIBLE:  { label: 'Disponibles',   icon: 'ti-circle-check', cls: 'stat-green' },
@@ -65,6 +65,190 @@ export default function DashboardPage() {
             <div><strong>{porEstado.PERDIDO} tubo{porEstado.PERDIDO > 1 ? 's' : ''} perdido{porEstado.PERDIDO > 1 ? 's' : ''}</strong> sin ubicación registrada</div>
           </div>
         )}
+
+        {/* Accesos Rápidos */}
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <i className="ti ti-rocket" style={{ fontSize: 13, color: 'var(--blue)' }} /> Accesos Rápidos
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+            <div 
+              className="card" 
+              style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: 12, 
+                padding: '12px 16px', 
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                backgroundColor: 'var(--surface)',
+                border: '1px solid var(--border)'
+              }}
+              onClick={() => navigate('/entregas?tab=nueva')}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.04)';
+                e.currentTarget.style.borderColor = 'var(--blue)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'none';
+                e.currentTarget.style.boxShadow = 'none';
+                e.currentTarget.style.borderColor = 'var(--border)';
+              }}
+            >
+              <div style={{ 
+                width: 36, 
+                height: 36, 
+                borderRadius: 'var(--radius-md)', 
+                backgroundColor: 'var(--blue-light)', 
+                color: 'var(--blue)', 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center',
+                fontSize: 16,
+                flexShrink: 0
+              }}>
+                <i className="ti ti-truck-delivery" />
+              </div>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-primary)' }}>Nueva Entrega</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Registrar salida de tubos</div>
+              </div>
+            </div>
+
+            <div 
+              className="card" 
+              style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: 12, 
+                padding: '12px 16px', 
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                backgroundColor: 'var(--surface)',
+                border: '1px solid var(--border)'
+              }}
+              onClick={() => navigate('/entregas?tab=historial')}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.04)';
+                e.currentTarget.style.borderColor = 'var(--blue)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'none';
+                e.currentTarget.style.boxShadow = 'none';
+                e.currentTarget.style.borderColor = 'var(--border)';
+              }}
+            >
+              <div style={{ 
+                width: 36, 
+                height: 36, 
+                borderRadius: 'var(--radius-md)', 
+                backgroundColor: 'var(--green-light)', 
+                color: 'var(--green)', 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center',
+                fontSize: 16,
+                flexShrink: 0
+              }}>
+                <i className="ti ti-history" />
+              </div>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-primary)' }}>Historial de Entregas</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Consultar y reimprimir</div>
+              </div>
+            </div>
+
+            <div 
+              className="card" 
+              style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: 12, 
+                padding: '12px 16px', 
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                backgroundColor: 'var(--surface)',
+                border: '1px solid var(--border)'
+              }}
+              onClick={() => navigate('/tubos')}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.04)';
+                e.currentTarget.style.borderColor = 'var(--blue)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'none';
+                e.currentTarget.style.boxShadow = 'none';
+                e.currentTarget.style.borderColor = 'var(--border)';
+              }}
+            >
+              <div style={{ 
+                width: 36, 
+                height: 36, 
+                borderRadius: 'var(--radius-md)', 
+                backgroundColor: 'var(--purple-light)', 
+                color: 'var(--purple)', 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center',
+                fontSize: 16,
+                flexShrink: 0
+              }}>
+                <i className="ti ti-cylinder" />
+              </div>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-primary)' }}>Control de Tubos</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Ver stock y estados</div>
+              </div>
+            </div>
+
+            <div 
+              className="card" 
+              style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: 12, 
+                padding: '12px 16px', 
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                backgroundColor: 'var(--surface)',
+                border: '1px solid var(--border)'
+              }}
+              onClick={() => navigate('/cargas')}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.04)';
+                e.currentTarget.style.borderColor = 'var(--blue)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'none';
+                e.currentTarget.style.boxShadow = 'none';
+                e.currentTarget.style.borderColor = 'var(--border)';
+              }}
+            >
+              <div style={{ 
+                width: 36, 
+                height: 36, 
+                borderRadius: 'var(--radius-md)', 
+                backgroundColor: 'var(--coral-light)', 
+                color: 'var(--coral)', 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center',
+                fontSize: 16,
+                flexShrink: 0
+              }}>
+                <i className="ti ti-gas-station" />
+              </div>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-primary)' }}>Registrar Carga</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Carga de gas y stock</div>
+              </div>
+            </div>
+          </div>
+        </div>
 
         {/* Stats grid */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10, marginBottom: 20 }}>

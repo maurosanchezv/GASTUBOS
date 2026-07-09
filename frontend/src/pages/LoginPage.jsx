@@ -5,6 +5,7 @@ import { useAuthStore } from '../store/authStore.js'
 
 export default function LoginPage() {
   const [form, setForm]     = useState({ username: '', password: '' })
+  const [verPassword, setVerPassword] = useState(false)
   const [error, setError]   = useState('')
   const { login, loading }  = useAuthStore()
   const navigate            = useNavigate()
@@ -69,13 +70,35 @@ export default function LoginPage() {
             <label className="form-label" style={{ marginBottom: 6, display: 'block' }}>
               Contraseña
             </label>
-            <input
-              type="password"
-              placeholder="••••••••"
-              value={form.password}
-              onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
-              required
-            />
+            <div style={{ position: 'relative' }}>
+              <input
+                type={verPassword ? "text" : "password"}
+                placeholder="••••••••"
+                value={form.password}
+                onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+                required
+                style={{ paddingRight: 40 }}
+              />
+              <button
+                type="button"
+                onClick={() => setVerPassword(!verPassword)}
+                style={{
+                  position: 'absolute',
+                  right: 12,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  color: 'var(--text-secondary)'
+                }}
+              >
+                <i className={`ti ti-eye${verPassword ? '-off' : ''}`} style={{ fontSize: 18 }} />
+              </button>
+            </div>
           </div>
 
           {error && (

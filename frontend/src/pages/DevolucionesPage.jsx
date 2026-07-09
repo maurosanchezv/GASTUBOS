@@ -3,10 +3,14 @@ import { useState, useEffect, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Html5Qrcode } from 'html5-qrcode'
 import api from '../services/api.js'
+import { useAuthStore } from '../store/authStore.js'
 import { PageHeader, StateBadge, GasDot, Spinner, Modal } from '../components/ui.jsx'
 import { useToast } from '../components/ui.jsx'
 
 export default function DevolucionesPage() {
+  const { user } = useAuthStore()
+  const [esMovil, setEsMovil] = useState(window.innerWidth <= 768)
+  const [pendientesAbierto, setPendientesAbierto] = useState(window.innerWidth > 768)
   const [tuboId,  setTuboId]  = useState('')
   const [tubo,    setTubo]    = useState(null)
   const [estado,  setEstado]  = useState('DEVUELTO')
@@ -95,6 +99,19 @@ export default function DevolucionesPage() {
     }
   }, [])
 
+  // Escuchar cambio de tamaño de pantalla para adaptar plegado
+  useEffect(() => {
+    const handleResize = () => {
+      const mobile = window.innerWidth <= 768
+      setEsMovil(mobile)
+      if (!mobile) {
+        setPendientesAbierto(true)
+      }
+    }
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
+
   // Cerrar dropdown al hacer clic afuera
   useEffect(() => {
     const handler = e => {
@@ -141,7 +158,7 @@ export default function DevolucionesPage() {
     <>
       <PageHeader title="Devoluciones" subtitle="Registrar retorno de tubos de clientes" />
       <div className="app-content">
-        <div className="responsive-grid">
+        <div className="responsive-grid" style={{ flexDirection: 'column' }}>
           <form onSubmit={handleSubmit}>
             <div className="card">
               <div className="card-title" style={{ marginBottom: 16 }}>Identificar Tubo</div>
@@ -251,59 +268,82 @@ export default function DevolucionesPage() {
                 </div>
               )}
 
-              {/* Datos de la Devolución */}
-              <div className="form-grid" style={{ opacity: tubo ? 1 : 0.5, pointerEvents: tubo ? 'all' : 'none' }}>
-                <div className="form-group">
-                  <label className="form-label">Estado tras devolución <span className="form-required">*</span></label>
-                  <select value={estado} onChange={e => setEstado(e.target.value)}>
-                    <option value="DEVUELTO">Devuelto (Listo)</option>
-                    <option value="VACIO">Vacío (Para cargar)</option>
-                    <option value="EN_REVISION">En revisión (Taller)</option>
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Fecha</label>
-                  <input type="date" defaultValue={new Date().toISOString().slice(0,10)} readOnly style={{ background: 'var(--surface-2)' }} />
-                </div>
-                <div className="form-group col-span-2">
-                  <label className="form-label">Observaciones / Notas</label>
-                  <textarea value={obs} onChange={e => setObs(e.target.value)} placeholder="¿En qué condiciones vuelve el tubo?..." style={{ height: 60 }} />
-                </div>
-              </div>
-              
-              <button type="submit" className="btn btn-primary" style={{ marginTop: 16, width: '100%', height: 48, fontWeight: 600 }} disabled={!tubo || saving}>
-                {saving ? 'Registrando...' : <><i className="ti ti-check" /> Confirmar Devolución</>}
-              </button>
+              {/* Datos de la Devolución (solo visibles cuando hay un tubo seleccionado) */}
+              {tubo && (
+                <>
+                  <div className="form-grid" style={{ marginTop: 16 }}>
+                    <div className="form-group">
+                      <label className="form-label">Estado tras devolución <span className="form-required">*</span></label>
+                      <select value={estado} onChange={e => setEstado(e.target.value)}>
+                        <option value="DEVUELTO">Devuelto (Listo)</option>
+                        <option value="VACIO">Vacío (Para cargar)</option>
+                        <option value="EN_REVISION">En revisión (Taller)</option>
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Fecha</label>
+                      <input type="date" defaultValue={new Date().toISOString().slice(0,10)} readOnly style={{ background: 'var(--surface-2)' }} />
+                    </div>
+                    <div className="form-group col-span-2">
+                      <label className="form-label">Observaciones / Notas</label>
+                      <textarea value={obs} onChange={e => setObs(e.target.value)} placeholder="¿En qué condiciones vuelve el tubo?..." style={{ height: 60 }} />
+                    </div>
+                  </div>
+                  
+                  <button type="submit" className="btn btn-primary" style={{ marginTop: 16, width: '100%', height: 48, fontWeight: 600 }} disabled={saving}>
+                    {saving ? 'Registrando...' : <><i className="ti ti-check" /> Confirmar Devolución</>}
+                  </button>
+                </>
+              )}
             </div>
           </form>
 
-          <div className="card">
-            <div className="card-title" style={{ marginBottom: 12 }}>Pendientes de devolución</div>
-            {pendientes.length === 0 ? (
-              <p style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', padding: '16px 0' }}>Sin tubos pendientes</p>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {pendientes.slice(0,15).map(t => (
-                  <div
-                    key={t.id}
-                    className="list-card"
-                    style={{ 
-                      padding: '10px 12px', cursor: 'pointer', background: 'var(--surface-2)', 
-                      border: '1px solid var(--border)', borderRadius: 8, transition: 'transform 0.1s' 
-                    }}
-                    onClick={() => { setTuboId(t.id); buscarPorId(t.id) }}
-                    onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--blue)'}
-                    onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: 'var(--blue)' }}>{t.id}</div>
-                      <GasDot gas={t.gas} />
+          <div className="card" style={{ marginTop: esMovil ? 16 : 0 }}>
+            <div 
+              className="card-title" 
+              onClick={() => esMovil && setPendientesAbierto(!pendientesAbierto)}
+              style={{ 
+                marginBottom: pendientesAbierto ? 12 : 0, 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center',
+                cursor: esMovil ? 'pointer' : 'default',
+                userSelect: 'none'
+              }}
+            >
+              <span>Pendientes de devolución ({pendientes.length})</span>
+              {esMovil && (
+                <i className={`ti ti-chevron-${pendientesAbierto ? 'up' : 'down'}`} style={{ fontSize: 18, color: 'var(--text-secondary)' }} />
+              )}
+            </div>
+            
+            {pendientesAbierto && (
+              pendientes.length === 0 ? (
+                <p style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', padding: '16px 0' }}>Sin tubos pendientes</p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {pendientes.slice(0,15).map(t => (
+                    <div
+                      key={t.id}
+                      className="list-card"
+                      style={{ 
+                        padding: '10px 12px', cursor: 'pointer', background: 'var(--surface-2)', 
+                        border: '1px solid var(--border)', borderRadius: 8, transition: 'transform 0.1s' 
+                      }}
+                      onClick={() => { setTuboId(t.id); buscarPorId(t.id) }}
+                      onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--blue)'}
+                      onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: 'var(--blue)' }}>{t.id}</div>
+                        <GasDot gas={t.gas} />
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--text-primary)', fontWeight: 500, marginBottom: 4 }}>{t.cliente?.nombre}</div>
+                      <StateBadge estado={t.estado} />
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-primary)', fontWeight: 500, marginBottom: 4 }}>{t.cliente?.nombre}</div>
-                    <StateBadge estado={t.estado} />
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )
             )}
           </div>
         </div>

@@ -160,11 +160,22 @@ export default function CargasPage() {
           ? `${tubos.length} tubo${tubos.length !== 1 ? 's' : ''} para cargar`
           : `${total} registro${total !== 1 ? 's' : ''} en historial`}
         actions={
-          (user?.rol === 'ADMIN' || user?.rol === 'OPERADOR') && (
-            <button className="btn btn-primary btn-sm" onClick={abrirModalSalon}>
-              <i className="ti ti-plus" /> Carga en salón
+          <>
+            <button
+              className="btn btn-sm"
+              onClick={tab === 'pendientes' ? loadTubos : loadHistorial}
+              disabled={loading}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              <i className={`ti ti-refresh ${loading ? 'ti-spin' : ''}`} />
+              Actualizar
             </button>
-          )
+            {(user?.rol === 'ADMIN' || user?.rol === 'OPERADOR') && (
+              <button className="btn btn-primary btn-sm" onClick={abrirModalSalon}>
+                <i className="ti ti-plus" /> Carga en salón
+              </button>
+            )}
+          </>
         }
       />
 

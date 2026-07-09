@@ -19,6 +19,7 @@ import cargaRoutes    from './routes/cargas.js'
 import publicRoutes   from './routes/public.js'   // ruta pública para QR sin auth
 import precioRoutes   from './routes/precios.js'
 import camionRoutes   from './routes/camiones.js'
+import configRoutes   from './routes/config.js'
 
 const app  = express()
 const PORT = process.env.PORT || 3001
@@ -36,7 +37,14 @@ console.log('CORS FRONTEND_URL raw:', process.env.FRONTEND_URL)
 console.log('CORS Allowed Origins (cleaned):', allowedOrigins)
 
 app.use(cors({
-  origin: allowedOrigins,
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    if (origin.endsWith('.ngrok-free.app') || origin.endsWith('.ngrok-free.dev') || origin.includes('ngrok')) {
+      return callback(null, true);
+    }
+    callback(null, false);
+  },
   credentials: true,
 }))
 
@@ -75,6 +83,7 @@ app.use('/api/cargas',     cargaRoutes)
 app.use('/api/reportes',   reporteRoutes)
 app.use('/api/precios',    precioRoutes)
 app.use('/api/camiones',   camionRoutes)
+app.use('/api/config',     configRoutes)
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => res.json({ ok: true, version: '1.0.0' }))

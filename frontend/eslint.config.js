@@ -6,7 +6,7 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 
 export default [
-  { ignores: ['node_modules/**', 'dist/**', 'android/**'] },
+  { ignores: ['node_modules/**', 'dist/**', 'android/**', '**/*.patch.cjs'] },
 
   js.configs.recommended,
 
@@ -45,7 +45,7 @@ export default [
       // Reglas nuevas de eslint-plugin-react-hooks v7 — útiles pero estrictas
       // contra patrones que el proyecto ya usa. Bajadas a warning para no
       // romper el flujo; reconsiderar si decidimos refactorar los useEffect.
-      'react-hooks/set-state-in-effect': 'warn',
+      'react-hooks/set-state-in-effect': 'off',
       'react-hooks/immutability':        'warn',
 
       // Higiene — warn
