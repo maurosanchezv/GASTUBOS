@@ -820,6 +820,7 @@ export default function EntregasPage() {
                                 <div style={{ fontSize: 11, color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                   {t.gas} · {t.capacidadLitros ? `${t.capacidadLitros}L` : `${Number(t.capacidadKg)} kg`}
                                   {t.cliente ? <span style={{ color: 'var(--text-muted)' }}> · {t.cliente.nombre}</span> : ''}
+                                  {t.camion ? <span style={{ color: 'var(--orange)', fontWeight: 500 }}> · 🚚 {t.camion.placa}</span> : ''}
                                 </div>
                               </div>
                               <StateBadge estado={t.estado} />
@@ -1410,7 +1411,17 @@ function TuboChip({ tuboId, detail, onChange, onRemove }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 200px' }}>
         {tubo && <GasDot gas={tubo.gas} />}
         <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--blue)' }}>{tuboId}</span>
-        {tubo && <><span style={{ color: 'var(--text-secondary)' }}>{tubo.gas}</span><StateBadge estado={tubo.estado} /></>}
+        {tubo && (
+          <>
+            <span style={{ color: 'var(--text-secondary)' }}>{tubo.gas}</span>
+            <StateBadge estado={tubo.estado} />
+            {tubo.camion && (
+              <span className="badge badge-orange" style={{ fontWeight: 500 }} title={`En camión ${tubo.camion.placa}`}>
+                🚚 {tubo.camion.placa}
+              </span>
+            )}
+          </>
+        )}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '0 0 auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>

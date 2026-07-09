@@ -81,7 +81,10 @@ router.get('/', async (req, res, next) => {
     const [tubos, total] = await Promise.all([
       prisma.tubo.findMany({
         where,
-        include: { cliente: { select: { id: true, nombre: true } } },
+        include: { 
+          cliente: { select: { id: true, nombre: true } },
+          camion: { select: { id: true, placa: true } },
+        },
         orderBy: { id: 'asc' },
         skip: (Number(page) - 1) * Number(limit),
         take: Number(limit),
@@ -100,6 +103,7 @@ router.get('/:id', async (req, res, next) => {
       where: { id: req.params.id },
       include: {
         cliente: true,
+        camion: true,
         auditoria: {
           include: { usuario: { select: { username: true, nombre: true } } },
           orderBy: { createdAt: 'desc' },

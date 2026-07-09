@@ -40,8 +40,9 @@ export default function TubosPage() {
     setLoading(true)
     try {
       const res = await api.get('/tubos', { params: { q: q || undefined, estado: estadoFilter || undefined, limit: 80 } })
-      setTubos(res.data.tubos)
-      setTotal(res.data.total)
+      const ownTubos = res.data.tubos.filter(t => !t.id.startsWith('CLI_') && !t.id.startsWith('CLI-'))
+      setTubos(ownTubos)
+      setTotal(ownTubos.length)
     } catch { toast('Error al cargar tubos', 'error') }
     finally { setLoading(false) }
   }, [q, estadoFilter])

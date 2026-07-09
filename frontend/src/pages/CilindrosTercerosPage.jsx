@@ -89,6 +89,9 @@ export default function CilindrosTercerosPage() {
   // Filtrado de tubos en el cliente
   const getFilteredTubos = () => {
     return tubos.filter(t => {
+      // Filtrar para mostrar SOLO los que empiezan con CLI
+      if (!t.id.startsWith('CLI_') && !t.id.startsWith('CLI-')) return false
+
       // Buscar coincidencia en la query (q)
       if (q) {
         const qLower = q.toLowerCase()

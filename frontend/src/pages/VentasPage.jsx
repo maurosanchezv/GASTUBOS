@@ -18,7 +18,11 @@ export default function VentasPage() {
       api.get('/ventas'),
       api.get('/clientes'),
       api.get('/tubos', { params: { estado: 'DISPONIBLE', limit: 100 } }),
-    ]).then(([v, c, t]) => { setVentas(v.data); setClientes(c.data); setTubos(t.data.tubos) })
+    ]).then(([v, c, t]) => { 
+      setVentas(v.data); 
+      setClientes(c.data); 
+      setTubos(t.data.tubos.filter(x => !x.id.startsWith('CLI_') && !x.id.startsWith('CLI-'))) 
+    })
     .catch(() => {}).finally(() => setLoading(false))
   }, [])
 
@@ -29,7 +33,8 @@ export default function VentasPage() {
       toast('Venta registrada', 'success')
       setForm({ tuboId: '', clienteId: '', referencia: '', observaciones: '' })
       const [v, t] = await Promise.all([api.get('/ventas'), api.get('/tubos', { params: { estado: 'DISPONIBLE', limit: 100 } })])
-      setVentas(v.data); setTubos(t.data.tubos)
+      setVentas(v.data); 
+      setTubos(t.data.tubos.filter(x => !x.id.startsWith('CLI_') && !x.id.startsWith('CLI-')))
     } catch (err) { toast(err.response?.data?.error || 'Error', 'error') }
     finally { setSaving(false) }
   }

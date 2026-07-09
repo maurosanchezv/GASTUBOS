@@ -64,7 +64,7 @@ export default function CargasPage() {
       const resultados = await Promise.all(
         ESTADOS_CARGABLES.map(estado => api.get(`/tubos?estado=${estado}&limit=200`))
       )
-      const todos = resultados.flatMap(r => r.data.tubos)
+      const todos = resultados.flatMap(r => r.data.tubos).filter(t => !t.id.startsWith('CLI_') && !t.id.startsWith('CLI-'))
       // Ordenar: VACIO primero, luego resto
       todos.sort((a, b) => {
         const orden = { VACIO: 0, DEVUELTO: 1, DISPONIBLE: 2, EN_REVISION: 3, RESERVADO: 4 }

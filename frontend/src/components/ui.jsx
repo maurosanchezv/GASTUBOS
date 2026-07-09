@@ -1,11 +1,33 @@
 // gastubos/frontend/src/components/ui.jsx
 // Componentes reutilizables usados en todas las páginas
 
+const ESTADO_DESCRIPCIONES = {
+  DISPONIBLE:  'Envase metálico vacío en depósito, listo para ser recargado, alquilado o vendido.',
+  CARGADO:     'Cilindro lleno de gas en depósito, listo para su distribución o entrega.',
+  VACIO:       'Cilindro consumido en depósito, esperando ser enviado a recargar en planta.',
+  ENTREGADO:   'Cilindro entregado al cliente (bajo flujo de canje/intercambio).',
+  ALQUILADO:   'Cilindro prestado al cliente bajo contrato de alquiler activo.',
+  VENDIDO:     'El envase metálico fue comprado físicamente por el cliente.',
+  RESERVADO:   'Cilindro cargado en el camión de reparto, en tránsito hacia el cliente.',
+  PERDIDO:     'Cilindro reportado como extraviado. Debe pasar a revisión si se recupera.',
+  DEVUELTO:    'Cilindro retornado por el cliente, en espera de ser verificado.',
+  EN_REVISION: 'Cilindro en taller bajo pruebas hidráulicas o inspección de seguridad.',
+}
+
 // ── Badge de estado ────────────────────────────────────────────
 export function StateBadge({ estado }) {
   if (!estado) return null
   const label = estado.replace('_', ' ')
-  return <span className={`badge badge-${estado}`}>{label}</span>
+  const desc = ESTADO_DESCRIPCIONES[estado] || ''
+  return (
+    <span 
+      className={`badge badge-${estado}`} 
+      title={desc}
+      style={{ cursor: desc ? 'help' : 'default' }}
+    >
+      {label}
+    </span>
+  )
 }
 
 // ── Badge de rol ───────────────────────────────────────────────
