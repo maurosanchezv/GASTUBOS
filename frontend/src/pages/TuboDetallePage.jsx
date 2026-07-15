@@ -10,6 +10,7 @@ import {
   Modal,
   FormGroup,
   Spinner,
+  formatCapacidad,
 } from "../components/ui.jsx";
 import { useConfigStore } from "../store/configStore.js";
 import { useToast } from "../components/ui.jsx";
@@ -97,11 +98,11 @@ export default function TuboDetallePage() {
 
           const gasDesc = clean(t.gas);
           const capDesc = clean(
-            `Capacidad: ${t.capacidadLitros ? `${t.capacidadLitros}L` : `${Number(t.capacidadKg || 0)}kg`}`,
+            `Capacidad: ${formatCapacidad(t).replace("³", "3")}`,
           );
           const ownerDesc = clean(
             t.propietario === "CLIENTE"
-              ? `PROPIETARIO: CLIENTE - ${t.cliente?.nombre || "Desconocido"}`
+              ? `PROPIETARIO: CLIENTE - ${t.propietarioCliente?.nombre || t.cliente?.nombre || "Desconocido"}`
               : `PROPIETARIO: ${(nombre_empresa || "PROPIO").toUpperCase()}`,
           );
           const nroSerie = t.serie ? clean(`Nro Serie: ${t.serie}`) : "";
@@ -310,7 +311,7 @@ export default function TuboDetallePage() {
     <>
       <PageHeader
         title={tubo.id}
-        subtitle={`${tubo.gas} · ${tubo.capacidadLitros ? `${tubo.capacidadLitros}L` : `${Number(tubo.capacidadKg)} kg`}`}
+        subtitle={`${tubo.gas} · ${formatCapacidad(tubo)}`}
         actions={
           <>
             <button className="btn btn-sm" onClick={() => navigate("/tubos")}>
@@ -351,16 +352,14 @@ export default function TuboDetallePage() {
                   ["Tipo de gas", tubo.gas],
                   [
                     "Capacidad",
-                    tubo.capacidadLitros
-                      ? `${tubo.capacidadLitros}L`
-                      : `${Number(tubo.capacidadKg)} kg`,
+                    formatCapacidad(tubo),
                   ],
                   ["Peso", tubo.pesoKg ? `${tubo.pesoKg} kg` : "—"],
                   [
                     "Propietario",
                     tubo.propietario === "PROPIO"
                       ? (nombre_empresa || "PROPIO").toUpperCase()
-                      : tubo.propietario,
+                      : `CLIENTE - ${tubo.propietarioCliente?.nombre || tubo.cliente?.nombre || "Desconocido"}`,
                   ],
                   [
                     "Fecha de compra",
@@ -822,9 +821,7 @@ export default function TuboDetallePage() {
                       ? (GAS_LABELS[tubo.gas] || tubo.gas).toUpperCase()
                       : "TIPO DE GAS"}
                     /
-                    {tubo.capacidadLitros
-                      ? `${tubo.capacidadLitros}L`
-                      : `${Number(tubo.capacidadKg || 0)}KG`}
+                    {formatCapacidad(tubo).toUpperCase()}
                   </div>
                 </div>
 
@@ -955,7 +952,7 @@ export default function TuboDetallePage() {
                     }}
                   >
                     {tubo.propietario === "CLIENTE"
-                      ? `CLIENTE - ${tubo.cliente?.nombre || "DESCONOCIDO"}`
+                      ? `CLIENTE - ${tubo.propietarioCliente?.nombre || tubo.cliente?.nombre || "DESCONOCIDO"}`
                       : `CILINDRO ${(nombre_empresa || "PROPIO").toUpperCase()}`}
                   </div>
                 </div>
@@ -1230,10 +1227,7 @@ export default function TuboDetallePage() {
                 marginTop: 2,
               }}
             >
-              {tubo.gas} ·{" "}
-              {tubo.capacidadLitros
-                ? `${tubo.capacidadLitros}L`
-                : `${Number(tubo.capacidadKg)} kg`}
+              {tubo.gas} · {formatCapacidad(tubo)}
             </div>
             <div
               style={{
@@ -1245,7 +1239,7 @@ export default function TuboDetallePage() {
               }}
             >
               {tubo.propietario === "CLIENTE"
-                ? `CLIENTE - ${tubo.cliente?.nombre || "Desconocido"}`
+                ? `CLIENTE - ${tubo.propietarioCliente?.nombre || tubo.cliente?.nombre || "Desconocido"}`
                 : (nombre_empresa || "PROPIO").toUpperCase()}
             </div>
           </div>

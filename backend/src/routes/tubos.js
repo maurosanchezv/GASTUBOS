@@ -127,7 +127,14 @@ router.get('/:id', async (req, res, next) => {
       },
     })
     if (!tubo) return res.status(404).json({ error: 'Tubo no encontrado' })
-    res.json(tubo)
+    let propietarioCliente = null
+    if (tubo.propietario === 'CLIENTE' && tubo.propietarioClienteId) {
+      propietarioCliente = await prisma.cliente.findUnique({
+        where: { id: tubo.propietarioClienteId },
+        select: { id: true, nombre: true }
+      })
+    }
+    res.json({ ...tubo, propietarioCliente })
   } catch (err) { next(err) }
 })
 

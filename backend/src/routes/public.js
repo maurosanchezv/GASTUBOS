@@ -14,12 +14,21 @@ router.get('/:id', async (req, res, next) => {
           id: true, gas: true, capacidadLitros: true,
           estado: true, ubicacion: true, propietario: true,
           cliente: { select: { nombre: true, telefono: true } },
+          propietarioClienteId: true,
           updatedAt: true,
         },
       }),
       prisma.config.findMany()
     ])
     if (!tubo) return res.status(404).json({ error: 'Tubo no encontrado' })
+
+    let propietarioCliente = null
+    if (tubo.propietario === 'CLIENTE' && tubo.propietarioClienteId) {
+      propietarioCliente = await prisma.cliente.findUnique({
+        where: { id: tubo.propietarioClienteId },
+        select: { nombre: true, telefono: true }
+      })
+    }
 
     const configMap = {
       nombre_empresa: 'Propio',
@@ -30,6 +39,7 @@ router.get('/:id', async (req, res, next) => {
 
     res.json({
       ...tubo,
+      propietarioCliente,
       nombre_empresa: configMap.nombre_empresa,
     })
   } catch (err) { next(err) }

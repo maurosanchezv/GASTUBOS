@@ -68,7 +68,7 @@ export default function TuboPublicoPage() {
         {/* Info */}
         <div style={{ padding: '16px 24px' }}>
           {[
-            ['Propietario', tubo.propietario === 'CLIENTE' ? `CLIENTE - ${tubo.cliente?.nombre || '—'}` : (tubo.nombre_empresa || 'PROPIO').toUpperCase()],
+            ['Propietario', tubo.propietario === 'CLIENTE' ? `CLIENTE - ${tubo.propietarioCliente?.nombre || tubo.cliente?.nombre || '—'}` : (tubo.nombre_empresa || 'PROPIO').toUpperCase()],
             ['Ubicación',   tubo.ubicacion   || '—'],
             ['Cliente',     tubo.cliente?.nombre || '—'],
             ['Actualizado', new Date(tubo.updatedAt).toLocaleString('es-PY')],
