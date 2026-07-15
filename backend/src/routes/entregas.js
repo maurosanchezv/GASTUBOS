@@ -463,7 +463,7 @@ router.put('/:id/confirmar', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), asyn
           
           if (!tuboRetornado) {
             // Auto-crear tubo del cliente si no existe en la base de datos
-            // Intentar copiar gas/talla del primer detalle de la entrega como referencia
+            // Intentar copiar gas del primer detalle de la entrega como referencia
             const primerDetalle = entrega.detalles[0]
             const tuboReferencia = primerDetalle ? await tx.tubo.findUnique({ where: { id: primerDetalle.tuboId } }) : null
 

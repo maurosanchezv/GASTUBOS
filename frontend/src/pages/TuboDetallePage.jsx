@@ -95,7 +95,7 @@ export default function TuboDetallePage() {
               .replace(/Ñ/g, "N");
           };
 
-          const gasDesc = clean(`${t.gas} - Talla: ${t.talla || "—"}`);
+          const gasDesc = clean(t.gas);
           const capDesc = clean(
             `Capacidad: ${t.capacidadLitros ? `${t.capacidadLitros}L` : `${Number(t.capacidadKg || 0)}kg`}`,
           );
@@ -228,9 +228,10 @@ export default function TuboDetallePage() {
           margin: 0 !important;
           padding: 1mm 3mm 0 3mm !important;
           box-sizing: border-box !important;
-          transform: rotate(180deg) !important;
-          transform-origin: center center !important;
           overflow: hidden !important;
+          border: none !important;
+          box-shadow: none !important;
+          border-radius: 0 !important;
         }
       }
     `,
@@ -309,7 +310,7 @@ export default function TuboDetallePage() {
     <>
       <PageHeader
         title={tubo.id}
-        subtitle={`${tubo.gas} · ${tubo.capacidadLitros ? `${tubo.capacidadLitros}L` : `${Number(tubo.capacidadKg)} kg`} · ${tubo.talla}`}
+        subtitle={`${tubo.gas} · ${tubo.capacidadLitros ? `${tubo.capacidadLitros}L` : `${Number(tubo.capacidadKg)} kg`}`}
         actions={
           <>
             <button className="btn btn-sm" onClick={() => navigate("/tubos")}>
@@ -354,7 +355,6 @@ export default function TuboDetallePage() {
                       ? `${tubo.capacidadLitros}L`
                       : `${Number(tubo.capacidadKg)} kg`,
                   ],
-                  ["Talla", tubo.talla],
                   ["Peso", tubo.pesoKg ? `${tubo.pesoKg} kg` : "—"],
                   [
                     "Propietario",
@@ -758,29 +758,51 @@ export default function TuboDetallePage() {
                 Código QR
               </div>
 
-              {/* Printable label */}
+              {/* Contenedor de escala para evitar desborde en pantalla */}
               <div
-                ref={printRef}
-                id="tubo-print-label"
                 style={{
-                  width: "80mm",
-                  height: "44mm",
-                  padding: "1mm 3mm 0 3mm",
-                  boxSizing: "border-box",
-                  background: "#fff",
-                  color: "#000",
-                  fontFamily: "system-ui, -apple-system, sans-serif",
-                  margin: "0 auto",
+                  width: "100%",
+                  height: "135px",
+                  overflow: "hidden",
                   display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "flex-start",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  margin: "0 auto",
                 }}
               >
+                <div
+                  style={{
+                    transform: "scale(0.78)",
+                    transformOrigin: "center center",
+                    flexShrink: 0,
+                  }}
+                >
+                  {/* Printable label */}
+                  <div
+                    ref={printRef}
+                    id="tubo-print-label"
+                    style={{
+                      width: "80mm",
+                      height: "44mm",
+                      padding: "1mm 3mm 0 3mm",
+                      boxSizing: "border-box",
+                      background: "#fff",
+                      color: "#000",
+                      fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+                      margin: "0 auto",
+                      display: "flex",
+                      flexDirection: "column",
+                      justifyContent: "flex-start",
+                      border: "1px solid var(--border-mid)",
+                      borderRadius: "var(--radius-md)",
+                      boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
+                    }}
+                  >
                 {/* Top Row: Gas Type and Capacity */}
                 <div
                   style={{
                     display: "flex",
-                    justifyContent: "space-between",
+                    justifyContent: "center",
                     alignItems: "center",
                     borderBottom: "1.5px solid #000",
                     paddingBottom: "2px",
@@ -789,7 +811,7 @@ export default function TuboDetallePage() {
                 >
                   <div
                     style={{
-                      fontSize: "13px",
+                      fontSize: "14px",
                       fontWeight: "800",
                       textTransform: "uppercase",
                       letterSpacing: "0.3px",
@@ -799,19 +821,10 @@ export default function TuboDetallePage() {
                     {tubo.gas
                       ? (GAS_LABELS[tubo.gas] || tubo.gas).toUpperCase()
                       : "TIPO DE GAS"}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: "13px",
-                      fontWeight: "800",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.3px",
-                      color: "#000",
-                    }}
-                  >
+                    /
                     {tubo.capacidadLitros
-                      ? `${tubo.capacidadLitros} L`
-                      : `${Number(tubo.capacidadKg || 0)} KG`}
+                      ? `${tubo.capacidadLitros}L`
+                      : `${Number(tubo.capacidadKg || 0)}KG`}
                   </div>
                 </div>
 
@@ -841,8 +854,8 @@ export default function TuboDetallePage() {
                     <svg
                       viewBox="0 0 100 100"
                       style={{
-                        width: "44px",
-                        height: "44px",
+                        width: "56px",
+                        height: "56px",
                         display: "block",
                         margin: "0 auto 3px",
                       }}
@@ -900,8 +913,8 @@ export default function TuboDetallePage() {
                     {/* Phone Number */}
                     <div
                       style={{
-                        fontSize: "9px",
-                        fontWeight: "700",
+                        fontSize: "13px",
+                        fontWeight: "800",
                         color: "#000",
                         marginTop: "2px",
                       }}
@@ -947,6 +960,8 @@ export default function TuboDetallePage() {
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
 
               <div
                 style={{

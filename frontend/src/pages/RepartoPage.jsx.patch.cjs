@@ -82,7 +82,7 @@ const targetPortal = `{activeEntrega && createPortal(
                   <td>
                     <strong>{d.tuboId}</strong><br />
                     <span style={{ fontSize: '10px', color: '#555' }}>
-                      {d.tubo?.gas} {d.tubo?.talla}
+                      {d.tubo?.gas}
                     </span>
                   </td>
                   <td style={{ textAlign: 'center' }}>
@@ -182,7 +182,7 @@ const replacementPortal = `{(entregaParaImprimir || activeEntrega) && createPort
                   <td>
                     <strong>{d.tuboId}</strong><br />
                     <span style={{ fontSize: '10px', color: '#555' }}>
-                      {d.tubo?.gas} {d.tubo?.talla}
+                      {d.tubo?.gas}
                     </span>
                   </td>
                   <td style={{ textAlign: 'center' }}>
@@ -332,7 +332,7 @@ const replacementModalMount = `      {/* Modal de Detalle / Previsualización de
                     <td style={{ paddingTop: '6px', paddingBottom: '4px' }}>
                       <strong>{d.tuboId}</strong><br />
                       <span style={{ fontSize: '10px', color: '#555' }}>
-                        {d.tubo?.gas} {d.tubo?.talla}
+                        {d.tubo?.gas}
                       </span>
                     </td>
                     <td style={{ textAlign: 'center', paddingTop: '6px', paddingBottom: '4px' }}>
@@ -379,7 +379,7 @@ const replacementModalMount = `      {/* Modal de Detalle / Previsualización de
                     const tubo = r.tuboEntregado
                     const desc = tubo.observaciones && (tubo.observaciones.includes(' ') || tubo.observaciones.length > 15)
                       ? tubo.observaciones 
-                      : \`\${tubo.id} (\${tubo.gas} \${tubo.talla || ''})\`
+                      : \`\${tubo.id} (\${tubo.gas})\`
                     return <li key={r.id}>{desc}</li>
                   })}
                 </ul>
