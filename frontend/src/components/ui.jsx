@@ -12,6 +12,7 @@ const ESTADO_DESCRIPCIONES = {
   PERDIDO:     'Cilindro reportado como extraviado. Debe pasar a revisión si se recupera.',
   DEVUELTO:    'Cilindro retornado por el cliente, en espera de ser verificado.',
   EN_REVISION: 'Cilindro en taller bajo pruebas hidráulicas o inspección de seguridad.',
+  DE_BAJA:     'Cilindro fuera de servicio por baja, descarte o retiro definitivo.',
 }
 
 // ── Badge de estado ────────────────────────────────────────────

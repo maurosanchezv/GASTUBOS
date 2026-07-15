@@ -6,7 +6,7 @@ import { PageHeader, StateBadge, Modal, FormGroup, Spinner, EmptyState, GasDot, 
 import { useConfigStore } from '../store/configStore.js'
 import { useToast } from '../components/ui.jsx'
 
-const ESTADOS = ['DISPONIBLE','CARGADO','VACIO','ENTREGADO','ALQUILADO','VENDIDO','RESERVADO','PERDIDO','DEVUELTO','EN_REVISION']
+const ESTADOS = ['DISPONIBLE','CARGADO','VACIO','ENTREGADO','ALQUILADO','VENDIDO','RESERVADO','PERDIDO','DEVUELTO','EN_REVISION','DE_BAJA']
 const GASES   = ['CO2','Oxígeno','Argón','Nitrógeno','Aire comprimido','Acetileno','Mezcla Ar+CO2','Mezcla especial']
 
 const EMPTY_TUBO = {
@@ -30,6 +30,12 @@ export default function TubosPage() {
   const navigate  = useNavigate()
   const { toast } = useToast()
 
+  const [bajaModal, setBajaModal] = useState(false)
+  const [bajaSaving, setBajaSaving] = useState(false)
+  const [motivoBaja, setMotivoBaja] = useState('')
+  const [selectedTubo, setSelectedTubo] = useState(null)
+  const [hideBaja, setHideBaja] = useState(true)
+
   useEffect(() => {
     api.get('/clientes')
       .then(res => setClientes(res.data))
@@ -40,12 +46,15 @@ export default function TubosPage() {
     setLoading(true)
     try {
       const res = await api.get('/tubos', { params: { q: q || undefined, estado: estadoFilter || undefined, limit: 80 } })
-      const ownTubos = res.data.tubos.filter(t => !t.id.startsWith('CLI_') && !t.id.startsWith('CLI-'))
+      let ownTubos = res.data.tubos.filter(t => !t.id.startsWith('CLI_') && !t.id.startsWith('CLI-'))
+      if (hideBaja && !estadoFilter) {
+        ownTubos = ownTubos.filter(t => t.estado !== 'DE_BAJA')
+      }
       setTubos(ownTubos)
       setTotal(ownTubos.length)
     } catch { toast('Error al cargar tubos', 'error') }
     finally { setLoading(false) }
-  }, [q, estadoFilter])
+  }, [q, estadoFilter, hideBaja])
 
   useEffect(() => { load() }, [load])
 
@@ -94,6 +103,23 @@ export default function TubosPage() {
 
   const f = (k) => (e) => setForm(prev => ({ ...prev, [k]: e.target.value }))
 
+  const handleBajaSubmit = async () => {
+    setBajaSaving(true)
+    try {
+      await api.post(`/tubos/${selectedTubo.id}/cambiar-estado`, {
+        estadoNuevo: 'DE_BAJA',
+        observaciones: motivoBaja,
+      })
+      toast('Tubo dado de baja correctamente', 'success')
+      setBajaModal(false)
+      load()
+    } catch (err) {
+      toast(err.response?.data?.error || 'Error al dar de baja el tubo', 'error')
+    } finally {
+      setBajaSaving(false)
+    }
+  }
+
   return (
     <>
       <PageHeader
@@ -133,6 +159,14 @@ export default function TubosPage() {
             <option value="">Todos los estados</option>
             {ESTADOS.map(s => <option key={s} value={s}>{s.replace('_',' ')}</option>)}
           </select>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, userSelect: 'none', cursor: 'pointer', height: 38 }}>
+            <input
+              type="checkbox"
+              checked={hideBaja}
+              onChange={e => setHideBaja(e.target.checked)}
+            />
+            Ocultar dados de baja
+          </label>
         </div>
 
         {loading ? <Spinner /> : (
@@ -184,13 +218,18 @@ export default function TubosPage() {
                         </td>
                         <td style={{ color: 'var(--text-secondary)' }}>{t.ubicacion || '—'}</td>
                         <td>
-                          <div style={{ display: 'flex', gap: 4 }}>
-                            <button className="btn-icon" title="Ver detalle" onClick={() => navigate(`/tubos/${t.id}/detalle`)}>
-                              <i className="ti ti-eye" />
+                          <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                            <button className="btn btn-sm" onClick={() => navigate(`/tubos/${t.id}/detalle`)}>
+                              <i className="ti ti-eye" /> Detalle
                             </button>
-                            <button className="btn-icon" title="Imprimir QR" onClick={() => navigate(`/tubos/${t.id}/detalle?qr=1`)}>
-                              <i className="ti ti-qrcode" />
+                            <button className="btn btn-sm" onClick={() => navigate(`/tubos/${t.id}/detalle?qr=1`)}>
+                              <i className="ti ti-qrcode" /> QR
                             </button>
+                            {t.estado !== 'DE_BAJA' && t.estado !== 'RESERVADO' && t.estado !== 'VENDIDO' && (
+                              <button className="btn btn-sm btn-danger" title="Dar de baja" onClick={() => { setSelectedTubo(t); setMotivoBaja(''); setBajaModal(true); }}>
+                                <i className="ti ti-trash" />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -234,6 +273,11 @@ export default function TubosPage() {
                       <button className="btn btn-sm" onClick={() => navigate(`/tubos/${t.id}/detalle?qr=1`)}>
                         <i className="ti ti-qrcode" /> QR
                       </button>
+                      {t.estado !== 'DE_BAJA' && t.estado !== 'RESERVADO' && t.estado !== 'VENDIDO' && (
+                        <button className="btn btn-sm btn-danger" style={{ padding: '4px 8px' }} onClick={() => { setSelectedTubo(t); setMotivoBaja(''); setBajaModal(true); }}>
+                          <i className="ti ti-trash" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))
@@ -331,6 +375,37 @@ export default function TubosPage() {
           </div>
         </form>
       </Modal>
+
+      {/* Modal Dar de Baja */}
+      {bajaModal && (
+        <Modal 
+          open={true} 
+          title="Dar de Baja Tubo" 
+          onClose={() => setBajaModal(false)}
+          footer={
+            <>
+              <button className="btn" onClick={() => setBajaModal(false)}>Cancelar</button>
+              <button className="btn btn-danger" onClick={handleBajaSubmit} disabled={bajaSaving}>
+                {bajaSaving ? 'Procesando...' : 'Confirmar Baja'}
+              </button>
+            </>
+          }
+        >
+          <div style={{ padding: '10px 0' }}>
+            <p style={{ marginBottom: 12 }}>¿Estás seguro de que deseas dar de baja el tubo <strong>{selectedTubo?.id}</strong>?</p>
+            <FormGroup label="Motivo de la baja" required>
+              <textarea
+                placeholder="Escribe el motivo del descarte/baja..."
+                value={motivoBaja}
+                onChange={e => setMotivoBaja(e.target.value)}
+                rows={3}
+                style={{ width: '100%', padding: 8, borderRadius: 4, border: '1px solid var(--border-mid)' }}
+                required
+              />
+            </FormGroup>
+          </div>
+        </Modal>
+      )}
     </>
   )
 }

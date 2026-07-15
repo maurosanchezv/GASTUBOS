@@ -30,6 +30,7 @@ enum EstadoTubo {
   PERDIDO
   DEVUELTO
   EN_REVISION
+  DE_BAJA
 }
 
 enum TipoCliente {

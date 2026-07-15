@@ -8,7 +8,7 @@ import { TRANSICIONES } from '../utils/estadosTubo.js'
 import { useConfigStore } from '../store/configStore.js'
 
 const GASES = ['Oxígeno', 'CO2', 'Argón', 'Nitrógeno', 'Aire comprimido', 'Mezcla CO2/Argón', 'Acetileno']
-const ESTADOS = ['DEVUELTO', 'VACIO', 'EN_REVISION', 'CARGADO', 'DISPONIBLE']
+const ESTADOS = ['DEVUELTO', 'VACIO', 'EN_REVISION', 'CARGADO', 'DISPONIBLE', 'DE_BAJA']
 
 export default function CilindrosTercerosPage() {
   const { nombre_empresa } = useConfigStore()
@@ -22,6 +22,7 @@ export default function CilindrosTercerosPage() {
   const [filterGas, setFilterGas] = useState('')
   const [filterEstado, setFilterEstado] = useState('')
   const [filterCliente, setFilterCliente] = useState('')
+  const [hideBaja, setHideBaja] = useState(true)
   
   // Modales
   const [adquirirModal, setAdquirirModal] = useState(false)
@@ -42,6 +43,7 @@ export default function CilindrosTercerosPage() {
   
   const [nuevoEstado, setNuevoEstado] = useState('')
   const [observacionesEstado, setObservacionesEstado] = useState('')
+  const [motivoBaja, setMotivoBaja] = useState('')
 
   // Estados de carga (saving)
   const [saving, setSaving] = useState(false)
@@ -111,6 +113,9 @@ export default function CilindrosTercerosPage() {
       
       // Filtro por Cliente propietario
       if (filterCliente && t.propietarioClienteId !== filterCliente) return false
+
+      // Ocultar dados de baja si está marcado y no se filtra por ese estado
+      if (hideBaja && !filterEstado && t.estado === 'DE_BAJA') return false
       
       return true
     })
@@ -214,11 +219,14 @@ export default function CilindrosTercerosPage() {
     }
   }
 
-  // Dar de baja (desactivar) el tubo seleccionado
+  // Dar de baja (cambiar estado a DE_BAJA) el tubo seleccionado
   const handleBajaSubmit = async () => {
     setBajaSaving(true)
     try {
-      await api.patch(`/tubos/${selectedTubo.id}`, { activo: false })
+      await api.post(`/tubos/${selectedTubo.id}/cambiar-estado`, {
+        estadoNuevo: 'DE_BAJA',
+        observaciones: motivoBaja,
+      })
       toast('Cilindro dado de baja correctamente', 'success')
       setBajaModal(false)
       load()
@@ -311,6 +319,17 @@ export default function CilindrosTercerosPage() {
               </select>
             </div>
 
+            <div style={{ display: 'flex', alignItems: 'center', height: 38 }}>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, userSelect: 'none', cursor: 'pointer', margin: 0 }}>
+                <input
+                  type="checkbox"
+                  checked={hideBaja}
+                  onChange={e => setHideBaja(e.target.checked)}
+                />
+                Ocultar dados de baja
+              </label>
+            </div>
+
             {(filterGas || filterEstado || filterCliente || q) && (
               <button 
                 className="btn" 
@@ -395,13 +414,15 @@ export default function CilindrosTercerosPage() {
                               >
                                 <i className="ti ti-eye" /> Detalle
                               </Link>
-                              <button 
-                                className="btn btn-sm btn-danger" 
-                                title="Dar de baja"
-                                onClick={() => { setSelectedTubo(t); setBajaModal(true) }}
-                              >
-                                <i className="ti ti-trash" />
-                              </button>
+                              {t.estado !== 'DE_BAJA' && t.estado !== 'RESERVADO' && t.estado !== 'VENDIDO' && (
+                                <button 
+                                  className="btn btn-sm btn-danger" 
+                                  title="Dar de baja"
+                                  onClick={() => { setSelectedTubo(t); setMotivoBaja(''); setBajaModal(true) }}
+                                >
+                                  <i className="ti ti-trash" />
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -454,9 +475,11 @@ export default function CilindrosTercerosPage() {
                           <Link to={`/tubos/${t.id}/detalle`} className="btn btn-sm" style={{ flex: '1 1 auto', display: 'inline-flex', justifyContent: 'center', alignItems: 'center' }}>
                             <i className="ti ti-eye" /> Detalle
                           </Link>
-                          <button className="btn btn-sm btn-danger" style={{ padding: '4px 8px' }} onClick={() => { setSelectedTubo(t); setBajaModal(true) }}>
-                            <i className="ti ti-trash" />
-                          </button>
+                          {t.estado !== 'DE_BAJA' && t.estado !== 'RESERVADO' && t.estado !== 'VENDIDO' && (
+                            <button className="btn btn-sm btn-danger" style={{ padding: '4px 8px' }} onClick={() => { setSelectedTubo(t); setMotivoBaja(''); setBajaModal(true) }}>
+                              <i className="ti ti-trash" />
+                            </button>
+                          )}
                         </div>
                       </div>
                     )
@@ -586,16 +609,23 @@ export default function CilindrosTercerosPage() {
             <>
               <button className="btn" onClick={() => setBajaModal(false)}>Cancelar</button>
               <button className="btn btn-danger" onClick={handleBajaSubmit} disabled={bajaSaving}>
-                {bajaSaving ? 'Desactivando...' : 'Confirmar Baja'}
+                {bajaSaving ? 'Procesando...' : 'Confirmar Baja'}
               </button>
             </>
           }
         >
           <div style={{ padding: '10px 0' }}>
-            <p>¿Estás seguro de que deseas dar de baja el cilindro <strong>{selectedTubo?.id}</strong>?</p>
-            <p style={{ marginTop: 8, fontSize: 13, color: 'var(--text-secondary)' }}>
-              Esta acción lo desactivará del sistema. No se mostrará más en este listado ni en las búsquedas operativas.
-            </p>
+            <p style={{ marginBottom: 12 }}>¿Estás seguro de que deseas dar de baja el cilindro <strong>{selectedTubo?.id}</strong>?</p>
+            <FormGroup label="Motivo de la baja" required>
+              <textarea
+                placeholder="Escribe el motivo del descarte/baja..."
+                value={motivoBaja}
+                onChange={e => setMotivoBaja(e.target.value)}
+                rows={3}
+                style={{ width: '100%', padding: 8, borderRadius: 4, border: '1px solid var(--border-mid)' }}
+                required
+              />
+            </FormGroup>
           </div>
         </Modal>
       )}

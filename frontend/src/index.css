@@ -264,6 +264,7 @@ input, select, textarea { font-family: inherit; }
 .badge-PERDIDO     { background: var(--red-light);    color: var(--red); }
 .badge-DEVUELTO    { background: var(--coral-light);  color: var(--coral); }
 .badge-EN_REVISION { background: var(--amber-light);  color: var(--amber); }
+.badge-DE_BAJA     { background: var(--red-light);    color: var(--red); }
 .badge-ADMIN       { background: var(--purple-light); color: var(--purple); }
 .badge-SUPERVISOR  { background: var(--teal-light);   color: var(--teal); }
 .badge-OPERADOR    { background: var(--blue-light);   color: var(--blue-dark); }
