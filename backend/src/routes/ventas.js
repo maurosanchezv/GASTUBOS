@@ -12,7 +12,7 @@ router.get('/', async (req, res, next) => {
     const ventas = await prisma.venta.findMany({
       include: {
         cliente: { select: { nombre: true } },
-        tubo:    { select: { id: true, gas: true, talla: true } },
+        tubo:    { select: { id: true, gas: true } },
       },
       orderBy: { fechaVenta: 'desc' },
     })

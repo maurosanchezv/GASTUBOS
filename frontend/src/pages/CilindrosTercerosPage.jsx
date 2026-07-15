@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import api from '../services/api.js'
-import { PageHeader, Modal, FormGroup, Spinner, EmptyState, StateBadge } from '../components/ui.jsx'
+import { PageHeader, Modal, FormGroup, Spinner, EmptyState, StateBadge, formatCapacidad } from '../components/ui.jsx'
 import { useToast } from '../components/ui.jsx'
 import { TRANSICIONES } from '../utils/estadosTubo.js'
 import { useConfigStore } from '../store/configStore.js'
@@ -33,7 +33,6 @@ export default function CilindrosTercerosPage() {
   const [form, setForm] = useState({
     serie: '',
     gas: 'Oxígeno',
-    talla: 'T50',
     capacidadLitros: 50,
     capacidadKg: '',
     pesoKg: '',
@@ -125,7 +124,6 @@ export default function CilindrosTercerosPage() {
     
     // Extraer datos del id CLI_Gas_Capacidad_Random
     let gas = tubo.gas || 'Oxígeno'
-    const talla = tubo.talla || 'T50'
     let capL = tubo.capacidadLitros || 50
     let capK = tubo.capacidadKg || ''
     
@@ -148,7 +146,6 @@ export default function CilindrosTercerosPage() {
     setForm({
       serie: '',
       gas,
-      talla,
       capacidadLitros: capL,
       capacidadKg: capK,
       pesoKg: tubo.pesoKg || '',
@@ -356,7 +353,7 @@ export default function CilindrosTercerosPage() {
                           <td>
                             <span style={{ fontWeight: 600 }}>{t.gas}</span>
                           </td>
-                          <td>{t.capacidadLitros ? `${t.capacidadLitros} L` : `${t.capacidadKg} kg`} ({t.talla})</td>
+                          <td>{formatCapacidad(t)}</td>
                           <td>
                             <StateBadge estado={t.estado} />
                           </td>
@@ -432,7 +429,7 @@ export default function CilindrosTercerosPage() {
                           <strong>Gas:</strong> {t.gas}
                         </div>
                         <div style={{ fontSize: 13, marginBottom: 4 }}>
-                          <strong>Capacidad:</strong> {t.capacidadLitros ? `${t.capacidadLitros} L` : `${t.capacidadKg} kg`} ({t.talla})
+                          <strong>Capacidad:</strong> {formatCapacidad(t)}
                         </div>
                         <div style={{ fontSize: 13, marginBottom: 4, color: 'var(--text-secondary)' }}>
                           <strong>Cliente Origen:</strong> {getClienteNombre(t.propietarioClienteId)}
@@ -489,11 +486,7 @@ export default function CilindrosTercerosPage() {
             </FormGroup>
 
             <FormGroup label="Capacidad">
-              <input readOnly value={form.capacidadLitros ? `${form.capacidadLitros} L` : `${form.capacidadKg} kg`} disabled />
-            </FormGroup>
-
-            <FormGroup label="Talla">
-              <input readOnly value={form.talla} disabled />
+              <input readOnly value={formatCapacidad(form)} disabled />
             </FormGroup>
 
             <FormGroup label="Ubicación">

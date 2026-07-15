@@ -11,7 +11,7 @@ router.get('/:id', async (req, res, next) => {
       prisma.tubo.findUnique({
         where: { id: req.params.id, activo: true },
         select: {
-          id: true, gas: true, talla: true, capacidadLitros: true,
+          id: true, gas: true, capacidadLitros: true,
           estado: true, ubicacion: true, propietario: true,
           cliente: { select: { nombre: true, telefono: true } },
           updatedAt: true,

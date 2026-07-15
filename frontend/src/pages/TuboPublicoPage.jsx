@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore.js'
 import api from '../services/api.js'
+import { formatCapacidad } from '../components/ui.jsx'
 
 const ESTADO_COLOR = {
   DISPONIBLE:'#3B6D11', CARGADO:'#185FA5', VACIO:'#5F5E5A',
@@ -57,7 +58,7 @@ export default function TuboPublicoPage() {
         <div style={{ background: color, padding: '20px 24px', borderRadius: '12px 12px 0 0' }}>
           <div style={{ fontSize: 22, fontWeight: 600, color: '#fff', fontFamily: 'monospace' }}>{tubo.id}</div>
           <div style={{ fontSize: 13, color: 'rgba(255,255,255,.8)', marginTop: 4 }}>
-            {tubo.gas} · {tubo.capacidadLitros ? `${tubo.capacidadLitros}L` : `${Number(tubo.capacidadKg)} kg`} · {tubo.talla}
+            {tubo.gas} · {formatCapacidad(tubo)}
           </div>
           <span style={{ display:'inline-block', marginTop: 8, background:'rgba(255,255,255,.25)', color:'#fff', padding:'3px 10px', borderRadius:10, fontSize:12, fontWeight:600 }}>
             {tubo.estado.replace('_',' ')}

@@ -66,7 +66,6 @@ async function main() {
         id: t.id,
         serie: t.id,
         gas: t.gas,
-        talla: 'T50',
         capacidadLitros: 50,
         estado: 'RESERVADO',
         propietario: 'PROPIO',

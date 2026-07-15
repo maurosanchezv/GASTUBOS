@@ -123,9 +123,8 @@ model Tubo {
   id              String          @id  // TUBO-000001, generado en app
   serie           String          @unique
   gas             String          // CO2, Oxígeno, Argón, etc.
-  capacidadLitros Int?
+  capacidadLitros Decimal?        @db.Decimal(5, 2)
   capacidadKg     Decimal?        @db.Decimal(5, 2)
-  talla           String          // T50, T10, T8
   pesoKg          Decimal?        @db.Decimal(8, 2)
   estado          EstadoTubo      @default(DISPONIBLE)
   propietario     TipoPropietario @default(PROPIO)

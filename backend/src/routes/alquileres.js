@@ -21,7 +21,7 @@ router.get('/', async (req, res, next) => {
       where,
       include: {
         cliente: { select: { id: true, nombre: true } },
-        tubo:    { select: { id: true, gas: true, talla: true } },
+        tubo:    { select: { id: true, gas: true } },
       },
       orderBy: { fechaVencimiento: 'asc' },
     })

@@ -5,7 +5,7 @@ import { Html5Qrcode } from 'html5-qrcode'
 import api from '../services/api.js'
 import { useAuthStore } from '../store/authStore.js'
 import { useConfigStore } from '../store/configStore.js'
-import { PageHeader, Spinner, EmptyState, StateBadge, Modal } from '../components/ui.jsx'
+import { PageHeader, Spinner, EmptyState, StateBadge, Modal, formatCapacidad } from '../components/ui.jsx'
 import { useToast } from '../components/ui.jsx'
 import { EscPosBuilder } from '../utils/escPosBuilder.js'
 
@@ -34,6 +34,10 @@ export default function RepartoPage() {
   const [pairedDevices, setPairedDevices] = useState([])
   const [connectingPrinter, setConnectingPrinter] = useState(false)
   const [selectedDeviceAddress, setSelectedDeviceAddress] = useState('')
+  const [paperWidth, setPaperWidth] = useState(() => {
+    const saved = localStorage.getItem('printer_paper_width')
+    return saved ? Number(saved) : 48
+  })
 
   const safeParseJSON = (key, fallback = []) => {
     try {
@@ -56,10 +60,17 @@ export default function RepartoPage() {
       (devices) => {
         setPairedDevices(devices)
         setConnectingPrinter(false)
-        // Auto-seleccionar impresora HM-A300 si se encuentra en la lista
-        const autoDevice = devices.find(d => d.name && d.name.toUpperCase().includes('HM-A300'))
+        // Auto-seleccionar impresora HM-A300 o FTX/Bluetooth Printer de 58mm
+        const autoDevice = devices.find(d => {
+          const name = (d.name || '').toUpperCase()
+          return name.includes('HM-A300') || name.includes('TDR058') || name.includes('FTX') || name.includes('BLUETOOTH') || name.includes('PRINTER')
+        })
         if (autoDevice) {
           setSelectedDeviceAddress(autoDevice.address || autoDevice.id)
+          const name = (autoDevice.name || '').toUpperCase()
+          const detectedWidth = (name.includes('58') || name.includes('TDR') || name.includes('FTX') || name.includes('BLUETOOTH') || name.includes('PRINTER')) ? 32 : 48
+          setPaperWidth(detectedWidth)
+          localStorage.setItem('printer_paper_width', String(detectedWidth))
         }
       },
       (err) => {
@@ -89,7 +100,7 @@ export default function RepartoPage() {
       const t = r.tuboEntregado || {}
       return (t.observaciones && (t.observaciones.includes(' ') || t.observaciones.length > 15))
         ? t.observaciones
-        : `${t.id} (${t.gas || ''} ${t.talla || ''})`.trim()
+        : `${t.id} (${t.gas || ''})`.trim()
     })
   }
 
@@ -108,8 +119,31 @@ export default function RepartoPage() {
         if (alreadyPrinted) return
         alreadyPrinted = true
         try {
+          const wrapText = (text, maxChars) => {
+            if (!text) return []
+            const words = text.split(' ')
+            const lines = []
+            let currentLine = ''
+            
+            words.forEach(word => {
+              if ((currentLine + word).length <= maxChars) {
+                currentLine += (currentLine ? ' ' : '') + word
+              } else {
+                if (currentLine) lines.push(currentLine)
+                let remaining = word
+                while (remaining.length > maxChars) {
+                  lines.push(remaining.slice(0, maxChars))
+                  remaining = remaining.slice(maxChars)
+                }
+                currentLine = remaining
+              }
+            })
+            if (currentLine) lines.push(currentLine)
+            return lines
+          }
+
           const builder = new EscPosBuilder()
-          const width = 48 // Ancho óptimo para ticket de 80mm en HM-A300E
+          const width = paperWidth
           
           const justify = (left, right) => {
             const pad = Math.max(1, width - left.length - right.length)
@@ -128,8 +162,12 @@ export default function RepartoPage() {
           
           // Encabezado
           builder.alignCenter().boldOn().doubleSizeOn().addTextLine((nombre_empresa || 'GASTUBOS').toUpperCase()).doubleSizeOff()
-          if (direccion) builder.addTextLine(direccion.slice(0, width))
-          if (telefono) builder.addTextLine('Tel: ' + telefono.slice(0, width - 5))
+          if (direccion) {
+            wrapText(direccion, width).forEach(l => builder.addTextLine(l))
+          }
+          if (telefono) {
+            wrapText('Tel: ' + telefono, width).forEach(l => builder.addTextLine(l))
+          }
           builder.addTextLine(doubleLine())
           
           // Información de Remisión
@@ -137,11 +175,19 @@ export default function RepartoPage() {
           builder.addTextLine(line())
 
           // Datos del Cliente (mismo orden que la remisión de la computadora)
-          builder.addTextLine('Cliente: ' + (entrega.cliente?.nombre || '').slice(0, width - 9))
+          const clienteText = 'Cliente: ' + (entrega.cliente?.nombre || '')
+          wrapText(clienteText, width).forEach(l => builder.addTextLine(l))
+          
           builder.addTextLine('RUC/CI: ' + (entrega.cliente?.ruc || '-'))
-          builder.addTextLine('Direccion: ' + (entrega.direccionEntrega || '').slice(0, width * 2))
+          
+          const dirText = 'Direccion: ' + (entrega.direccionEntrega || '')
+          wrapText(dirText, width).forEach(l => builder.addTextLine(l))
+          
           builder.addTextLine('Fecha: ' + new Date(entrega.fechaEntrega).toLocaleString('es-PY'))
-          builder.addTextLine('Chofer: ' + (entrega.repartidor?.nombre || 'Sin asignar').slice(0, width - 8))
+          
+          const choferText = 'Chofer: ' + (entrega.repartidor?.nombre || 'Sin asignar')
+          wrapText(choferText, width).forEach(l => builder.addTextLine(l))
+          
           builder.addTextLine('Tipo: ' + (entrega.tipoOperacion || '').replace('_', ' '))
           builder.addTextLine(doubleLine())
 
@@ -151,7 +197,7 @@ export default function RepartoPage() {
 
           let subtotalItems = 0
           entrega.detalles?.forEach(d => {
-            const desc = `${d.tuboId} (${d.tubo?.gas || ''} ${d.tubo?.talla || ''})`
+            const desc = `${d.tuboId} (${d.tubo?.gas || ''})`
             const cant = `${Number(d.cantidadGas)} ${d.unidadGas}`
             const precioUnit = Number(d.precioUnitario).toLocaleString('es-PY')
             const price = Number(d.subtotal).toLocaleString('es-PY') + ' GS'
@@ -173,32 +219,40 @@ export default function RepartoPage() {
           if (recsBT.length > 0) {
             builder.boldOn().addTextLine('RECAMBIOS RECIBIDOS:').boldOff()
             recsBT.forEach(desc => {
-              builder.addTextLine('- ' + desc.slice(0, width - 2))
+              const wrapped = wrapText(desc, width - 2)
+              wrapped.forEach((lineText, idx) => {
+                if (idx === 0) {
+                  builder.addTextLine('- ' + lineText)
+                } else {
+                  builder.addTextLine('  ' + lineText)
+                }
+              })
             })
             builder.addTextLine(line())
           }
 
           // Observaciones
           if (entrega.observaciones) {
-            builder.addTextLine('Obs: ' + entrega.observaciones.slice(0, width * 2))
+            const obsText = 'Obs: ' + entrega.observaciones
+            wrapText(obsText, width).forEach(l => builder.addTextLine(l))
             builder.addTextLine(line())
           }
           
           // Firmas side-by-side
           builder.addTextLine('').addTextLine('')
-          const lineLength = 18
+          const lineLength = width >= 48 ? 18 : 13
           const leftLine = '-'.repeat(lineLength)
           const rightLine = '-'.repeat(lineLength)
-          const spacesBetweenLines = width - (lineLength * 2) // 48 - 36 = 12
+          const spacesBetweenLines = width - (lineLength * 2)
           builder.addTextLine(leftLine + ' '.repeat(spacesBetweenLines) + rightLine)
           
           const labelLeft = 'Firma Chofer'
           const labelRight = 'Firma Cliente'
-          const padLeft = Math.floor((lineLength - labelLeft.length) / 2)
-          const padRight = Math.floor((lineLength - labelRight.length) / 2)
+          const padLeft = Math.max(0, Math.floor((lineLength - labelLeft.length) / 2))
+          const padRight = Math.max(0, Math.floor((lineLength - labelRight.length) / 2))
           
-          const strLeft = ' '.repeat(padLeft) + labelLeft + ' '.repeat(lineLength - labelLeft.length - padLeft)
-          const strRight = ' '.repeat(padRight) + labelRight + ' '.repeat(lineLength - labelRight.length - padRight)
+          const strLeft = ' '.repeat(padLeft) + labelLeft + ' '.repeat(Math.max(0, lineLength - labelLeft.length - padLeft))
+          const strRight = ' '.repeat(padRight) + labelRight + ' '.repeat(Math.max(0, lineLength - labelRight.length - padRight))
           
           builder.addTextLine(strLeft + ' '.repeat(spacesBetweenLines) + strRight)
           builder.addTextLine('')
@@ -252,7 +306,7 @@ export default function RepartoPage() {
   const [activeEntrega, setActiveEntrega] = useState(null)
   const [entregaStep, setEntregaStep] = useState(1)
   const [calcGas, setCalcGas] = useState('Oxígeno')
-  const [calcCapacidad, setCalcCapacidad] = useState('50 L')
+  const [calcCapacidad, setCalcCapacidad] = useState('6 m³')
   
   // Escáner QR
   const [escaneando, setEscaneando] = useState(false)
@@ -1077,7 +1131,7 @@ export default function RepartoPage() {
                                 <div>
                                   <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 'bold', fontSize: 13 }}>{t.id}</div>
                                   <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>
-                                    {t.gas} {t.talla} · {t.capacidadLitros ? `${t.capacidadLitros}L` : `${Number(t.capacidadKg)} kg`}
+                                    {t.gas} · {formatCapacidad(t)}
                                   </div>
                                 </div>
                                 <span className={`badge badge-${t.estado}`} style={{ fontSize: 10 }}>
@@ -1220,7 +1274,7 @@ export default function RepartoPage() {
                           <div style={{ flex: 1 }}>
                             <strong style={{ fontFamily: 'var(--font-mono)' }}>{d.tuboId}</strong>
                             <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 1 }}>
-                              {d.tubo?.gas} {d.tubo?.talla} · {Number(d.cantidadGas)} {d.unidadGas}
+                              {d.tubo?.gas} · {Number(d.cantidadGas)} {d.unidadGas}
                             </div>
                           </div>
                           <span style={{ fontSize: 11, fontWeight: 600, color: verificado ? '#10b981' : 'var(--text-muted)' }}>
@@ -1323,16 +1377,19 @@ export default function RepartoPage() {
                         <div style={{ marginBottom: 10 }}>
                           <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>1. Seleccionar Gas</div>
                           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
-                            {['CO2', 'Oxígeno', 'Argón', 'Nitrógeno', 'Acetileno', 'Mezcla Ar+CO2', 'Mezcla especial'].map(g => (
+                            {['CO2', 'Oxígeno', 'Argón', 'Nitrógeno', 'Aire comprimido', 'Acetileno', 'Mezcla Ar+CO2', 'Mezcla especial'].map(g => (
                               <button
                                 key={g}
                                 type="button"
                                 onClick={() => {
                                   setCalcGas(g)
-                                  if (g === 'Acetileno') {
+                                  const gLower = g.toLowerCase()
+                                  if (gLower === 'acetileno') {
                                     setCalcCapacidad('6 kg')
+                                  } else if (gLower === 'co2') {
+                                    setCalcCapacidad('25 kg')
                                   } else {
-                                    setCalcCapacidad('50 L')
+                                    setCalcCapacidad('6 m³')
                                   }
                                 }}
                                 style={{
@@ -1358,7 +1415,12 @@ export default function RepartoPage() {
                         <div style={{ marginBottom: 14 }}>
                           <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>2. Seleccionar Capacidad</div>
                           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
-                            {(calcGas === 'Acetileno' ? ['1 kg', '1.5 kg', '2 kg', '3 kg', '4 kg', '5 kg', '6 kg', '8 kg'] : ['8 L', '10 L', '50 L']).map(cap => (
+                            {(calcGas === 'Acetileno'
+                              ? ['1 kg', '1.2 kg', '1.5 kg', '2 kg', '2.5 kg', '3 kg', '3.5 kg', '4 kg', '4.5 kg', '5 kg', '5.5 kg', '6 kg', '7 kg', '8 kg']
+                              : calcGas === 'CO2'
+                                ? ['1 kg', '2 kg', '3 kg', '4 kg', '5 kg', '6 kg', '7 kg', '8 kg', '10 kg', '13 kg', '15 kg', '20 kg', '25 kg', '30 kg']
+                                : ['1 m³', '1.5 m³', '2.5 m³', '3 m³', '4 m³', '5 m³', '6 m³', '6.5 m³', '7 m³', '7.15 m³', '7.5 m³', '8.5 m³']
+                            ).map(cap => (
                               <button
                                 key={cap}
                                 type="button"
@@ -1542,7 +1604,7 @@ export default function RepartoPage() {
                           <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
                             {activeEntrega.detalles?.filter(d => scannedIds.includes(d.tuboId)).map(d => (
                               <div key={d.id} style={{ fontSize: 12, color: '#047857', fontFamily: 'var(--font-mono)' }}>
-                                • {d.tuboId} ({d.tubo?.gas} {d.tubo?.talla})
+                                • {d.tuboId} ({d.tubo?.gas})
                               </div>
                             ))}
                           </div>
@@ -1640,7 +1702,7 @@ export default function RepartoPage() {
                   <td>
                     <strong>{d.tuboId}</strong><br />
                     <span style={{ fontSize: '10px', color: '#555' }}>
-                      {d.tubo?.gas} {d.tubo?.talla}
+                      {d.tubo?.gas}
                     </span>
                   </td>
                   <td style={{ textAlign: 'center' }}>
@@ -1756,7 +1818,7 @@ export default function RepartoPage() {
                     <td style={{ paddingTop: '6px', paddingBottom: '4px' }}>
                       <strong>{d.tuboId}</strong><br />
                       <span style={{ fontSize: '10px', color: '#555' }}>
-                        {d.tubo?.gas} {d.tubo?.talla}
+                        {d.tubo?.gas}
                       </span>
                     </td>
                     <td style={{ textAlign: 'center', paddingTop: '6px', paddingBottom: '4px' }}>
@@ -1798,7 +1860,7 @@ export default function RepartoPage() {
                     const tubo = r.tuboEntregado
                     const desc = tubo.observaciones && (tubo.observaciones.includes(' ') || tubo.observaciones.length > 15)
                       ? tubo.observaciones 
-                      : `${tubo.id} (${tubo.gas} ${tubo.talla || ''})`
+                      : `${tubo.id} (${tubo.gas})`
                     return <li key={r.id}>{desc}</li>
                   })}
                 </ul>
@@ -1851,8 +1913,36 @@ export default function RepartoPage() {
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>
-            Asegúrate de que la impresora <strong>HM-A300E</strong> esté encendida y vinculada (emparejada) en la configuración de Bluetooth de tu celular.
+            Asegúrate de que tu impresora Bluetooth (ej. <strong>FTX TDR058BT</strong> o <strong>HM-A300E</strong>) esté encendida y vinculada (emparejada) en la configuración de tu celular.
           </p>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--text-secondary)' }}>Ancho del papel / Formato:</span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                type="button"
+                className={`btn btn-sm ${paperWidth === 32 ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ flex: 1 }}
+                onClick={() => {
+                  setPaperWidth(32)
+                  localStorage.setItem('printer_paper_width', '32')
+                }}
+              >
+                58 mm (ftx TDR058BT)
+              </button>
+              <button
+                type="button"
+                className={`btn btn-sm ${paperWidth === 48 ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ flex: 1 }}
+                onClick={() => {
+                  setPaperWidth(48)
+                  localStorage.setItem('printer_paper_width', '48')
+                }}
+              >
+                80 mm (HM-A300E)
+              </button>
+            </div>
+          </div>
 
           {connectingPrinter && pairedDevices.length === 0 ? (
             <div style={{ padding: '20px 0', textAlign: 'center' }}>
@@ -1875,11 +1965,18 @@ export default function RepartoPage() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 200, overflowY: 'auto' }}>
               {pairedDevices.map(device => {
                 const esHMA300 = device.name && device.name.toUpperCase().includes('HM-A300')
+                const esTDR = device.name && (device.name.toUpperCase().includes('TDR058') || device.name.toUpperCase().includes('FTX') || device.name.toUpperCase().includes('BLUETOOTH') || device.name.toUpperCase().includes('PRINTER'))
                 const esSeleccionado = selectedDeviceAddress === (device.address || device.id)
                 return (
                   <div
                     key={device.address || device.id}
-                    onClick={() => setSelectedDeviceAddress(device.address || device.id)}
+                    onClick={() => {
+                      setSelectedDeviceAddress(device.address || device.id)
+                      const name = (device.name || '').toUpperCase()
+                      const detectedWidth = (name.includes('58') || name.includes('TDR') || name.includes('FTX') || name.includes('BLUETOOTH') || name.includes('PRINTER')) ? 32 : 48
+                      setPaperWidth(detectedWidth)
+                      localStorage.setItem('printer_paper_width', String(detectedWidth))
+                    }}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -1894,7 +1991,7 @@ export default function RepartoPage() {
                   >
                     <div>
                       <div style={{ fontSize: 13, fontWeight: esSeleccionado ? 600 : 500, display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <i className="ti ti-bluetooth" style={{ color: esHMA300 ? 'var(--blue)' : 'var(--text-muted)' }} />
+                        <i className="ti ti-bluetooth" style={{ color: (esHMA300 || esTDR) ? 'var(--blue)' : 'var(--text-muted)' }} />
                         {device.name || 'Dispositivo sin nombre'}
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>

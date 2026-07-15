@@ -2,15 +2,15 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import api from '../services/api.js'
-import { PageHeader, StateBadge, Modal, FormGroup, Spinner, EmptyState, GasDot } from '../components/ui.jsx'
+import { PageHeader, StateBadge, Modal, FormGroup, Spinner, EmptyState, GasDot, formatCapacidad } from '../components/ui.jsx'
 import { useConfigStore } from '../store/configStore.js'
 import { useToast } from '../components/ui.jsx'
 
 const ESTADOS = ['DISPONIBLE','CARGADO','VACIO','ENTREGADO','ALQUILADO','VENDIDO','RESERVADO','PERDIDO','DEVUELTO','EN_REVISION']
-const GASES   = ['CO2','Oxígeno','Argón','Nitrógeno','Acetileno','Mezcla Ar+CO2','Mezcla especial']
+const GASES   = ['CO2','Oxígeno','Argón','Nitrógeno','Aire comprimido','Acetileno','Mezcla Ar+CO2','Mezcla especial']
 
 const EMPTY_TUBO = {
-  serie: '', gas: 'CO2', capacidadLitros: 50, capacidadKg: '', talla: 'T50',
+  serie: '', gas: 'CO2', capacidadLitros: '', capacidadKg: 25,
   pesoKg: '', propietario: 'PROPIO', propietarioClienteId: '', estado: 'DISPONIBLE',
   ubicacion: 'Depósito A', fechaCompra: '', observaciones: '',
 }
@@ -59,11 +59,12 @@ export default function TubosPage() {
 
     setSaving(true)
     try {
-      const isAcetileno = form.gas.toLowerCase() === 'acetileno'
+      const gasLower = form.gas.toLowerCase()
+      const isKgBased = gasLower === 'acetileno' || gasLower === 'co2'
       const payload = {
         ...form,
-        capacidadLitros: isAcetileno ? undefined : Number(form.capacidadLitros),
-        capacidadKg: isAcetileno ? Number(form.capacidadKg) : undefined,
+        capacidadLitros: isKgBased ? undefined : Number(form.capacidadLitros),
+        capacidadKg: isKgBased ? Number(form.capacidadKg) : undefined,
         pesoKg: form.pesoKg ? Number(form.pesoKg) : undefined,
         fechaCompra: form.fechaCompra ? new Date(form.fechaCompra).toISOString() : undefined,
         propietarioClienteId: form.propietario === 'CLIENTE' ? form.propietarioClienteId : undefined,
@@ -81,12 +82,13 @@ export default function TubosPage() {
 
   const handleGasChange = (e) => {
     const val = e.target.value
-    const isAcetileno = val.toLowerCase() === 'acetileno'
+    const valLower = val.toLowerCase()
+    const isKgBased = valLower === 'acetileno' || valLower === 'co2'
     setForm(prev => ({
       ...prev,
       gas: val,
-      capacidadLitros: isAcetileno ? '' : 50,
-      capacidadKg: isAcetileno ? 1 : '',
+      capacidadLitros: isKgBased ? '' : 6,
+      capacidadKg: isKgBased ? (valLower === 'co2' ? 25 : 6) : '',
     }))
   }
 
@@ -171,7 +173,7 @@ export default function TubosPage() {
                           </span>
                         </td>
                         <td style={{ color: 'var(--text-secondary)' }}>
-                          {t.capacidadLitros ? `${t.capacidadLitros}L` : `${Number(t.capacidadKg)} kg`}
+                          {formatCapacidad(t)}
                         </td>
                         <td><StateBadge estado={t.estado} /></td>
                         <td>
@@ -213,7 +215,7 @@ export default function TubosPage() {
                       <div className="list-card-item">
                         <span className="list-card-label">Gas / Capacidad</span>
                         <span className="list-card-value">
-                          <GasDot gas={t.gas} /> {t.gas} · {t.capacidadLitros ? `${t.capacidadLitros}L` : `${Number(t.capacidadKg)} kg`}
+                          <GasDot gas={t.gas} /> {t.gas} · {formatCapacidad(t)}
                         </span>
                       </div>
                       <div className="list-card-item">
@@ -274,18 +276,25 @@ export default function TubosPage() {
                   ))}
                 </select>
               </FormGroup>
+            ) : form.gas.toLowerCase() === 'co2' ? (
+              <FormGroup label="Capacidad (kg)" required>
+                <select value={form.capacidadKg} onChange={f('capacidadKg')}>
+                  <option value="">Seleccionar...</option>
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 10, 13, 15, 20, 25, 30].map(kg => (
+                    <option key={kg} value={kg}>{kg} kg</option>
+                  ))}
+                </select>
+              </FormGroup>
             ) : (
-              <FormGroup label="Capacidad (litros)" required>
+              <FormGroup label="Capacidad (m³)" required>
                 <select value={form.capacidadLitros} onChange={f('capacidadLitros')}>
-                  <option value={8}>8 L</option>
-                  <option value={10}>10 L</option>
-                  <option value={50}>50 L</option>
+                  <option value="">Seleccionar...</option>
+                  {[1, 1.5, 2.5, 3, 4, 5, 6, 6.5, 7, 7.15, 7.5, 8.5].map(m3 => (
+                    <option key={m3} value={m3}>{m3} m³</option>
+                  ))}
                 </select>
               </FormGroup>
             )}
-            <FormGroup label="Talla">
-              <input value={form.talla} onChange={f('talla')} placeholder="T50" />
-            </FormGroup>
             <FormGroup label="Peso (kg)">
               <input type="number" value={form.pesoKg} onChange={f('pesoKg')} placeholder="75" step="0.1" />
             </FormGroup>

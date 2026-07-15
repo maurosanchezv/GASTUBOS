@@ -1,7 +1,7 @@
 // gastubos/frontend/src/pages/VentasPage.jsx
 import { useState, useEffect } from 'react'
 import api from '../services/api.js'
-import { PageHeader, Spinner, EmptyState, GasDot } from '../components/ui.jsx'
+import { PageHeader, Spinner, EmptyState, GasDot, formatCapacidad } from '../components/ui.jsx'
 import { useToast } from '../components/ui.jsx'
 
 export default function VentasPage() {
@@ -53,7 +53,7 @@ export default function VentasPage() {
                 <label className="form-label">Tubo <span className="form-required">*</span></label>
                 <select value={form.tuboId} onChange={f('tuboId')} required>
                   <option value="">Seleccionar tubo...</option>
-                  {tubos.map(t => <option key={t.id} value={t.id}>{t.id} — {t.gas} {t.capacidadLitros}L</option>)}
+                  {tubos.map(t => <option key={t.id} value={t.id}>{t.id} — {t.gas} · {formatCapacidad(t)}</option>)}
                 </select>
               </div>
               <div className="form-group">

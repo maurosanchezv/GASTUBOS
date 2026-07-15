@@ -3,10 +3,10 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import api from '../services/api.js'
-import { PageHeader, Spinner, GasDot, EmptyState } from '../components/ui.jsx'
+import { PageHeader, Spinner, GasDot, EmptyState, formatCapacidad } from '../components/ui.jsx'
 
 const gs = (v) => `${Number(v || 0).toLocaleString('es-PY')} Gs`
-const cap = (t) => t?.capacidadLitros ? `${t.capacidadLitros} L` : (t?.capacidadKg ? `${Number(t.capacidadKg)} kg` : '—')
+const cap = (t) => formatCapacidad(t)
 
 const TIPO_LABEL = {
   ENTREGA_SIMPLE: 'Entrega simple',
@@ -129,7 +129,7 @@ export default function RemisionPage() {
                     <table>
                       <thead>
                         <tr>
-                          <th>Código</th><th>Gas</th><th>Talla</th><th>Capacidad</th>
+                          <th>Código</th><th>Gas</th><th>Capacidad</th>
                           <th style={{ textAlign: 'right' }}>Carga</th>
                           <th style={{ textAlign: 'right' }}>Subtotal</th>
                         </tr>
@@ -139,7 +139,6 @@ export default function RemisionPage() {
                           <tr key={d.id}>
                             <td className="td-code">{d.tuboId}</td>
                             <td><GasDot gas={d.tubo?.gas} /> {d.tubo?.gas}</td>
-                            <td>{d.tubo?.talla || '—'}</td>
                             <td>{cap(d.tubo)}</td>
                             <td style={{ textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap' }}>{Number(d.cantidadGas || 0)} {d.unidadGas}</td>
                             <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>{gs(d.subtotal)}</td>
@@ -159,7 +158,6 @@ export default function RemisionPage() {
                         </div>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', fontSize: 12, color: 'var(--text-secondary)' }}>
                           <span><GasDot gas={d.tubo?.gas} /> {d.tubo?.gas}</span>
-                          <span>Talla: {d.tubo?.talla || '—'}</span>
                           <span>{cap(d.tubo)}</span>
                           <span>Carga: <strong style={{ color: 'var(--text-primary)' }}>{Number(d.cantidadGas || 0)} {d.unidadGas}</strong></span>
                         </div>
@@ -182,7 +180,7 @@ export default function RemisionPage() {
                     const t = r.tuboEntregado || {}
                     const desc = (t.observaciones && (t.observaciones.includes(' ') || t.observaciones.length > 15))
                       ? t.observaciones
-                      : `${t.id}${t.gas ? ` · ${t.gas}` : ''}${t.talla ? ` ${t.talla}` : ''}`
+                      : `${t.id}${t.gas ? ` · ${t.gas}` : ''}`
                     return (
                       <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--coral-light, var(--surface-2))', border: '1px solid var(--border)', padding: '9px 12px', borderRadius: 8, fontSize: 13 }}>
                         <i className="ti ti-arrow-back-up" style={{ color: 'var(--coral, var(--amber))' }} />

@@ -141,6 +141,18 @@ export function GasDot({ gas }) {
   return <span className="gas-dot" style={{ background: color }} />
 }
 
+// ── Format capacity helper ─────────────────────────────────────
+export function formatCapacidad(tubo) {
+  if (!tubo) return '—'
+  const gas = (tubo.gas || '').toLowerCase()
+  if (gas.includes('co2') || gas.includes('acetileno')) {
+    const val = tubo.capacidadKg !== undefined && tubo.capacidadKg !== null ? tubo.capacidadKg : (tubo.capacidadLitros || 0)
+    return `${Number(val)} kg`
+  }
+  const val = tubo.capacidadLitros !== undefined && tubo.capacidadLitros !== null ? tubo.capacidadLitros : (tubo.capacidadKg || 0)
+  return `${Number(val)} m³`
+}
+
 // ── Toast notification ─────────────────────────────────────────
 import { useState, useEffect } from 'react'
 

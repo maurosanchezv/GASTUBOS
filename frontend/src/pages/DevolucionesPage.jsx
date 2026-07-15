@@ -4,7 +4,7 @@ import { useSearchParams } from 'react-router-dom'
 import { Html5Qrcode } from 'html5-qrcode'
 import api from '../services/api.js'
 import { useAuthStore } from '../store/authStore.js'
-import { PageHeader, StateBadge, GasDot, Spinner, Modal } from '../components/ui.jsx'
+import { PageHeader, StateBadge, GasDot, Spinner, Modal, formatCapacidad } from '../components/ui.jsx'
 import { useToast } from '../components/ui.jsx'
 
 export default function DevolucionesPage() {
@@ -253,7 +253,7 @@ export default function DevolucionesPage() {
                     <StateBadge estado={tubo.estado} />
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, fontSize: 12 }}>
-                    {[['Gas', tubo.gas],['Capacidad', tubo.capacidadLitros ? `${tubo.capacidadLitros}L` : `${Number(tubo.capacidadKg)} kg`],['Cliente actual', tubo.cliente?.nombre || '—'],['Últ. Ubicación', tubo.ubicacion || '—']].map(([k,v]) => (
+                    {[['Gas', tubo.gas],['Capacidad', formatCapacidad(tubo)],['Cliente actual', tubo.cliente?.nombre || '—'],['Últ. Ubicación', tubo.ubicacion || '—']].map(([k,v]) => (
                       <div key={k} style={{ display: 'flex', flexDirection: 'column' }}>
                         <span style={{ color: 'var(--text-muted)', fontSize: 10, textTransform: 'uppercase', fontWeight: 600 }}>{k}</span>
                         <strong>{v}</strong>

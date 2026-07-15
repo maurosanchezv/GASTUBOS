@@ -82,8 +82,8 @@ router.get('/', async (req, res, next) => {
           cliente:    { select: { id: true, nombre: true, ruc: true, telefono: true, contacto: true } },
           creadoPor:  { select: { username: true, nombre: true } },
           repartidor: { select: { username: true, nombre: true } },
-          detalles:   { include: { tubo: { select: { id: true, gas: true, talla: true } } } },
-          recambios:  { include: { tuboEntregado: { select: { id: true, gas: true, talla: true, observaciones: true } } } },
+          detalles:   { include: { tubo: { select: { id: true, gas: true } } } },
+          recambios:  { include: { tuboEntregado: { select: { id: true, gas: true, observaciones: true } } } },
         },
         orderBy: { fechaEntrega: 'desc' },
         skip: (Number(page) - 1) * Number(limit),
@@ -107,8 +107,8 @@ router.get('/numero/:numero', async (req, res, next) => {
         cliente:    true,
         creadoPor:  { select: { username: true, nombre: true } },
         repartidor: { select: { username: true, nombre: true } },
-        detalles:   { include: { tubo: { select: { id: true, gas: true, talla: true, capacidadLitros: true, capacidadKg: true } } } },
-        recambios:  { include: { tuboEntregado: { select: { id: true, gas: true, talla: true, observaciones: true } } } },
+        detalles:   { include: { tubo: { select: { id: true, gas: true, capacidadLitros: true, capacidadKg: true } } } },
+        recambios:  { include: { tuboEntregado: { select: { id: true, gas: true, observaciones: true } } } },
       },
     })
     if (!entrega) return res.status(404).json({ error: 'Remisión no encontrada' })
@@ -472,7 +472,6 @@ router.put('/:id/confirmar', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), asyn
                 id: retId,
                 serie: retId, // Usamos el ID como serie por defecto
                 gas: tuboReferencia ? tuboReferencia.gas : 'CO2',
-                talla: tuboReferencia ? tuboReferencia.talla : 'T50',
                 capacidadLitros: tuboReferencia ? tuboReferencia.capacidadLitros : 40,
                 estado: 'DEVUELTO',
                 propietario: 'CLIENTE',
@@ -765,8 +764,7 @@ router.post('/:id/agregar-tubo', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), 
           tubo: {
             select: {
               id: true,
-              gas: true,
-              talla: true
+              gas: true
             }
           }
         }

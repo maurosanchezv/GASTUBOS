@@ -1,7 +1,7 @@
 // gastubos/frontend/src/pages/CamionesPage.jsx
 import { useState, useEffect, useCallback } from 'react'
 import api from '../services/api.js'
-import { PageHeader, Modal, FormGroup, Spinner, EmptyState, StateBadge, GasDot } from '../components/ui.jsx'
+import { PageHeader, Modal, FormGroup, Spinner, EmptyState, StateBadge, GasDot, formatCapacidad } from '../components/ui.jsx'
 import { useToast } from '../components/ui.jsx'
 
 export default function CamionesPage() {
@@ -450,7 +450,7 @@ export default function CamionesPage() {
                           <GasDot gas={t.gas} /> {t.gas}
                         </span>
                       </td>
-                      <td>{t.capacidadLitros ? `${t.capacidadLitros}L` : `${Number(t.capacidadKg)} kg`}</td>
+                      <td>{formatCapacidad(t)}</td>
                       <td><StateBadge estado={t.estado} /></td>
                     </tr>
                   ))}
@@ -543,7 +543,7 @@ export default function CamionesPage() {
                               <GasDot gas={t.gas} /> {t.gas}
                             </span>
                           </td>
-                          <td>{t.capacidadLitros ? `${t.capacidadLitros}L` : `${Number(t.capacidadKg)} kg`}</td>
+                          <td>{formatCapacidad(t)}</td>
                           <td><StateBadge estado={t.estado} /></td>
                           <td style={{ color: 'var(--text-secondary)', fontSize: 11 }}>{t.ubicacion || 'Depósito'}</td>
                         </tr>

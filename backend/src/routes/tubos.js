@@ -16,9 +16,8 @@ router.use(requireAuth)
 const tuboSchema = z.object({
   serie:            z.string().min(1),
   gas:              z.string().min(1),
-  capacidadLitros:  z.number().int().positive().optional().nullable(),
+  capacidadLitros:  z.number().positive().optional().nullable(),
   capacidadKg:      z.number().positive().optional().nullable(),
-  talla:            z.string().min(1),
   pesoKg:           z.number().positive().optional(),
   propietario:      z.enum(['PROPIO', 'CLIENTE']).default('PROPIO'),
   propietarioClienteId: z.string().optional().nullable(),
@@ -35,14 +34,20 @@ const tuboSchema = z.object({
   message: "Debe seleccionar un cliente si el tubo es propiedad de un cliente",
   path: ["propietarioClienteId"]
 }).refine(data => {
-  const isAcetileno = data.gas.toLowerCase() === 'acetileno'
-  if (isAcetileno) {
+  const gasLower = data.gas.toLowerCase()
+  if (gasLower === 'acetileno') {
     if (data.capacidadLitros) return false
     const allowedSizes = [1, 1.2, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 7, 8]
     if (!data.capacidadKg || !allowedSizes.includes(data.capacidadKg)) return false
+  } else if (gasLower === 'co2') {
+    if (data.capacidadLitros) return false
+    const allowedSizes = [1, 2, 3, 4, 5, 6, 7, 8, 10, 13, 15, 20, 25, 30]
+    if (!data.capacidadKg || !allowedSizes.includes(data.capacidadKg)) return false
   } else {
-    if (!data.capacidadLitros) return false
+    // Para Oxígeno, Nitrógeno, Argón, Aire comprimido y Mezclas, se usa capacidadLitros (representa m3)
     if (data.capacidadKg) return false
+    const allowedSizes = [1, 1.5, 2.5, 3, 4, 5, 6, 6.5, 7, 7.15, 7.5, 8.5]
+    if (!data.capacidadLitros || !allowedSizes.includes(data.capacidadLitros)) return false
   }
   return true
 }, {

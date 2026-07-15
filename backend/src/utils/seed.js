@@ -79,11 +79,11 @@ async function main() {
 
   // ── Tubos ──────────────────────────────────────────────────────────────────
   const tubosData = [
-    { id: 'TUBO-000001', serie: 'SN-2021-001', gas: 'CO2',      capacidadLitros: 50, talla: 'T50', pesoKg: 75, estado: 'DISPONIBLE', ubicacion: 'Depósito A' },
-    { id: 'TUBO-000002', serie: 'SN-2021-002', gas: 'Oxígeno',  capacidadLitros: 50, talla: 'T50', pesoKg: 72, estado: 'ENTREGADO',  ubicacion: 'Cliente', clienteId: cliente1.id },
-    { id: 'TUBO-000003', serie: 'SN-2022-011', gas: 'Argón',    capacidadLitros: 10, talla: 'T10', pesoKg: 28, estado: 'ALQUILADO',  ubicacion: 'Cliente', clienteId: cliente2.id },
-    { id: 'TUBO-000004', serie: 'SN-2022-012', gas: 'Nitrógeno',capacidadLitros: 50, talla: 'T50', pesoKg: 70, estado: 'CARGADO',    ubicacion: 'Depósito B' },
-    { id: 'TUBO-000005', serie: 'SN-2023-031', gas: 'Acetileno',capacidadLitros: 8,  talla: 'T8',  pesoKg: 30, estado: 'VACIO',      ubicacion: 'Depósito A' },
+    { id: 'TUBO-000001', serie: 'SN-2021-001', gas: 'CO2',      capacidadKg: 25,     pesoKg: 75, estado: 'DISPONIBLE', ubicacion: 'Depósito A' },
+    { id: 'TUBO-000002', serie: 'SN-2021-002', gas: 'Oxígeno',  capacidadLitros: 6,  pesoKg: 72, estado: 'ENTREGADO',  ubicacion: 'Cliente', clienteId: cliente1.id },
+    { id: 'TUBO-000003', serie: 'SN-2022-011', gas: 'Argón',    capacidadLitros: 2.5,pesoKg: 28, estado: 'ALQUILADO',  ubicacion: 'Cliente', clienteId: cliente2.id },
+    { id: 'TUBO-000004', serie: 'SN-2022-012', gas: 'Nitrógeno',capacidadLitros: 6,  pesoKg: 70, estado: 'CARGADO',    ubicacion: 'Depósito B' },
+    { id: 'TUBO-000005', serie: 'SN-2023-031', gas: 'Acetileno',capacidadKg: 6,      pesoKg: 30, estado: 'VACIO',      ubicacion: 'Depósito A' },
   ]
 
   for (const t of tubosData) {

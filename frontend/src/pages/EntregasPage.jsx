@@ -9,7 +9,7 @@ import iconUrl from 'leaflet/dist/images/marker-icon.png'
 import iconRetinaUrl from 'leaflet/dist/images/marker-icon-2x.png'
 import shadowUrl from 'leaflet/dist/images/marker-shadow.png'
 import api from '../services/api.js'
-import { PageHeader, StateBadge, Spinner, GasDot, EmptyState, Modal } from '../components/ui.jsx'
+import { PageHeader, StateBadge, Spinner, GasDot, EmptyState, Modal, formatCapacidad } from '../components/ui.jsx'
 import { useToast } from '../components/ui.jsx'
 import { useConfigStore } from '../store/configStore.js'
 import jsPDF from 'jspdf'
@@ -233,8 +233,8 @@ export default function EntregasPage() {
 
           autoTable(doc, {
             startY: 65,
-            head: [['Código Tubo', 'Gas / Talla']],
-            body: e.detalles.map(d => [d.tuboId, `${d.tubo?.gas || ''} - ${d.tubo?.talla || ''}`]),
+            head: [['Código Tubo', 'Gas']],
+            body: e.detalles.map(d => [d.tuboId, `${d.tubo?.gas || ''}`]),
             headStyles: { fillColor: [26, 95, 168] }
           })
           doc.save(`Entrega_${e.numero}.pdf`)
@@ -383,7 +383,7 @@ export default function EntregasPage() {
                 ${e.detalles.map(d => `
                   <li>
                     <strong style="font-family:monospace; color:#18181B">${d.tuboId}</strong> 
-                    (${d.tubo?.gas || 'N/A'} - ${d.tubo?.talla || 'N/A'})
+                    (${d.tubo?.gas || 'N/A'})
                   </li>
                 `).join('')}
               </ul>
@@ -415,7 +415,7 @@ export default function EntregasPage() {
                 ${e.detalles.map(d => `
                   <li>
                     <span style="font-family:monospace; font-weight:600">${d.tuboId}</span> 
-                    (${d.tubo?.gas || 'N/A'} - ${d.tubo?.talla || 'N/A'})
+                    (${d.tubo?.gas || 'N/A'})
                   </li>
                 `).join('')}
               </ul>`
@@ -486,7 +486,7 @@ export default function EntregasPage() {
         defaultCant = Number(r.data.cargas[0].cantidad)
         defaultUnidad = r.data.cargas[0].unidad
       } else {
-        defaultCant = r.data.capacidadKg ? Number(r.data.capacidadKg) : (r.data.capacidadLitros || 0)
+        defaultCant = r.data.capacidadKg ? Number(r.data.capacidadKg) : (Number(r.data.capacidadLitros) || 0)
         const gasNorm = r.data.gas?.toLowerCase() || ''
         defaultUnidad = (gasNorm.includes('oxigeno') || gasNorm.includes('argon') || gasNorm.includes('nitrogeno') || gasNorm.includes('aire') || gasNorm.includes('mezcla')) ? 'M3' : 'KG'
       }
@@ -818,7 +818,7 @@ export default function EntregasPage() {
                               <div style={{ flex: 1, minWidth: 0 }}>
                                 <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600 }}>{t.id}</div>
                                 <div style={{ fontSize: 11, color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                  {t.gas} · {t.capacidadLitros ? `${t.capacidadLitros}L` : `${Number(t.capacidadKg)} kg`}
+                                  {t.gas} · {formatCapacidad(t)}
                                   {t.cliente ? <span style={{ color: 'var(--text-muted)' }}> · {t.cliente.nombre}</span> : ''}
                                   {t.camion ? <span style={{ color: 'var(--orange)', fontWeight: 500 }}> · 🚚 {t.camion.placa}</span> : ''}
                                 </div>
@@ -1229,7 +1229,7 @@ export default function EntregasPage() {
                     <td>
                       <strong>{d.tuboId}</strong><br />
                       <span style={{ fontSize: '10px', color: '#666' }}>
-                        {d.tubo?.gas} {d.tubo?.talla}
+                        {d.tubo?.gas}
                       </span>
                     </td>
                     <td style={{ textAlign: 'center' }}>
@@ -1271,7 +1271,7 @@ export default function EntregasPage() {
                     const tubo = r.tuboEntregado
                     const desc = tubo.observaciones && (tubo.observaciones.includes(' ') || tubo.observaciones.length > 15)
                       ? tubo.observaciones 
-                      : `${tubo.id} (${tubo.gas} ${tubo.talla || ''})`
+                      : `${tubo.id} (${tubo.gas})`
                     return <li key={r.id}>{desc}</li>
                   })}
                 </ul>
@@ -1325,7 +1325,7 @@ export default function EntregasPage() {
                   <td>
                     <strong>{d.tuboId}</strong><br />
                     <span style={{ fontSize: '10px', color: '#555' }}>
-                      {d.tubo?.gas} {d.tubo?.talla}
+                      {d.tubo?.gas}
                     </span>
                   </td>
                   <td style={{ textAlign: 'center' }}>
@@ -1368,7 +1368,7 @@ export default function EntregasPage() {
                   const tubo = r.tuboEntregado
                   const desc = tubo.observaciones && (tubo.observaciones.includes(' ') || tubo.observaciones.length > 15)
                     ? tubo.observaciones 
-                    : `${tubo.id} (${tubo.gas} ${tubo.talla || ''})`
+                    : `${tubo.id} (${tubo.gas})`
                   return <li key={r.id}>{desc}</li>
                 })}
               </ul>
