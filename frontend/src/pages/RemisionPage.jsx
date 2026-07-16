@@ -8,6 +8,16 @@ import { PageHeader, Spinner, GasDot, EmptyState, formatCapacidad } from '../com
 const gs = (v) => `${Number(v || 0).toLocaleString('es-PY')} Gs`
 const cap = (t) => formatCapacidad(t)
 
+const formatNumberSpanish = (val) => {
+  const num = Number(val)
+  if (isNaN(num)) return '0'
+  const rounded = Math.round(num * 1000) / 1000
+  if (Number.isInteger(rounded)) {
+    return rounded.toString()
+  }
+  return rounded.toFixed(3).replace('.', ',')
+}
+
 const TIPO_LABEL = {
   ENTREGA_SIMPLE: 'Entrega simple',
   ALQUILER: 'Alquiler',
@@ -135,34 +145,48 @@ export default function RemisionPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {detalles.map(d => (
-                          <tr key={d.id}>
-                            <td className="td-code">{d.tuboId}</td>
-                            <td><GasDot gas={d.tubo?.gas} /> {d.tubo?.gas}</td>
-                            <td>{cap(d.tubo)}</td>
-                            <td style={{ textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap' }}>{Number(d.cantidadGas || 0)} {d.unidadGas}</td>
-                            <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>{gs(d.subtotal)}</td>
-                          </tr>
-                        ))}
+                        {detalles.map(d => {
+                          const showSerie = d.tubo?.serie && d.tubo?.serie !== d.tuboId;
+                          return (
+                            <tr key={d.id}>
+                              <td className="td-code">
+                                {d.tuboId}
+                                {showSerie && (
+                                  <div style={{ fontSize: 10, color: 'var(--text-secondary)', fontWeight: 400 }}>Nro: {d.tubo.serie}</div>
+                                )}
+                              </td>
+                              <td><GasDot gas={d.tubo?.gas} /> {d.tubo?.gas}</td>
+                              <td>{cap(d.tubo)}</td>
+                              <td style={{ textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap' }}>{formatNumberSpanish(d.cantidadGas)} {d.unidadGas}</td>
+                              <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>{gs(d.subtotal)}</td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
 
                   {/* Móvil: tarjetas */}
                   <div className="mobile-only" style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '8px 0' }}>
-                    {detalles.map(d => (
-                      <div key={d.id} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 8, padding: 12 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 13, color: 'var(--blue)' }}>{d.tuboId}</span>
-                          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 13 }}>{gs(d.subtotal)}</span>
+                    {detalles.map(d => {
+                      const showSerie = d.tubo?.serie && d.tubo?.serie !== d.tuboId;
+                      return (
+                        <div key={d.id} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 8, padding: 12 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                            <div>
+                              <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 13, color: 'var(--blue)' }}>{d.tuboId}</span>
+                              {showSerie && <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>Nro: {d.tubo.serie}</div>}
+                            </div>
+                            <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 13 }}>{gs(d.subtotal)}</span>
+                          </div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', fontSize: 12, color: 'var(--text-secondary)' }}>
+                            <span><GasDot gas={d.tubo?.gas} /> {d.tubo?.gas}</span>
+                            <span>{cap(d.tubo)}</span>
+                            <span>Carga: <strong style={{ color: 'var(--text-primary)' }}>{formatNumberSpanish(d.cantidadGas)} {d.unidadGas}</strong></span>
+                          </div>
                         </div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', fontSize: 12, color: 'var(--text-secondary)' }}>
-                          <span><GasDot gas={d.tubo?.gas} /> {d.tubo?.gas}</span>
-                          <span>{cap(d.tubo)}</span>
-                          <span>Carga: <strong style={{ color: 'var(--text-primary)' }}>{Number(d.cantidadGas || 0)} {d.unidadGas}</strong></span>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </>
               )}

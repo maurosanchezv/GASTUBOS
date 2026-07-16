@@ -36,7 +36,6 @@ const NAV = [
     { to: '/ventas',     icon: 'ti-shopping-cart',    label: 'Ventas',   restrictedTo: OFICINA },
   ]},
   { group: 'Sistema', items: [
-    { to: '/tarifas',    icon: 'ti-coin',             label: 'Tarifas', restrictedTo: ['ADMIN', 'SUPERVISOR'] },
     { to: '/reportes',   icon: 'ti-chart-bar',        label: 'Reportes', restrictedTo: ['ADMIN', 'SUPERVISOR'] },
     { to: '/auditoria',  icon: 'ti-list-details',     label: 'Auditoría', restrictedTo: ['ADMIN', 'SUPERVISOR'] },
     { to: '/usuarios',   icon: 'ti-shield-lock',      label: 'Usuarios', restrictedTo: ['ADMIN'] },

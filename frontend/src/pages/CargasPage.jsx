@@ -31,6 +31,16 @@ const GAS_STRING_TO_ENUM = {
 
 const ESTADOS_CARGABLES = ['VACIO', 'DISPONIBLE', 'DEVUELTO', 'EN_REVISION', 'RESERVADO']
 
+const formatNumberSpanish = (val) => {
+  const num = Number(val)
+  if (isNaN(num)) return '0'
+  const rounded = Math.round(num * 1000) / 1000
+  if (Number.isInteger(rounded)) {
+    return rounded.toString()
+  }
+  return rounded.toFixed(3).replace('.', ',')
+}
+
 const FORM_INICIAL = {
   tuboId: '', tipoGas: '', unidad: '', cantidad: '',
   fechaCarga: new Date().toISOString().slice(0, 16), observaciones: '',
@@ -53,6 +63,15 @@ export default function CargasPage() {
   const [filtroGas, setFiltroGas] = useState('')
   const [filtroDesde, setFiltroDesde] = useState('')
   const [filtroHasta, setFiltroHasta] = useState('')
+  const [precios,  setPrecios]  = useState([])
+  const [calcPrecio, setCalcPrecio] = useState('')
+  const [calcMonto, setCalcMonto] = useState('')
+
+  useEffect(() => {
+    api.get('/precios')
+      .then(res => setPrecios(res.data))
+      .catch(() => {})
+  }, [])
 
   const limit = 50
 
@@ -104,11 +123,27 @@ export default function CargasPage() {
       tipoGas: gasEnum,
       unidad:  gasEnum ? TIPO_GAS_UNIDAD[gasEnum] : '',
     })
+
+    // Cargar precio sugerido para el cálculo
+    const priceInfo = precios.find(p => p.gas === gasEnum)
+    setCalcPrecio(priceInfo ? Number(priceInfo.precioUnitario) : '')
+    setCalcMonto('')
+
     setModal(true)
   }
 
   function handleGasChange(tipoGas) {
     setForm(prev => ({ ...prev, tipoGas, unidad: TIPO_GAS_UNIDAD[tipoGas] || '' }))
+    const priceInfo = precios.find(p => p.gas === tipoGas)
+    const price = priceInfo ? Number(priceInfo.precioUnitario) : ''
+    setCalcPrecio(price)
+
+    if (calcMonto && price) {
+      const qty = (Number(calcMonto) / price).toFixed(3)
+      setForm(prev => ({ ...prev, cantidad: qty }))
+    } else {
+      setForm(prev => ({ ...prev, cantidad: '' }))
+    }
   }
 
   function abrirModalSalon() {
@@ -119,7 +154,53 @@ export default function CargasPage() {
       tipoGas: 'CO2',
       unidad: 'KG',
     })
+
+    // Cargar precio sugerido para el cálculo (por defecto CO2)
+    const priceInfo = precios.find(p => p.gas === 'CO2')
+    setCalcPrecio(priceInfo ? Number(priceInfo.precioUnitario) : '')
+    setCalcMonto('')
+
     setModal(true)
+  }
+
+  const handleCalcMontoChange = (monto) => {
+    setCalcMonto(monto)
+    const m = Number(monto)
+    const p = Number(calcPrecio)
+    if (m && p) {
+      const qty = (m / p).toFixed(3)
+      setForm(prev => ({ ...prev, cantidad: qty }))
+    } else {
+      setForm(prev => ({ ...prev, cantidad: '' }))
+    }
+  }
+
+  const handleCalcPrecioChange = (precio) => {
+    setCalcPrecio(precio)
+    const p = Number(precio)
+    if (p) {
+      if (calcMonto) {
+        const qty = (Number(calcMonto) / p).toFixed(3)
+        setForm(prev => ({ ...prev, cantidad: qty }))
+      } else if (form.cantidad) {
+        const m = Math.round(Number(form.cantidad) * p)
+        setCalcMonto(m ? m.toString() : '')
+      }
+    } else {
+      setForm(prev => ({ ...prev, cantidad: '' }))
+    }
+  }
+
+  const handleCantidadChange = (cantidad) => {
+    setForm(prev => ({ ...prev, cantidad }))
+    const qty = Number(cantidad)
+    const p = Number(calcPrecio)
+    if (qty && p) {
+      const m = Math.round(qty * p)
+      setCalcMonto(m ? m.toString() : '')
+    } else {
+      setCalcMonto('')
+    }
   }
 
   async function handleSubmit() {
@@ -138,6 +219,7 @@ export default function CargasPage() {
         tipoGas:       form.tipoGas,
         unidad:        form.unidad,
         cantidad:      Number(form.cantidad),
+        precioUnitario: Number(calcPrecio) || 0,
         fechaCarga:    new Date(form.fechaCarga).toISOString(),
         observaciones: form.observaciones || undefined,
       })
@@ -488,7 +570,7 @@ export default function CargasPage() {
               type="number" min="0.001" step="0.001"
               placeholder={form.unidad === 'KG' ? 'ej: 25' : 'ej: 6'}
               value={form.cantidad}
-              onChange={e => setForm(prev => ({ ...prev, cantidad: e.target.value }))}
+              onChange={e => handleCantidadChange(e.target.value)}
             />
           </FormGroup>
           <FormGroup label="Fecha de carga" required>
@@ -498,6 +580,44 @@ export default function CargasPage() {
               onChange={e => setForm(prev => ({ ...prev, fechaCarga: e.target.value }))}
             />
           </FormGroup>
+        </div>
+
+        {/* Asistente de cálculo por dinero */}
+        <div style={{ 
+          border: '1px dashed var(--border-mid)', 
+          borderRadius: 8, 
+          padding: '12px 14px', 
+          marginBottom: 16, 
+          background: 'var(--bg-subtle)'
+        }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <i className="ti ti-calculator" /> Asistente de cobro (Opcional)
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <FormGroup label="Monto total (Gs.)">
+              <input
+                type="number"
+                min="0"
+                placeholder="ej: 100000"
+                value={calcMonto}
+                onChange={e => handleCalcMontoChange(e.target.value)}
+              />
+            </FormGroup>
+            <FormGroup label="Precio unitario (Gs.)">
+              <input
+                type="number"
+                min="0"
+                placeholder="ej: 10000"
+                value={calcPrecio}
+                onChange={e => handleCalcPrecioChange(e.target.value)}
+              />
+            </FormGroup>
+          </div>
+          {calcMonto && calcPrecio && (
+            <div style={{ fontSize: 11, color: 'var(--blue)', marginTop: 4, fontWeight: 600 }}>
+              Cálculo: {Number(calcMonto).toLocaleString('de-DE')} Gs. / {Number(calcPrecio).toLocaleString('de-DE')} Gs. = {formatNumberSpanish(Number(calcMonto) / Number(calcPrecio))} {form.unidad}
+            </div>
+          )}
         </div>
 
         <FormGroup label="Observaciones">

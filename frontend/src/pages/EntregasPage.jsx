@@ -28,6 +28,26 @@ const EMPTY = {
   costoDelivery: '',
 }
 
+const GAS_STRING_TO_ENUM = {
+  'CO2': 'CO2', 'CO₂': 'CO2',
+  'Oxígeno': 'OXIGENO', 'Oxigeno': 'OXIGENO',
+  'Argón': 'ARGON', 'Argon': 'ARGON',
+  'Nitrógeno': 'NITROGENO', 'Nitrogeno': 'NITROGENO',
+  'Aire comprimido': 'AIRE_COMPRIMIDO',
+  'Mezcla': 'MEZCLA_CO2_ARGON',
+  'Acetileno': 'ACETILENO',
+}
+
+const formatNumberSpanish = (val) => {
+  const num = Number(val)
+  if (isNaN(num)) return '0'
+  const rounded = Math.round(num * 1000) / 1000
+  if (Number.isInteger(rounded)) {
+    return rounded.toString()
+  }
+  return rounded.toFixed(3).replace('.', ',')
+}
+
 // URL pública de la remisión que codifica el QR del ticket. Al escanearla (con
 // login) abre la página de detalle /remision/:numero. Misma lógica que en la app
 // del repartidor, para que ambos QR abran la misma página.
@@ -46,6 +66,7 @@ export default function EntregasPage() {
   const [form, setForm]         = useState(EMPTY)
   const [clientes, setClientes] = useState([])
   const [usuarios, setUsuarios] = useState([])
+  const [precios, setPrecios]   = useState([])
 
   // Búsqueda de tubos mejorada
   const [tuboBusq, setTuboBusq]       = useState('')
@@ -124,6 +145,7 @@ export default function EntregasPage() {
   useEffect(() => {
     api.get('/clientes').then(r => setClientes(r.data)).catch(() => {})
     api.get('/usuarios').then(r => setUsuarios(r.data)).catch(() => {})
+    api.get('/precios').then(r => setPrecios(r.data)).catch(() => {})
     if (params.get('tubo')) agregarTubo(params.get('tubo'))
     if (params.get('tab')) setTab(params.get('tab'))
   }, [])
@@ -482,19 +504,31 @@ export default function EntregasPage() {
       
       let defaultCant = 0
       let defaultUnidad = 'KG'
+      let defaultPrecio = 0
+
       if (r.data.cargas && r.data.cargas.length > 0) {
-        defaultCant = Number(r.data.cargas[0].cantidad)
-        defaultUnidad = r.data.cargas[0].unidad
+        const ultimaCarga = r.data.cargas[0]
+        defaultCant = Number(ultimaCarga.cantidad)
+        defaultUnidad = ultimaCarga.unidad
+        defaultPrecio = Number(ultimaCarga.precioUnitario || 0)
       } else {
         defaultCant = r.data.capacidadKg ? Number(r.data.capacidadKg) : (Number(r.data.capacidadLitros) || 0)
         const gasNorm = r.data.gas?.toLowerCase() || ''
         defaultUnidad = (gasNorm.includes('oxigeno') || gasNorm.includes('argon') || gasNorm.includes('nitrogeno') || gasNorm.includes('aire') || gasNorm.includes('mezcla')) ? 'M3' : 'KG'
+        
+        // Buscar precio sugerido para el tipo de gas
+        const gasEnum = GAS_STRING_TO_ENUM[r.data.gas] || ''
+        try {
+          const pr = precios.length > 0 ? precios : (await api.get('/precios')).data
+          const priceInfo = pr.find(p => p.gas === gasEnum)
+          defaultPrecio = priceInfo ? Number(priceInfo.precioUnitario) : 0
+        } catch {}
       }
 
       setForm(f => ({ 
         ...f, 
         tubosIds: [...f.tubosIds, id],
-        tubosDetalles: [...(f.tubosDetalles || []), { tuboId: id, cantidadGas: defaultCant, unidadGas: defaultUnidad }]
+        tubosDetalles: [...(f.tubosDetalles || []), { tuboId: id, cantidadGas: defaultCant, unidadGas: defaultUnidad, precioUnitario: defaultPrecio }]
       }))
       setTuboSugs([])
       setTuboBusq('')
@@ -1320,25 +1354,30 @@ export default function EntregasPage() {
               </tr>
             </thead>
             <tbody>
-              {entregaSeleccionada.detalles?.map(d => (
-                <tr key={d.id}>
-                  <td>
-                    <strong>{d.tuboId}</strong><br />
-                    <span style={{ fontSize: '10px', color: '#555' }}>
-                      {d.tubo?.gas}
-                    </span>
-                  </td>
-                  <td style={{ textAlign: 'center' }}>
-                    {Number(d.cantidadGas)} {d.unidadGas}<br />
-                    <span style={{ fontSize: '9px', color: '#888' }}>
-                      x {Number(d.precioUnitario).toLocaleString('es-PY')}
-                    </span>
-                  </td>
-                  <td style={{ textAlign: 'right', fontWeight: '500' }}>
-                    {Number(d.subtotal).toLocaleString('es-PY')} GS
-                  </td>
-                </tr>
-              ))}
+              {entregaSeleccionada.detalles?.map(d => {
+                const capStr = d.tubo ? ` (${formatCapacidad(d.tubo)})` : '';
+                const showSerie = d.tubo?.serie && d.tubo?.serie !== d.tuboId;
+                return (
+                  <tr key={d.id}>
+                    <td>
+                      <strong>{d.tuboId}</strong>
+                      {showSerie && <span style={{ fontSize: '10px', color: '#555', display: 'block' }}>Nro: {d.tubo.serie}</span>}
+                      <span style={{ fontSize: '10px', color: '#555', display: 'block' }}>
+                        {d.tubo?.gas}{capStr}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'center' }}>
+                      {formatNumberSpanish(d.cantidadGas)} {d.unidadGas}<br />
+                      <span style={{ fontSize: '9px', color: '#888' }}>
+                        x {Number(d.precioUnitario).toLocaleString('es-PY')}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'right', fontWeight: '500' }}>
+                      {Number(d.subtotal).toLocaleString('es-PY')} GS
+                    </td>
+                  </tr>
+                );
+              })}
               <tr style={{ borderTop: '1px dashed #000' }}>
                 <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>DELIVERY:</td>
                 <td style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>
@@ -1423,7 +1462,7 @@ function TuboChip({ tuboId, detail, onChange, onRemove }) {
           </>
         )}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '0 0 auto' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '0 0 auto', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <label style={{ fontSize: 10, color: 'var(--text-muted)' }}>CANTIDAD:</label>
           <input 
@@ -1443,6 +1482,12 @@ function TuboChip({ tuboId, detail, onChange, onRemove }) {
           <option value="KG">KG</option>
           <option value="M3">M³</option>
         </select>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 8 }}>
+          <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>PRECIO:</span>
+          <span style={{ fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+            {Number(detail?.precioUnitario || 0).toLocaleString('es-PY')} Gs
+          </span>
+        </div>
         <button type="button" className="btn-icon" onClick={() => onRemove(tuboId)} title="Quitar">
           <i className="ti ti-x" />
         </button>

@@ -16,6 +16,7 @@ const cargaSchema = z.object({
   tipoGas:       z.enum(['CO2','OXIGENO','ARGON','NITROGENO','AIRE_COMPRIMIDO','MEZCLA_CO2_ARGON','ACETILENO']),
   unidad:        z.enum(['KG','M3']),
   cantidad:      z.number().positive(),
+  precioUnitario: z.number().nonnegative().optional().default(0),
   fechaCarga:    z.string().datetime(),
   observaciones: z.string().optional(),
 })
@@ -92,6 +93,7 @@ router.post('/', requireRol('ADMIN', 'OPERADOR'), async (req, res, next) => {
           tipoGas:       data.tipoGas,
           unidad:        data.unidad,
           cantidad:      data.cantidad,
+          precioUnitario: data.precioUnitario,
           fechaCarga:    new Date(data.fechaCarga),
           operadorId:    req.user.id,
           observaciones: data.observaciones,

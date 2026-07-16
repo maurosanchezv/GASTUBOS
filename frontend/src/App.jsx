@@ -22,7 +22,6 @@ import ReportesPage    from './pages/ReportesPage.jsx'
 import AuditoriaPage   from './pages/AuditoriaPage.jsx'
 import PerfilPage      from './pages/PerfilPage.jsx'
 import UsuariosPage    from './pages/UsuariosPage.jsx'
-import TarifasPage     from './pages/TarifasPage.jsx'
 import CargasPage      from './pages/CargasPage.jsx'
 import ConfiguracionPage from './pages/ConfiguracionPage.jsx'
 import RepartoPage     from './pages/RepartoPage.jsx'
@@ -102,9 +101,6 @@ export default function App() {
           } />
           <Route path="auditoria" element={
             <PrivateRoute roles={['ADMIN', 'SUPERVISOR']}><AuditoriaPage /></PrivateRoute>
-          } />
-          <Route path="tarifas" element={
-            <PrivateRoute roles={['ADMIN', 'SUPERVISOR']}><TarifasPage /></PrivateRoute>
           } />
           <Route path="camiones" element={
             <PrivateRoute roles={['ADMIN', 'SUPERVISOR', 'OPERADOR']}><CamionesPage /></PrivateRoute>

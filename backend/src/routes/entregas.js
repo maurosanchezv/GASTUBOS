@@ -166,26 +166,39 @@ router.post('/', requireRol('ADMIN', 'OPERADOR'), async (req, res, next) => {
         const tipoGas = mapTuboGasToTipoGas(tubo.gas)
         const precioGasInfo = todosLosPrecios.find(p => p.gas === tipoGas)
 
-        const precioUnitario = precioGasInfo ? Number(precioGasInfo.precioUnitario) : 0
+        // Buscar la última carga de este tubo para usar su precio unitario
+        const ultimaCargaTubo = await tx.carga.findFirst({
+          where: { tuboId },
+          orderBy: { fechaCarga: 'desc' }
+        })
+
+        let precioUnitario = 0
+        if (ultimaCargaTubo && Number(ultimaCargaTubo.precioUnitario) > 0) {
+          precioUnitario = Number(ultimaCargaTubo.precioUnitario)
+        } else if (precioGasInfo) {
+          precioUnitario = Number(precioGasInfo.precioUnitario)
+        }
+
         let cantidadGas = 0
         let unidadGas = precioGasInfo ? precioGasInfo.unidad : 'KG'
 
-        // Verificar si la cantidad fue ingresada manualmente
+        // Verificar si la cantidad o precio fue ingresado manualmente
         const manualDetail = data.tubosDetalles?.find(d => d.tuboId === tuboId)
-        if (manualDetail && manualDetail.cantidadGas !== undefined) {
-          cantidadGas = Number(manualDetail.cantidadGas)
+        if (manualDetail) {
+          if (manualDetail.cantidadGas !== undefined) {
+            cantidadGas = Number(manualDetail.cantidadGas)
+          }
           if (manualDetail.unidadGas) {
             unidadGas = manualDetail.unidadGas
           }
+          if (manualDetail.precioUnitario !== undefined && Number(manualDetail.precioUnitario) > 0) {
+            precioUnitario = Number(manualDetail.precioUnitario)
+          }
         } else {
-          // Buscar última carga en la base de datos
-          const ultimaCarga = await tx.carga.findFirst({
-            where: { tuboId },
-            orderBy: { fechaCarga: 'desc' },
-          })
-          if (ultimaCarga) {
-            cantidadGas = Number(ultimaCarga.cantidad)
-            unidadGas = ultimaCarga.unidad
+          // Si no hay detalle manual, usar cantidad de la última carga
+          if (ultimaCargaTubo) {
+            cantidadGas = Number(ultimaCargaTubo.cantidad)
+            unidadGas = ultimaCargaTubo.unidad
           }
         }
 
@@ -728,7 +741,19 @@ router.post('/:id/agregar-tubo', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), 
         where: { gas: tipoGas }
       })
 
-      const precioUnitario = precioGasInfo ? Number(precioGasInfo.precioUnitario) : 0
+      // Buscar la última carga de este tubo para usar su precio unitario
+      const ultimaCarga = await tx.carga.findFirst({
+        where: { tuboId },
+        orderBy: { fechaCarga: 'desc' }
+      })
+
+      let precioUnitario = 0
+      if (ultimaCarga && Number(ultimaCarga.precioUnitario) > 0) {
+        precioUnitario = Number(ultimaCarga.precioUnitario)
+      } else if (precioGasInfo) {
+        precioUnitario = Number(precioGasInfo.precioUnitario)
+      }
+
       let finalCantidadGas = 0
       let finalUnidadGas = precioGasInfo ? precioGasInfo.unidad : 'KG'
 
@@ -736,11 +761,6 @@ router.post('/:id/agregar-tubo', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), 
         finalCantidadGas = Number(cantidadGas)
         if (unidadGas) finalUnidadGas = unidadGas
       } else {
-        // Buscar última carga
-        const ultimaCarga = await tx.carga.findFirst({
-          where: { tuboId },
-          orderBy: { fechaCarga: 'desc' }
-        })
         if (ultimaCarga) {
           finalCantidadGas = Number(ultimaCarga.cantidad)
           finalUnidadGas = ultimaCarga.unidad

@@ -11,6 +11,16 @@ import { EscPosBuilder } from '../utils/escPosBuilder.js'
 
 const SCANNER_ID = 'reparto-qr-reader'
 
+const formatNumberSpanish = (val) => {
+  const num = Number(val)
+  if (isNaN(num)) return '0'
+  const rounded = Math.round(num * 1000) / 1000
+  if (Number.isInteger(rounded)) {
+    return rounded.toString()
+  }
+  return rounded.toFixed(3).replace('.', ',')
+}
+
 const TIPO_INFO = {
   ENTREGA_SIMPLE: { label: 'Entrega',  className: 'badge-tipo-ENTREGA_SIMPLE' },
   ALQUILER:       { label: 'Alquiler', className: 'badge-tipo-ALQUILER' },
@@ -197,8 +207,12 @@ export default function RepartoPage() {
 
           let subtotalItems = 0
           entrega.detalles?.forEach(d => {
-            const desc = `${d.tuboId} (${d.tubo?.gas || ''})`
-            const cant = `${Number(d.cantidadGas)} ${d.unidadGas}`
+            const capStr = d.tubo ? ` ${formatCapacidad(d.tubo)}` : ''
+            let desc = `${d.tuboId} (${d.tubo?.gas || ''}${capStr})`
+            if (d.tubo?.serie && d.tubo?.serie !== d.tuboId) {
+              desc += ` Nro:${d.tubo.serie}`
+            }
+            const cant = `${formatNumberSpanish(d.cantidadGas)} ${d.unidadGas}`
             const precioUnit = Number(d.precioUnitario).toLocaleString('es-PY')
             const price = Number(d.subtotal).toLocaleString('es-PY') + ' GS'
 
@@ -539,11 +553,11 @@ export default function RepartoPage() {
           stopScannerRecambio()
         },
         () => {}
-      ).catch(err => {
-        toast('No se pudo acceder a la cámara: ' + err, 'error')
+      ).catch(() => {
+        toast('No se pudo acceder a la cámara', 'error')
         setEscaneandoRecambio(false)
       })
-    }, 150)
+    }, 250)
   }
 
   const stopScannerRecambio = async () => {
@@ -671,28 +685,22 @@ export default function RepartoPage() {
         { facingMode: 'environment' },
         { fps: 10, qrbox: { width: 250, height: 250 } },
         (text) => {
-          // Normalizar código QR
           let id = text
           if (text.includes('/tubos/')) {
             id = text.split('/tubos/')[1].split('?')[0].split('/')[0]
           }
           
-          // Verificar si pertenece a los tubos de la entrega
           const pertenece = entrega.detalles?.some(d => d.tuboId === id)
           
           if (pertenece) {
             if (scannedIds.includes(id)) {
               toast('Tubo ya verificado anteriormente', 'info')
             } else {
-              setScannedIds(prev => [...prev, id])
               toast(`Tubo ${id} verificado con éxito`, 'success')
+              setScannedIds(prev => [...prev, id])
             }
           } else {
-            stopScanner()
-            const confirmAdd = window.confirm(`El tubo ${id} no pertenece a esta remisión. ¿Deseas agregarlo al pedido de este cliente?`)
-            if (confirmAdd) {
-              agregarTuboAdicional(entrega.id, id)
-            }
+            toast(`El tubo ${id} no pertenece a esta entrega`, 'error')
           }
           
           // Si ya escaneó todos, cerramos cámara automáticamente
@@ -709,7 +717,7 @@ export default function RepartoPage() {
         toast('No se pudo acceder a la cámara: ' + err, 'error')
         setEscaneando(false)
       })
-    }, 150)
+    }, 250)
   }
 
   useEffect(() => {
@@ -1277,9 +1285,32 @@ export default function RepartoPage() {
                               {d.tubo?.gas} · {Number(d.cantidadGas)} {d.unidadGas}
                             </div>
                           </div>
-                          <span style={{ fontSize: 11, fontWeight: 600, color: verificado ? '#10b981' : 'var(--text-muted)' }}>
-                            {verificado ? 'Listo' : 'Pendiente'}
-                          </span>
+                          {verificado ? (
+                            <button
+                              type="button"
+                              onClick={() => setScannedIds(prev => prev.filter(id => id !== d.tuboId))}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                padding: '4px 8px',
+                                background: '#fee2e2',
+                                color: '#ef4444',
+                                border: 'none',
+                                borderRadius: 4,
+                                fontSize: 11,
+                                fontWeight: 600,
+                                cursor: 'pointer'
+                              }}
+                              title="Desmarcar / Volver a escanear"
+                            >
+                              <i className="ti ti-trash" style={{ fontSize: 12 }} /> Quitar
+                            </button>
+                          ) : (
+                            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)' }}>
+                              Pendiente
+                            </span>
+                          )}
                         </div>
                       )
                     })}
@@ -1297,12 +1328,19 @@ export default function RepartoPage() {
                         </div>
 
                         {escaneando ? (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center', background: '#000', padding: 12, borderRadius: 8 }}>
-                            <div id={SCANNER_ID} style={{ width: '100%', maxWidth: '320px', overflow: 'hidden' }} />
-                            <button className="btn btn-sm btn-danger" onClick={stopScanner}>
-                              <i className="ti ti-player-stop" /> Apagar Cámara
-                            </button>
-                          </div>
+                          <Modal
+                            open={escaneando}
+                            title="Escanear Código de Tubo"
+                            onClose={stopScanner}
+                            width={400}
+                          >
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 15, alignItems: 'center', background: '#000', padding: 12, borderRadius: 8 }}>
+                              <div id={SCANNER_ID} style={{ width: '100%', maxWidth: '320px', overflow: 'hidden' }} />
+                              <button className="btn btn-danger" onClick={stopScanner} style={{ width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, height: 42 }}>
+                                <i className="ti ti-player-stop" style={{ fontSize: 16 }} /> Apagar Cámara / Cancelar
+                              </button>
+                            </div>
+                          </Modal>
                         ) : (
                           <button
                             className="btn btn-primary"
@@ -1481,21 +1519,25 @@ export default function RepartoPage() {
                           <button className="btn btn-secondary btn-sm" onClick={agregarRecambioManual}>
                             Agregar
                           </button>
-                          {escaneandoRecambio ? (
-                            <button className="btn btn-danger btn-sm" onClick={stopScannerRecambio}>
-                              Apagar
-                            </button>
-                          ) : (
-                            <button className="btn btn-secondary btn-sm" onClick={startScannerRecambio} title="Escanear QR">
-                              <i className="ti ti-qrcode" />
-                            </button>
-                          )}
+                          <button className="btn btn-secondary btn-sm" onClick={startScannerRecambio} title="Escanear QR" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            <i className="ti ti-qrcode" /> Escanear QR
+                          </button>
                         </div>
 
                         {escaneandoRecambio && (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center', background: '#000', padding: 12, borderRadius: 8, marginTop: 10 }}>
-                            <div id={SCANNER_ID} style={{ width: '100%', maxWidth: '320px', overflow: 'hidden' }} />
-                          </div>
+                          <Modal
+                            open={escaneandoRecambio}
+                            title="Escanear Tubo Retornado"
+                            onClose={stopScannerRecambio}
+                            width={400}
+                          >
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 15, alignItems: 'center', background: '#000', padding: 12, borderRadius: 8 }}>
+                              <div id={SCANNER_ID} style={{ width: '100%', maxWidth: '320px', overflow: 'hidden' }} />
+                              <button className="btn btn-danger" onClick={stopScannerRecambio} style={{ width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, height: 42 }}>
+                                <i className="ti ti-player-stop" style={{ fontSize: 16 }} /> Apagar Cámara / Cancelar
+                              </button>
+                            </div>
+                          </Modal>
                         )}
                       </div>
 
@@ -1697,25 +1739,30 @@ export default function RepartoPage() {
               </tr>
             </thead>
             <tbody>
-              {(entregaParaImprimir || activeEntrega).detalles?.map(d => (
-                <tr key={d.id}>
-                  <td>
-                    <strong>{d.tuboId}</strong><br />
-                    <span style={{ fontSize: '10px', color: '#555' }}>
-                      {d.tubo?.gas}
-                    </span>
-                  </td>
-                  <td style={{ textAlign: 'center' }}>
-                    {Number(d.cantidadGas)} {d.unidadGas}<br />
-                    <span style={{ fontSize: '9px', color: '#888' }}>
-                      x {Number(d.precioUnitario).toLocaleString('es-PY')}
-                    </span>
-                  </td>
-                  <td style={{ textAlign: 'right', fontWeight: '500' }}>
-                    {Number(d.subtotal).toLocaleString('es-PY')}
-                  </td>
-                </tr>
-              ))}
+              {(entregaParaImprimir || activeEntrega).detalles?.map(d => {
+                const capStr = d.tubo ? ` (${formatCapacidad(d.tubo)})` : '';
+                const showSerie = d.tubo?.serie && d.tubo?.serie !== d.tuboId;
+                return (
+                  <tr key={d.id}>
+                    <td>
+                      <strong>{d.tuboId}</strong>
+                      {showSerie && <span style={{ fontSize: '10px', color: '#555', display: 'block' }}>Nro: {d.tubo.serie}</span>}
+                      <span style={{ fontSize: '10px', color: '#555', display: 'block' }}>
+                        {d.tubo?.gas}{capStr}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'center' }}>
+                      {formatNumberSpanish(d.cantidadGas)} {d.unidadGas}<br />
+                      <span style={{ fontSize: '9px', color: '#888' }}>
+                        x {Number(d.precioUnitario).toLocaleString('es-PY')}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'right', fontWeight: '500' }}>
+                      {Number(d.subtotal).toLocaleString('es-PY')} GS
+                    </td>
+                  </tr>
+                );
+              })}
               <tr style={{ borderTop: '1px dashed #000' }}>
                 <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>DELIVERY:</td>
                 <td style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>

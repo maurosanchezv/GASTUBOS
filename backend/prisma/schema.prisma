@@ -261,6 +261,7 @@ model Carga {
   tipoGas       TipoGas
   unidad        UnidadGas
   cantidad      Decimal   @db.Decimal(10, 3)
+  precioUnitario Decimal  @db.Decimal(10, 2) @default(0.00)
   fechaCarga    DateTime
   operadorId    String
   operador      Usuario   @relation(fields: [operadorId], references: [id])
