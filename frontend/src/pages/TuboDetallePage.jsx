@@ -347,14 +347,13 @@ export default function TuboDetallePage() {
               </div>
               <div className="form-grid">
                 {[
-                  ["Código interno", tubo.id],
-                  ["Número de serie", tubo.serie],
+                  ["Código", tubo.id],
+                  ["Número de cilindro", tubo.serie],
                   ["Tipo de gas", tubo.gas],
                   [
                     "Capacidad",
                     formatCapacidad(tubo),
                   ],
-                  ["Peso", tubo.pesoKg ? `${tubo.pesoKg} kg` : "—"],
                   [
                     "Propietario",
                     tubo.propietario === "PROPIO"
@@ -362,7 +361,7 @@ export default function TuboDetallePage() {
                       : `CLIENTE - ${tubo.propietarioCliente?.nombre || tubo.cliente?.nombre || "Desconocido"}`,
                   ],
                   [
-                    "Fecha de compra",
+                    "Fecha de creación",
                     tubo.fechaCompra
                       ? new Date(tubo.fechaCompra).toLocaleDateString("es-PY")
                       : "—",
@@ -390,9 +389,9 @@ export default function TuboDetallePage() {
                     <div
                       style={{
                         fontSize: 13,
-                        fontWeight: k === "Código interno" ? 600 : 400,
+                        fontWeight: k === "Código" ? 600 : 400,
                         fontFamily:
-                          k === "Código interno" || k === "Número de serie"
+                          k === "Código" || k === "Número de cilindro"
                             ? "var(--font-mono)"
                             : "inherit",
                       }}
@@ -797,17 +796,30 @@ export default function TuboDetallePage() {
                       boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
                     }}
                   >
-                {/* Top Row: Gas Type and Capacity */}
+                {/* Top Row: Cylinder Code, Gas Type and Capacity */}
                 <div
                   style={{
                     display: "flex",
-                    justifyContent: "center",
+                    justifyContent: "space-between",
                     alignItems: "center",
                     borderBottom: "1.5px solid #000",
                     paddingBottom: "2px",
                     marginBottom: "3px",
+                    paddingLeft: "8px",
+                    paddingRight: "8px",
                   }}
                 >
+                  <div
+                    style={{
+                      fontSize: "14px",
+                      fontWeight: "800",
+                      textTransform: "uppercase",
+                      fontFamily: "var(--font-mono)",
+                      color: "#000",
+                    }}
+                  >
+                    {tubo.id}
+                  </div>
                   <div
                     style={{
                       fontSize: "14px",

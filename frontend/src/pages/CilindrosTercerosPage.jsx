@@ -36,7 +36,6 @@ export default function CilindrosTercerosPage() {
     gas: 'Oxígeno',
     capacidadLitros: 50,
     capacidadKg: '',
-    pesoKg: '',
     observaciones: '',
     ubicacion: 'Depósito'
   })
@@ -153,7 +152,6 @@ export default function CilindrosTercerosPage() {
       gas,
       capacidadLitros: capL,
       capacidadKg: capK,
-      pesoKg: tubo.pesoKg || '',
       observaciones: `Adquirido desde retorno de cliente. ID anterior: ${tubo.id}`,
       ubicacion: tubo.ubicacion || 'Depósito'
     })
@@ -164,7 +162,7 @@ export default function CilindrosTercerosPage() {
   const handleAdquirirSubmit = async (e) => {
     e.preventDefault()
     if (!form.serie.trim()) {
-      toast('Debe ingresar un número de serie o código para el nuevo cilindro', 'error')
+      toast('Debe ingresar un número de cilindro para el nuevo cilindro', 'error')
       return
     }
 
@@ -175,7 +173,6 @@ export default function CilindrosTercerosPage() {
         ...form,
         capacidadLitros: isAcetileno ? undefined : Number(form.capacidadLitros),
         capacidadKg: isAcetileno ? Number(form.capacidadKg) : undefined,
-        pesoKg: form.pesoKg ? Number(form.pesoKg) : undefined,
         propietario: 'PROPIO',
         estado: 'DISPONIBLE'
       }
@@ -495,10 +492,10 @@ export default function CilindrosTercerosPage() {
       {adquirirModal && (
         <Modal open={true} title={`Adquirir Cilindro (Pasar a ${nombre_empresa || 'Propio'})`} onClose={() => setAdquirirModal(false)}>
           <form onSubmit={handleAdquirirSubmit}>
-            <FormGroup label="Número de Serie/Código del Nuevo Tubo *">
+            <FormGroup label="Número de Cilindro *">
               <input
                 required
-                placeholder="Ej: TUBO-002345, AR-345-2"
+                placeholder="Ej: 12345"
                 value={form.serie}
                 onChange={e => setForm(prev => ({ ...prev, serie: e.target.value }))}
               />

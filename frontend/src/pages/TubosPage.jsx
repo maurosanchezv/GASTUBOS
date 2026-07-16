@@ -9,11 +9,19 @@ import { useToast } from '../components/ui.jsx'
 const ESTADOS = ['DISPONIBLE','CARGADO','VACIO','ENTREGADO','ALQUILADO','VENDIDO','RESERVADO','PERDIDO','DEVUELTO','EN_REVISION','DE_BAJA']
 const GASES   = ['CO2','Oxígeno','Argón','Nitrógeno','Aire comprimido','Acetileno','Mezcla Ar+CO2','Mezcla especial']
 
-const EMPTY_TUBO = {
-  serie: '', gas: 'CO2', capacidadLitros: '', capacidadKg: 25,
-  pesoKg: '', propietario: 'PROPIO', propietarioClienteId: '', estado: 'DISPONIBLE',
-  ubicacion: 'Depósito A', fechaCompra: '', observaciones: '',
+const getTodayString = () => {
+  const d = new Date()
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
+
+const getEmptyTubo = () => ({
+  serie: '', gas: 'CO2', capacidadLitros: '', capacidadKg: 25,
+  propietario: 'PROPIO', propietarioClienteId: '', estado: 'DISPONIBLE',
+  ubicacion: 'Depósito', fechaCompra: getTodayString(), observaciones: '',
+})
 
 export default function TubosPage() {
   const { nombre_empresa } = useConfigStore()
@@ -21,7 +29,7 @@ export default function TubosPage() {
   const [total,   setTotal]   = useState(0)
   const [loading, setLoading] = useState(true)
   const [modal,   setModal]   = useState(false)
-  const [form,    setForm]    = useState(EMPTY_TUBO)
+  const [form,    setForm]    = useState(getEmptyTubo())
   const [saving,  setSaving]  = useState(false)
   const [q,       setQ]       = useState('')
   const [params]  = useSearchParams()
@@ -74,7 +82,6 @@ export default function TubosPage() {
         ...form,
         capacidadLitros: isKgBased ? undefined : Number(form.capacidadLitros),
         capacidadKg: isKgBased ? Number(form.capacidadKg) : undefined,
-        pesoKg: form.pesoKg ? Number(form.pesoKg) : undefined,
         fechaCompra: form.fechaCompra ? new Date(form.fechaCompra).toISOString() : undefined,
         propietarioClienteId: form.propietario === 'CLIENTE' ? form.propietarioClienteId : undefined,
       }
@@ -82,7 +89,7 @@ export default function TubosPage() {
       await api.post('/tubos', payload)
       toast('Tubo creado correctamente', 'success')
       setModal(false)
-      setForm(EMPTY_TUBO)
+      setForm(getEmptyTubo())
       load()
     } catch (err) {
       toast(err.response?.data?.error || 'Error al crear tubo', 'error')
@@ -149,7 +156,7 @@ export default function TubosPage() {
           <div className="search-bar" style={{ flex: 1, minWidth: 200, marginBottom: 0 }}>
             <i className="ti ti-search" />
             <input
-              placeholder="Buscar por código, serie, gas..."
+              placeholder="Buscar por código, cilindro, gas..."
               value={q}
               onChange={e => setQ(e.target.value)}
             />
@@ -303,8 +310,8 @@ export default function TubosPage() {
       >
         <form onSubmit={handleCreate}>
           <div className="form-grid">
-            <FormGroup label="Número de serie" required>
-              <input value={form.serie} onChange={f('serie')} placeholder="SN-2025-001" required />
+            <FormGroup label="Número de cilindro" required>
+              <input value={form.serie} onChange={f('serie')} placeholder="Ej: 12345" required />
             </FormGroup>
             <FormGroup label="Tipo de gas" required>
               <select value={form.gas} onChange={handleGasChange}>
@@ -339,9 +346,6 @@ export default function TubosPage() {
                 </select>
               </FormGroup>
             )}
-            <FormGroup label="Peso (kg)">
-              <input type="number" value={form.pesoKg} onChange={f('pesoKg')} placeholder="75" step="0.1" />
-            </FormGroup>
             <FormGroup label="Estado inicial">
               <select value={form.estado} onChange={f('estado')}>
                 {['DISPONIBLE','CARGADO','VACIO'].map(s => <option key={s} value={s}>{s}</option>)}
@@ -363,11 +367,11 @@ export default function TubosPage() {
                 </select>
               </FormGroup>
             )}
-            <FormGroup label="Fecha de compra">
+            <FormGroup label="Fecha de creación">
               <input type="date" value={form.fechaCompra} onChange={f('fechaCompra')} />
             </FormGroup>
             <FormGroup label="Ubicación">
-              <input value={form.ubicacion} onChange={f('ubicacion')} placeholder="Depósito A" />
+              <input value={form.ubicacion} onChange={f('ubicacion')} placeholder="Depósito" />
             </FormGroup>
             <FormGroup label="Observaciones" >
               <textarea value={form.observaciones} onChange={f('observaciones')} style={{ height: 56 }} />

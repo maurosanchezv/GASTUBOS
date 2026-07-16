@@ -5,7 +5,6 @@ import { z } from 'zod'
 import QRCode from 'qrcode'
 import { prisma } from '../utils/prisma.js'
 import { requireAuth, requireRol } from '../middleware/auth.js'
-import { generarIdTubo } from '../utils/helpers.js'
 import { registrarAuditoria } from '../utils/auditoria.js'
 import { TRANSICIONES_VALIDAS } from '../utils/estadosTubo.js'
 
@@ -143,18 +142,36 @@ router.post('/', requireRol('ADMIN', 'OPERADOR'), async (req, res, next) => {
   try {
     const data = tuboSchema.parse(req.body)
 
-    // Contador + creación + auditoría en la misma transacción: si falla la
-    // creación (p. ej. `serie` duplicada), el incremento del contador se revierte.
     const tubo = await prisma.$transaction(async (tx) => {
-      const id = await generarIdTubo(tx)
+      const trimmedSerie = data.serie.trim()
+
+      // Verificar si ya existe un tubo con este id o serie
+      const existe = await tx.tubo.findFirst({
+        where: {
+          OR: [
+            { id: trimmedSerie },
+            { serie: trimmedSerie }
+          ]
+        }
+      })
+      if (existe) {
+        const error = new Error("Ya existe un cilindro con este número/serie")
+        error.status = 400
+        throw error
+      }
 
       const creado = await tx.tubo.create({
-        data: { ...data, id, fechaCompra: data.fechaCompra ? new Date(data.fechaCompra) : null },
+        data: { 
+          ...data, 
+          id: trimmedSerie, 
+          serie: trimmedSerie, 
+          fechaCompra: data.fechaCompra ? new Date(data.fechaCompra) : null 
+        },
       })
 
       await tx.auditoria.create({
         data: {
-          tuboId:        id,
+          tuboId:        trimmedSerie,
           usuarioId:     req.user.id,
           accion:        'Tubo creado',
           estadoNuevo:   creado.estado,
