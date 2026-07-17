@@ -727,12 +727,11 @@ textarea { resize: vertical; min-height: 72px; }
   /* Hacemos visible solo el contenedor del ticket que inyectamos en document.body */
   .print-ticket-container {
     display: block !important;
-    position: absolute;
-    left: 0;
-    top: 0;
+    position: relative;
     width: 80mm;
-    margin: 0;
-    padding: 0;
+    margin: 0 auto;
+    padding: 6mm 8mm;
+    box-sizing: border-box;
     background: white !important;
     color: black !important;
   }

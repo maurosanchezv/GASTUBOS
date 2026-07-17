@@ -1,5 +1,6 @@
 // gastubos/frontend/src/utils/escPosBuilder.js
 // --- ESC/POS Binary Command Builder ---
+import { LOGO_TUBOS_SVG, LOGO_PMS_SVG } from './logosSvg.js';
 
 export class EscPosBuilder {
   constructor() {
@@ -8,6 +9,8 @@ export class EscPosBuilder {
 
   addBytes(bytes) {
     if (Array.isArray(bytes)) {
+      this.buffer.push(...bytes);
+    } else if (bytes instanceof Uint8Array || ArrayBuffer.isView(bytes)) {
       this.buffer.push(...bytes);
     } else {
       this.buffer.push(bytes);
@@ -94,7 +97,99 @@ export class EscPosBuilder {
     return this;
   }
 
+  addRasterImage(pixels, width, height) {
+    const widthBytes = width / 8;
+    const imageBytes = [];
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < widthBytes; x++) {
+        let byte = 0;
+        for (let bit = 0; bit < 8; bit++) {
+          const pixelX = x * 8 + bit;
+          const pixelIndex = (y * width + pixelX) * 4;
+          const r = pixels[pixelIndex];
+          const g = pixels[pixelIndex + 1];
+          const b = pixels[pixelIndex + 2];
+          const a = pixels[pixelIndex + 3];
+          
+          let isBlack = 0;
+          if (a > 50) {
+            const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+            if (gray < 128) {
+              isBlack = 1;
+            }
+          }
+          byte = (byte << 1) | isBlack;
+        }
+        imageBytes.push(byte);
+      }
+    }
+
+    const xL = widthBytes % 256;
+    const xH = Math.floor(widthBytes / 256);
+    const yL = height % 256;
+    const yH = Math.floor(height / 256);
+
+    this.addBytes([0x1D, 0x76, 0x30, 0x00, xL, xH, yL, yH]);
+    this.addBytes(imageBytes);
+    return this;
+  }
+
   getBuffer() {
     return new Uint8Array(this.buffer);
   }
+}
+
+export function generarLogoEscPos() {
+  return new Promise((resolve, reject) => {
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = 384;
+      canvas.height = 80;
+      const ctx = canvas.getContext('2d');
+      
+      // Fondo blanco obligatorio
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      let loadedCount = 0;
+      const imgTubos = new Image();
+      const imgPms = new Image();
+      
+      const onImageLoaded = () => {
+        loadedCount++;
+        if (loadedCount === 2) {
+          try {
+            // Dibujar ambos lado a lado
+            // Margen izquierdo = 42px, Logo 1 (70px ancho), gap = 40px, Logo 2 (189px ancho), margen derecho = 43px. Total = 384px.
+            ctx.drawImage(imgTubos, 42, 5, 70, 70);
+            ctx.drawImage(imgPms, 152, 5, 189, 70);
+            
+            const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            
+            const builder = new EscPosBuilder();
+            builder.addRasterImage(imgData.data, canvas.width, canvas.height);
+            
+            resolve(builder.getBuffer());
+          } catch (err) {
+            reject(err);
+          }
+        }
+      };
+      
+      const onError = (err) => {
+        reject(new Error("Error al cargar las imágenes SVG del logo: " + err));
+      };
+      
+      imgTubos.onload = onImageLoaded;
+      imgTubos.onerror = onError;
+      imgPms.onload = onImageLoaded;
+      imgPms.onerror = onError;
+      
+      imgTubos.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(LOGO_TUBOS_SVG);
+      imgPms.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(LOGO_PMS_SVG);
+    } catch (e) {
+      reject(e);
+    }
+  });
 }

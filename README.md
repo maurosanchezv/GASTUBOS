@@ -15,6 +15,7 @@ Sistema web y móvil para gestionar tubos de gases industriales (CO₂, Oxígeno
   - `REPARTIDOR`: Interfaz móvil simplificada para visualización de su hoja de ruta y confirmación de entregas mediante escaneo QR.
 - **Logística Integrada:** Registro de entregas (simples, alquileres, ventas), cancelaciones con reversión de estados, control de cargas de gas y devoluciones de tubos vacíos.
 - **Exportación:** Generación de reportes y comprobantes de entregas en PDF.
+- **Impresión Térmica:** Emisión de comprobantes de remisión con logotipos de la empresa (vía Bluetooth en móvil y desde el historial en computadora para formatos de 58mm y 80mm).
 - **Compatibilidad Móvil:** Compilado como aplicación nativa Android mediante Capacitor.
 
 ---
@@ -28,6 +29,7 @@ Sistema web y móvil para gestionar tubos de gases industriales (CO₂, Oxígeno
 | **Frontend** | React 18 + Vite + React Router 6 + Zustand (Estado) + Axios (API) |
 | **Mobile Wrapper**| Capacitor 7/8 (Android Nativo) |
 | **Lector QR** | `html5-qrcode` (Cámara web y móvil) |
+| **Impresión** | ESC/POS (Móvil) / HTML Print (Computadora) con transmisión fragmentada anti-desbordamiento |
 | **Reportes** | `jspdf` + `jspdf-autotable` |
 | **Seguridad** | JWT (8h) + BcryptJS + Helmet + Rate Limiters |
 
@@ -191,6 +193,7 @@ EN_REVISION → DISPONIBLE, VACIO, CARGADO
 - [x] PWA / Aplicación nativa instalable en Android (Implementado vía Capacitor)
 - [x] Escaneo QR nativo desde la cámara móvil (Implementado vía `html5-qrcode` adaptado a Android)
 - [x] Generación y descarga de comprobantes en PDF (Implementado vía `jspdf`)
+- [x] Impresión térmica de remisiones con logotipos de la empresa (móvil y web).
 - [ ] Tareas cron automatizadas para la alerta y vencimiento de alquileres.
 - [ ] Envío automático de notificaciones por WhatsApp/Email al cliente ante vencimientos.
 - [ ] Módulo de facturación directa y registro de métodos de pago.

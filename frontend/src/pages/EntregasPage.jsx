@@ -14,6 +14,7 @@ import { useToast } from '../components/ui.jsx'
 import { useConfigStore } from '../store/configStore.js'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import { LOGO_TUBOS_SVG, LOGO_PMS_SVG } from '../utils/logosSvg.js'
 
 // ... (EMPTY y fixes de Leaflet se mantienen arriba)
 delete L.Icon.Default.prototype._getIconUrl
@@ -1234,7 +1235,10 @@ export default function EntregasPage() {
         {entregaSeleccionada && (
           <div className="ticket-preview">
             <div className="ticket-header">
-              <h3 style={{ margin: '0 0 4px', fontSize: '14px', fontWeight: 'bold' }}>{(nombre_empresa || 'GasTubos').toUpperCase()}</h3>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', marginBottom: '10px' }}>
+                <div style={{ width: '40px', height: '40px', display: 'flex', alignItems: 'center' }} dangerouslySetInnerHTML={{ __html: LOGO_TUBOS_SVG }} />
+                <div style={{ width: '108px', height: '40px', display: 'flex', alignItems: 'center' }} dangerouslySetInnerHTML={{ __html: LOGO_PMS_SVG }} />
+              </div>
               {direccion ? <p style={{ margin: 0, fontSize: '10px', color: '#666' }}>{direccion}</p> : <p style={{ margin: 0, fontSize: '10px', color: '#666' }}>Gestión de Gases Industriales</p>}
               {telefono && <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#666' }}>Tel: {telefono}</p>}
               <p style={{ margin: '6px 0 0', fontSize: '11px', fontWeight: 'bold' }}>REMISIÓN: {entregaSeleccionada.numero}</p>
@@ -1330,7 +1334,10 @@ export default function EntregasPage() {
       {entregaSeleccionada && createPortal(
         <div className="print-ticket-container">
           <div className="ticket-header">
-            <h3 style={{ margin: '0 0 4px', fontSize: '14px', fontWeight: 'bold' }}>{(nombre_empresa || 'GasTubos').toUpperCase()}</h3>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', marginBottom: '10px' }}>
+              <div style={{ width: '40px', height: '40px', display: 'flex', alignItems: 'center' }} dangerouslySetInnerHTML={{ __html: LOGO_TUBOS_SVG }} />
+              <div style={{ width: '108px', height: '40px', display: 'flex', alignItems: 'center' }} dangerouslySetInnerHTML={{ __html: LOGO_PMS_SVG }} />
+            </div>
             {direccion ? <p style={{ margin: 0, fontSize: '10px' }}>{direccion}</p> : <p style={{ margin: 0, fontSize: '10px' }}>Gestión de Gases Industriales</p>}
             {telefono && <p style={{ margin: '2px 0 0', fontSize: '10px' }}>Tel: {telefono}</p>}
             <p style={{ margin: '4px 0 0', fontSize: '11px', fontWeight: 'bold' }}>REMISIÓN: {entregaSeleccionada.numero}</p>

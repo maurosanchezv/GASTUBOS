@@ -7,7 +7,8 @@ import { useAuthStore } from '../store/authStore.js'
 import { useConfigStore } from '../store/configStore.js'
 import { PageHeader, Spinner, EmptyState, StateBadge, Modal, formatCapacidad } from '../components/ui.jsx'
 import { useToast } from '../components/ui.jsx'
-import { EscPosBuilder } from '../utils/escPosBuilder.js'
+import { EscPosBuilder, generarLogoEscPos } from '../utils/escPosBuilder.js'
+import { LOGO_TUBOS_SVG, LOGO_PMS_SVG } from '../utils/logosSvg.js'
 
 const SCANNER_ID = 'reparto-qr-reader'
 
@@ -114,13 +115,20 @@ export default function RepartoPage() {
     })
   }
 
-  const imprimirBluetooth = (entrega, deviceAddress) => {
+  const imprimirBluetooth = async (entrega, deviceAddress) => {
     if (!window.bluetoothSerial) return
     if (!deviceAddress) {
       toast('Por favor, selecciona una impresora', 'warning')
       return
     }
     setConnectingPrinter(true)
+    
+    let logoBytes = null
+    try {
+      logoBytes = await generarLogoEscPos()
+    } catch (e) {
+      console.warn("No se pudo generar el logo para la impresion:", e)
+    }
     
     let alreadyPrinted = false
     window.bluetoothSerial.connect(
@@ -170,8 +178,15 @@ export default function RepartoPage() {
 
           builder.initialize()
           
-          // Encabezado
-          builder.alignCenter().boldOn().doubleSizeOn().addTextLine((nombre_empresa || 'GASTUBOS').toUpperCase()).doubleSizeOff()
+          // Encabezado con Logo o fallback de texto
+          if (logoBytes) {
+            builder.addBytes(logoBytes)
+            builder.addTextLine('')
+          } else {
+            builder.alignCenter().boldOn().doubleSizeOn().addTextLine((nombre_empresa || 'GASTUBOS').toUpperCase()).doubleSizeOff()
+          }
+          
+          builder.alignCenter()
           if (direccion) {
             wrapText(direccion, width).forEach(l => builder.addTextLine(l))
           }
@@ -276,23 +291,40 @@ export default function RepartoPage() {
           // Espaciado generoso al final para evitar superposiciones con la siguiente impresión
           builder.addTextLine('').addTextLine('').addTextLine('').addTextLine('').addTextLine('').addTextLine('')
           builder.feed(4)
-          
           const binaryBuffer = builder.getBuffer()
-          
-          window.bluetoothSerial.write(
-            binaryBuffer, // Enviar Uint8Array directamente para asegurar compatibilidad con el puente Capacitor-Android
-            () => {
-              toast('Impresión enviada correctamente', 'success')
-              setConnectingPrinter(false)
-              setPrinterModalOpen(false)
-              window.bluetoothSerial.disconnect()
-            },
-            (err) => {
-              toast('Error al enviar datos a la impresora: ' + err, 'error')
-              setConnectingPrinter(false)
-              window.bluetoothSerial.disconnect()
-            }
-          )
+           
+           // Escribir en trozos para evitar el desbordamiento de búfer en impresoras de 58mm
+           const CHUNK_SIZE = 256
+           const CHUNK_DELAY = 30 // ms
+           
+           const enviarTrozo = (index) => {
+             if (index >= binaryBuffer.length) {
+               toast('Impresión enviada correctamente', 'success')
+               setConnectingPrinter(false)
+               setPrinterModalOpen(false)
+               setTimeout(() => {
+                 window.bluetoothSerial.disconnect()
+               }, 300)
+               return
+             }
+             
+             const trozo = binaryBuffer.slice(index, index + CHUNK_SIZE)
+             window.bluetoothSerial.write(
+               trozo,
+               () => {
+                 setTimeout(() => {
+                   enviarTrozo(index + CHUNK_SIZE)
+                 }, CHUNK_DELAY)
+               },
+               (err) => {
+                 toast('Error al enviar datos a la impresora: ' + err, 'error')
+                 setConnectingPrinter(false)
+                 window.bluetoothSerial.disconnect()
+               }
+             )
+           }
+           
+           enviarTrozo(0)
         } catch (e) {
           toast('Error de formato: ' + e.message, 'error')
           setConnectingPrinter(false)
@@ -1601,11 +1633,22 @@ export default function RepartoPage() {
                         </p>
                         
                         <button
+                          className="btn btn-outline"
+                          onClick={() => {
+                            setEntregaSeleccionada(activeEntrega)
+                            setModalDetalle(true)
+                          }}
+                          style={{ width: '100%', height: 44, fontSize: 13, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 8, borderColor: 'var(--blue)', color: 'var(--blue)' }}
+                        >
+                          <i className="ti ti-eye" /> Previsualizar Ticket
+                        </button>
+                        
+                        <button
                           className="btn btn-primary"
                           onClick={() => handlePrintClick(activeEntrega)}
                           style={{ width: '100%', height: 44, fontSize: 13, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
                         >
-                          <i className="ti ti-printer" /> Imprimir Remisión (Ticket)
+                          <i className="ti ti-printer" /> Imprimir Directamente
                         </button>
                       </div>
 
@@ -1836,7 +1879,10 @@ export default function RepartoPage() {
         {entregaSeleccionada && (
           <div className="ticket-preview">
             <div className="ticket-header">
-              <h3 style={{ margin: '0 0 4px', fontSize: '14px', fontWeight: 'bold' }}>{(nombre_empresa || 'GasTubos').toUpperCase()}</h3>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', marginBottom: '10px' }}>
+                <div style={{ width: '40px', height: '40px', display: 'flex', alignItems: 'center' }} dangerouslySetInnerHTML={{ __html: LOGO_TUBOS_SVG }} />
+                <div style={{ width: '108px', height: '40px', display: 'flex', alignItems: 'center' }} dangerouslySetInnerHTML={{ __html: LOGO_PMS_SVG }} />
+              </div>
               {direccion ? <p style={{ margin: 0, fontSize: '10px', color: '#666' }}>{direccion}</p> : <p style={{ margin: 0, fontSize: '10px', color: '#666' }}>Gestión de Gases Industriales</p>}
               {telefono && <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#666' }}>Tel: {telefono}</p>}
               <p style={{ margin: '6px 0 0', fontSize: '11px', fontWeight: 'bold' }}>REMISIÓN: {entregaSeleccionada.numero}</p>
