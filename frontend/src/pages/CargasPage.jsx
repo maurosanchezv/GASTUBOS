@@ -1,7 +1,7 @@
 // gastubos/frontend/src/pages/CargasPage.jsx
 import { useState, useEffect, useCallback } from 'react'
 import api from '../services/api.js'
-import { PageHeader, Modal, FormGroup, Spinner, EmptyState, GasDot, StateBadge, useToast } from '../components/ui.jsx'
+import { PageHeader, Modal, FormGroup, Spinner, EmptyState, GasDot, StateBadge, useToast, formatCapacidad } from '../components/ui.jsx'
 import { useAuthStore } from '../store/authStore.js'
 
 const TIPO_GAS_LABEL = {
@@ -117,18 +117,26 @@ export default function CargasPage() {
 
   function abrirModalConTubo(tubo) {
     const gasEnum = GAS_STRING_TO_ENUM[tubo.gas] || ''
+    const capVal = tubo.capacidadKg ? Number(tubo.capacidadKg) : (tubo.capacidadLitros ? Number(tubo.capacidadLitros) : null)
+    const capStr = capVal ? String(capVal) : ''
+
     setTuboSeleccionado(tubo)
+
+    // Cargar precio sugerido y calcular monto estimado para la capacidad del tubo
+    const priceInfo = precios.find(p => p.gas === gasEnum)
+    const price = priceInfo ? Number(priceInfo.precioUnitario) : ''
+    const montoEst = (capVal && price) ? Math.round(capVal * price).toString() : ''
+
     setForm({
       ...FORM_INICIAL,
       tuboId:  tubo.id,
       tipoGas: gasEnum,
       unidad:  gasEnum ? TIPO_GAS_UNIDAD[gasEnum] : '',
+      cantidad: capStr,
     })
 
-    // Cargar precio sugerido para el cálculo
-    const priceInfo = precios.find(p => p.gas === gasEnum)
-    setCalcPrecio(priceInfo ? Number(priceInfo.precioUnitario) : '')
-    setCalcMonto('')
+    setCalcPrecio(price)
+    setCalcMonto(montoEst)
 
     setModal(true)
   }
@@ -311,6 +319,7 @@ export default function CargasPage() {
                         <th>Código</th>
                         <th>Serie</th>
                         <th>Gas actual</th>
+                        <th>Capacidad</th>
                         <th>Estado</th>
                         <th>Ubicación</th>
                         <th style={{ textAlign: 'right' }}>Acciones</th>
@@ -327,6 +336,7 @@ export default function CargasPage() {
                               {t.gas}
                             </div>
                           </td>
+                          <td style={{ fontWeight: 600, color: 'var(--blue)', fontSize: 12 }}>{formatCapacidad(t)}</td>
                           <td><StateBadge estado={t.estado} /></td>
                           <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{t.ubicacion || '—'}</td>
                           <td style={{ textAlign: 'right' }}>
@@ -361,7 +371,11 @@ export default function CargasPage() {
                           <span className="list-card-label">Serie</span>
                           <span className="list-card-value">{t.serie}</span>
                         </div>
-                        <div className="list-card-item col-span-2">
+                        <div className="list-card-item">
+                          <span className="list-card-label">Capacidad</span>
+                          <span className="list-card-value" style={{ fontWeight: 600, color: 'var(--blue)' }}>{formatCapacidad(t)}</span>
+                        </div>
+                        <div className="list-card-item">
                           <span className="list-card-label">Ubicación</span>
                           <span className="list-card-value">{t.ubicacion || '—'}</span>
                         </div>
@@ -545,7 +559,7 @@ export default function CargasPage() {
             <div>
               <div style={{ fontSize: 13, fontWeight: 600 }}>{tuboSeleccionado.id}</div>
               <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-                Serie: {tuboSeleccionado.serie} · Gas actual: {tuboSeleccionado.gas} · <StateBadge estado={tuboSeleccionado.estado} />
+                Serie: {tuboSeleccionado.serie} · Gas: {tuboSeleccionado.gas} · <strong>Capacidad: {formatCapacidad(tuboSeleccionado)}</strong> · <StateBadge estado={tuboSeleccionado.estado} />
               </div>
             </div>
           </div>

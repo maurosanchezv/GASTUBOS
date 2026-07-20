@@ -107,15 +107,26 @@ export default function RepartoPage() {
   // localmente en esta sesión (aún no confirmados en el servidor); si no hay,
   // usa los ya persistidos en la entrega (caso de reimpresión).
   const recambiosParaImprimir = (entrega) => {
-    if (recambios && recambios.length > 0) {
+    // Si la entrega a evaluar es la entrega activa actual en sesión:
+    if (entrega && activeEntrega && entrega.id === activeEntrega.id && recambios && recambios.length > 0) {
       return recambios.map(v => String(v))
     }
-    return (entrega?.recambios || []).map(r => {
+    // Para entregas del historial o reimpresión de comprobantes guardados:
+    const e = entrega || activeEntrega
+    const recsPropios = (e?.recambios || []).map(r => {
       const t = r.tuboEntregado || {}
       return (t.observaciones && (t.observaciones.includes(' ') || t.observaciones.length > 15))
         ? t.observaciones
-        : `${t.id} (${t.gas || ''})`.trim()
+        : `${t.id}${t.gas ? ` (${t.gas})` : ''}`.trim()
     })
+
+    const recsTerceros = (e?.cilindrosTerceros || []).map(c => {
+      const cap = c.capacidadKg ? `${Number(c.capacidadKg)} kg` : c.capacidadLitros ? `${Number(c.capacidadLitros)} m³` : ''
+      const obsClean = (c.observaciones || '').replace(/^Recibido por repartidor en entrega E-[^.]*\.\s*Detalle:\s*/, '').trim()
+      return obsClean || `${c.gas}${cap ? ` (${cap})` : ''}`
+    })
+
+    return [...recsPropios, ...recsTerceros]
   }
 
   const imprimirBluetooth = async (entrega, deviceAddress) => {

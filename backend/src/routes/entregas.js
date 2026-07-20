@@ -126,8 +126,9 @@ router.get('/', async (req, res, next) => {
           cliente:    { select: { id: true, nombre: true, ruc: true, telefono: true, contacto: true } },
           creadoPor:  { select: { username: true, nombre: true } },
           repartidor: { select: { username: true, nombre: true } },
-          detalles:   { include: { tubo: { select: { id: true, gas: true } } } },
+          detalles:   { include: { tubo: { select: { id: true, gas: true, capacidadLitros: true, capacidadKg: true } } } },
           recambios:  { include: { tuboEntregado: { select: { id: true, gas: true, observaciones: true } } } },
+          cilindrosTerceros: true,
         },
         orderBy: { fechaEntrega: 'desc' },
         skip: (Number(page) - 1) * Number(limit),
@@ -153,6 +154,7 @@ router.get('/numero/:numero', async (req, res, next) => {
         repartidor: { select: { username: true, nombre: true } },
         detalles:   { include: { tubo: { select: { id: true, gas: true, capacidadLitros: true, capacidadKg: true } } } },
         recambios:  { include: { tuboEntregado: { select: { id: true, gas: true, observaciones: true } } } },
+        cilindrosTerceros: true,
       },
     })
     if (!entrega) return res.status(404).json({ error: 'Remisión no encontrada' })
