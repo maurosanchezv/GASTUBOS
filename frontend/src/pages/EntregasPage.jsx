@@ -81,17 +81,57 @@ export default function EntregasPage() {
   const addrRef = useRef(null)
   const lastSelectedAddress = useRef('')
 
-  // Función para buscar direcciones
+  // Función para buscar direcciones con Photon (Komoot) + Nominatim (Paraguay)
   const fetchDirecciones = async (query) => {
-    if (!query || query.trim().length < 3) {
+    if (!query || query.trim().length < 2) {
       setAddrSugs([])
       return
     }
     setAddrBuscando(true)
     try {
-      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5&addressdetails=1&countrycodes=py`)
-      const data = await res.json()
-      setAddrSugs(data || [])
+      // 1. Intentar Photon (Komoot) centrado prioritariamente en Paraguay (-25.2867, -57.6474)
+      const photonUrl = `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&lat=-25.2867&lon=-57.6474&limit=6`
+      const resPhoton = await fetch(photonUrl)
+      const dataPhoton = await resPhoton.json()
+      
+      let sugs = []
+      if (dataPhoton && dataPhoton.features && dataPhoton.features.length > 0) {
+        sugs = dataPhoton.features.map(f => {
+          const p = f.properties || {}
+          const coords = f.geometry?.coordinates || []
+          const nameParts = [p.name, p.street, p.housing, p.district, p.city || p.town || p.county, p.state || p.country]
+            .filter(Boolean)
+          const name = Array.from(new Set(nameParts)).join(', ')
+          return {
+            display_name: name || p.name || query,
+            lat: coords[1],
+            lon: coords[0],
+          }
+        }).filter(item => item.lat && item.lon)
+      }
+
+      // 2. Si Photon trajo pocas opciones, buscar también en Nominatim delimitado a Paraguay
+      if (sugs.length < 3) {
+        const nomUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5&countrycodes=py&viewbox=-58.5,-27.5,-54.0,-19.3`
+        const resNom = await fetch(nomUrl, {
+          headers: { 'Accept-Language': 'es' }
+        })
+        const dataNom = await resNom.json()
+        if (dataNom && Array.isArray(dataNom)) {
+          const nomSugs = dataNom.map(item => ({
+            display_name: item.display_name,
+            lat: parseFloat(item.lat),
+            lon: parseFloat(item.lon),
+          }))
+          for (const ns of nomSugs) {
+            if (!sugs.some(s => s.display_name === ns.display_name)) {
+              sugs.push(ns)
+            }
+          }
+        }
+      }
+
+      setAddrSugs(sugs.slice(0, 6))
     } catch (err) {
       console.error('Error fetching address suggestions', err)
       setAddrSugs([])
@@ -100,19 +140,19 @@ export default function EntregasPage() {
     }
   }
 
-  // Debounce para dirección de entrega
+  // Debounce para dirección de entrega (300ms)
   useEffect(() => {
     const q = form.direccionEntrega || ''
     if (q === lastSelectedAddress.current) {
       return
     }
-    if (q.trim().length < 3) {
+    if (q.trim().length < 2) {
       setAddrSugs([])
       return
     }
     const t = setTimeout(() => {
       fetchDirecciones(q)
-    }, 500)
+    }, 300)
     return () => clearTimeout(t)
   }, [form.direccionEntrega])
 
@@ -657,10 +697,28 @@ export default function EntregasPage() {
 
                     {/* Dirección + Geolocalización */}
                     <div className="form-group col-span-2">
-                      <label className="form-label">Dirección de entrega <span className="form-required">*</span></label>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                        <label className="form-label" style={{ margin: 0 }}>
+                          Dirección de entrega <span className="form-required">*</span>
+                        </label>
+                        {clienteSeleccionado?.direccion && form.direccionEntrega !== clienteSeleccionado.direccion && (
+                          <button
+                            type="button"
+                            className="btn btn-sm"
+                            onClick={() => {
+                              lastSelectedAddress.current = clienteSeleccionado.direccion
+                              setForm(f => ({ ...f, direccionEntrega: clienteSeleccionado.direccion }))
+                              fetchDirecciones(clienteSeleccionado.direccion)
+                            }}
+                            style={{ fontSize: 11, padding: '2px 8px', height: 'auto', background: 'var(--surface-2)', border: '1px solid var(--border)' }}
+                          >
+                            <i className="ti ti-map-pin" style={{ color: 'var(--blue)' }} /> Usar dirección del cliente
+                          </button>
+                        )}
+                      </div>
                       <div ref={addrRef} style={{ position: 'relative' }}>
                         <input type="text" value={form.direccionEntrega} onChange={f('direccionEntrega')}
-                          placeholder={clienteSeleccionado?.direccion || 'Calle, ciudad...'} required
+                          placeholder={clienteSeleccionado?.direccion || 'Ej: Av. San Martín, Asunción...'} required
                           style={{ paddingRight: addrBuscando ? '30px' : '10px' }}
                           onKeyDown={e => {
                             if (e.key === 'Escape') setAddrSugs([])
@@ -679,7 +737,13 @@ export default function EntregasPage() {
 
                         {/* Dropdown de sugerencias de dirección */}
                         {addrSugs.length > 0 && (
-                          <div className="address-autocomplete-dropdown">
+                          <div className="address-autocomplete-dropdown" style={{
+                            position: 'absolute', top: '100%', left: 0, right: 0,
+                            zIndex: 1000, background: 'var(--bg-card, #fff)',
+                            border: '1px solid var(--border)', borderRadius: 8,
+                            boxShadow: '0 8px 24px rgba(0,0,0,0.15)', marginTop: 4,
+                            maxHeight: 260, overflowY: 'auto'
+                          }}>
                             {addrSugs.map((item, i) => (
                               <div key={i}
                                 onClick={() => {
@@ -687,15 +751,15 @@ export default function EntregasPage() {
                                   setForm(f => ({
                                     ...f,
                                     direccionEntrega: item.display_name,
-                                    latitud: parseFloat(item.lat),
-                                    longitud: parseFloat(item.lon)
+                                    latitud: item.lat,
+                                    longitud: item.lon
                                   }));
                                   setAddrSugs([]);
                                 }}
                                 style={{
                                   padding: '10px 12px',
                                   cursor: 'pointer',
-                                  borderBottom: i < addrSugs.length - 1 ? '1px solid var(--border)' : 'none',
+                                  borderBottom: i < addrSugs.length - 1 ? '1px solid var(--border-light, #eee)' : 'none',
                                   fontSize: 12,
                                   color: 'var(--text)',
                                   transition: 'background .12s',
@@ -704,13 +768,20 @@ export default function EntregasPage() {
                                   textAlign: 'left',
                                   display: 'flex',
                                   alignItems: 'flex-start',
-                                  gap: 6
+                                  gap: 8
                                 }}
-                                onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                                onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2, #f5f5f5)'}
                                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                               >
-                                <i className="ti ti-map-pin" style={{ marginTop: 2, color: 'var(--text-secondary)' }} />
-                                <span style={{ flex: 1 }}>{item.display_name}</span>
+                                <i className="ti ti-map-pin" style={{ color: 'var(--blue)', marginTop: 2, flexShrink: 0, fontSize: 14 }} />
+                                <div style={{ flex: 1 }}>
+                                  <div style={{ fontWeight: 600, lineHeight: 1.3 }}>{item.display_name}</div>
+                                  {item.lat && item.lon && (
+                                    <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+                                      GPS vinculado ({item.lat.toFixed(4)}, {item.lon.toFixed(4)})
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                             ))}
                           </div>
