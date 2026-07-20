@@ -10,9 +10,11 @@ router.use(requireAuth)
 const clienteSchema = z.object({
   nombre:   z.string().min(1),
   ruc:      z.string().min(1),
-  telefono: z.string().optional(),
-  direccion: z.string().optional(),
-  contacto: z.string().optional(),
+  telefono: z.string().optional().nullable(),
+  direccion: z.string().optional().nullable(),
+  latitud:  z.coerce.number().optional().nullable(),
+  longitud: z.coerce.number().optional().nullable(),
+  contacto: z.string().optional().nullable(),
   tipo:     z.enum(['EMPRESA','PYME','PARTICULAR']).default('EMPRESA'),
 })
 

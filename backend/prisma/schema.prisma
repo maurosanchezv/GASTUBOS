@@ -110,6 +110,8 @@ model Cliente {
   ruc         String      @unique  // RUC o CI
   telefono    String?
   direccion   String?
+  latitud     Float?
+  longitud    Float?
   contacto    String?     // nombre del contacto principal
   tipo        TipoCliente @default(EMPRESA)
   activo      Boolean     @default(true)
