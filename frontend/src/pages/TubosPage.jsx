@@ -54,7 +54,7 @@ export default function TubosPage() {
     setLoading(true)
     try {
       const res = await api.get('/tubos', { params: { q: q || undefined, estado: estadoFilter || undefined, limit: 80 } })
-      let ownTubos = res.data.tubos.filter(t => !t.id.startsWith('CLI_') && !t.id.startsWith('CLI-'))
+      let ownTubos = res.data.tubos.filter(t => !t.id.startsWith('CLI_') && !t.id.startsWith('CLI-') && !(t._count?.recambiosComoEntregado > 0))
       if (hideBaja && !estadoFilter) {
         ownTubos = ownTubos.filter(t => t.estado !== 'DE_BAJA')
       }

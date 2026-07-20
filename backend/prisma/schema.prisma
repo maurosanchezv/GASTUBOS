@@ -57,6 +57,12 @@ enum EstadoAlquiler {
   CANCELADO
 }
 
+enum EstadoTercero {
+  PENDIENTE
+  ADQUIRIDO
+  DE_BAJA
+}
+
 enum TipoGas {
   CO2
   OXIGENO
@@ -87,10 +93,11 @@ model Usuario {
   updatedAt   DateTime @updatedAt
 
   // relaciones
-  auditoria          Auditoria[]
-  entregasCreadas    Entrega[]   @relation("EntregaCreadaPor")
-  entregasRepartidor Entrega[]   @relation("EntregaRepartidor")
-  cargas             Carga[]
+  auditoria                  Auditoria[]
+  entregasCreadas            Entrega[]   @relation("EntregaCreadaPor")
+  entregasRepartidor         Entrega[]   @relation("EntregaRepartidor")
+  cargas                     Carga[]
+  cilindrosTercerosRecibidos CilindroTerceroInfo[]
 
   @@map("usuarios")
 }
@@ -114,6 +121,7 @@ model Cliente {
   ventas      Venta[]
   entregas    Entrega[]
   recambios   Recambio[]
+  cilindrosTerceros CilindroTerceroInfo[]
 
   @@map("clientes")
 }
@@ -148,12 +156,13 @@ model Tubo {
   camion          Camion?         @relation(fields: [camionId], references: [id])
 
   // relaciones
-  auditoria              Auditoria[]
-  detallesEntrega        DetalleEntrega[]
-  alquileres             Alquiler[]
-  ventas                 Venta[]
-  cargas                 Carga[]
-  recambiosComoEntregado Recambio[]       @relation("TuboRetornado")
+  auditoria                  Auditoria[]
+  detallesEntrega            DetalleEntrega[]
+  alquileres                 Alquiler[]
+  ventas                     Venta[]
+  cargas                     Carga[]
+  recambiosComoEntregado     Recambio[]       @relation("TuboRetornado")
+  cilindrosTercerosAdquiridos CilindroTerceroInfo[]
 
   @@map("tubos")
 }
@@ -181,6 +190,7 @@ model Entrega {
   detalles        DetalleEntrega[]
   alquileres      Alquiler[]    // si tipoOperacion = ALQUILER
   recambios       Recambio[]
+  cilindrosTerceros CilindroTerceroInfo[]
   costoDelivery   Decimal       @db.Decimal(10, 2) @default(0.00)
   confirmada      Boolean       @default(false)
   cancelada       Boolean       @default(false)
@@ -354,4 +364,33 @@ model Config {
 
   @@map("config")
 }
+
+// ─── CILINDROS DE TERCEROS INFORMACIONALES ─────────────────────────────────────
+
+model CilindroTerceroInfo {
+  id              String        @id @default(cuid())
+  gas             String        // Oxígeno, CO2, etc.
+  capacidadLitros Decimal?      @db.Decimal(5, 2)
+  capacidadKg     Decimal?      @db.Decimal(5, 2)
+  estado          EstadoTercero @default(PENDIENTE)
+  observaciones   String?
+
+  clienteId       String
+  cliente         Cliente       @relation(fields: [clienteId], references: [id])
+
+  entregaId       String?
+  entrega         Entrega?      @relation(fields: [entregaId], references: [id])
+
+  repartidorId    String?
+  repartidor      Usuario?      @relation(fields: [repartidorId], references: [id])
+
+  tuboAdquiridoId String?
+  tuboAdquirido   Tubo?         @relation(fields: [tuboAdquiridoId], references: [id])
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@map("cilindros_terceros_info")
+}
+
 

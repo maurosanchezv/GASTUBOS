@@ -21,7 +21,7 @@ export default function VentasPage() {
     ]).then(([v, c, t]) => { 
       setVentas(v.data); 
       setClientes(c.data); 
-      setTubos(t.data.tubos.filter(x => !x.id.startsWith('CLI_') && !x.id.startsWith('CLI-'))) 
+      setTubos(t.data.tubos.filter(x => !x.id.startsWith('CLI_') && !x.id.startsWith('CLI-') && !(x._count?.recambiosComoEntregado > 0))) 
     })
     .catch(() => {}).finally(() => setLoading(false))
   }, [])
@@ -34,7 +34,7 @@ export default function VentasPage() {
       setForm({ tuboId: '', clienteId: '', referencia: '', observaciones: '' })
       const [v, t] = await Promise.all([api.get('/ventas'), api.get('/tubos', { params: { estado: 'DISPONIBLE', limit: 100 } })])
       setVentas(v.data); 
-      setTubos(t.data.tubos.filter(x => !x.id.startsWith('CLI_') && !x.id.startsWith('CLI-')))
+      setTubos(t.data.tubos.filter(x => !x.id.startsWith('CLI_') && !x.id.startsWith('CLI-') && !(x._count?.recambiosComoEntregado > 0)))
     } catch (err) { toast(err.response?.data?.error || 'Error', 'error') }
     finally { setSaving(false) }
   }

@@ -20,6 +20,7 @@ import publicRoutes   from './routes/public.js'   // ruta pública para QR sin a
 import precioRoutes   from './routes/precios.js'
 import camionRoutes   from './routes/camiones.js'
 import configRoutes   from './routes/config.js'
+import cilindrosTercerosRoutes from './routes/cilindrosTerceros.js'
 
 const app  = express()
 const PORT = process.env.PORT || 3001
@@ -84,6 +85,7 @@ app.use('/api/reportes',   reporteRoutes)
 app.use('/api/precios',    precioRoutes)
 app.use('/api/camiones',   camionRoutes)
 app.use('/api/config',     configRoutes)
+app.use('/api/cilindros-terceros', cilindrosTercerosRoutes)
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => res.json({ ok: true, version: '1.0.0' }))

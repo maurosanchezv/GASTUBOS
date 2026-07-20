@@ -15,6 +15,49 @@ import { generarNumero } from '../utils/helpers.js'
 const router = Router()
 router.use(requireAuth)
 
+function parseGasYCapacidadInfo(str, tuboReferencia) {
+  let gas = 'Oxígeno'
+  if (tuboReferencia && tuboReferencia.gas) gas = tuboReferencia.gas
+
+  if (str && typeof str === 'string') {
+    const sLower = str.toLowerCase()
+    if (sLower.includes('co2')) gas = 'CO2'
+    else if (sLower.includes('oxígeno') || sLower.includes('oxigeno')) gas = 'Oxígeno'
+    else if (sLower.includes('argón') || sLower.includes('argon')) gas = 'Argón'
+    else if (sLower.includes('nitrógeno') || sLower.includes('nitrogeno')) gas = 'Nitrógeno'
+    else if (sLower.includes('aire')) gas = 'Aire comprimido'
+    else if (sLower.includes('mezcla')) gas = 'Mezcla CO2/Argón'
+    else if (sLower.includes('acetileno')) gas = 'Acetileno'
+  }
+
+  const isKgGas = gas.toLowerCase() === 'co2' || gas.toLowerCase() === 'acetileno'
+
+  let numVal = null
+  if (str && typeof str === 'string') {
+    const cleanStr = str.replace(/#\d+/g, '').trim()
+    const matchNumber = cleanStr.match(/(\d+(?:\.\d+)?)/)
+    if (matchNumber) {
+      numVal = parseFloat(matchNumber[1])
+    }
+  }
+
+  let capacidadLitros = null
+  let capacidadKg = null
+
+  if (numVal !== null && !isNaN(numVal)) {
+    if (isKgGas) {
+      capacidadKg = numVal
+    } else {
+      capacidadLitros = numVal
+    }
+  } else if (tuboReferencia) {
+    capacidadLitros = tuboReferencia.capacidadLitros ? Number(tuboReferencia.capacidadLitros) : null
+    capacidadKg = tuboReferencia.capacidadKg ? Number(tuboReferencia.capacidadKg) : null
+  }
+
+  return { gas, capacidadLitros, capacidadKg }
+}
+
 const entregaSchema = z.object({
   clienteId:        z.string(),
   direccionEntrega: z.string().min(1),
@@ -26,9 +69,10 @@ const entregaSchema = z.object({
   tubosIds:         z.array(z.string()).min(1, 'Debe incluir al menos un tubo'),
   costoDelivery:    z.coerce.number().optional().default(0),
   tubosDetalles:    z.array(z.object({
-    tuboId:      z.string(),
-    cantidadGas: z.coerce.number().optional(),
-    unidadGas:   z.enum(['KG', 'M3']).optional(),
+    tuboId:         z.string(),
+    cantidadGas:    z.coerce.number().optional(),
+    unidadGas:      z.enum(['KG', 'M3']).optional(),
+    precioUnitario: z.coerce.number().optional(),
   })).optional(),
   // Solo si tipoOperacion = ALQUILER
   fechaVencimiento: z.string().datetime().optional(),
@@ -191,7 +235,7 @@ router.post('/', requireRol('ADMIN', 'OPERADOR'), async (req, res, next) => {
           if (manualDetail.unidadGas) {
             unidadGas = manualDetail.unidadGas
           }
-          if (manualDetail.precioUnitario !== undefined && Number(manualDetail.precioUnitario) > 0) {
+          if (manualDetail.precioUnitario !== undefined && manualDetail.precioUnitario !== null && !isNaN(Number(manualDetail.precioUnitario))) {
             precioUnitario = Number(manualDetail.precioUnitario)
           }
         } else {
@@ -202,7 +246,9 @@ router.post('/', requireRol('ADMIN', 'OPERADOR'), async (req, res, next) => {
           }
         }
 
-        const subtotal = cantidadGas * precioUnitario
+        const cantNum = Number(cantidadGas || 0)
+        const precNum = Number(precioUnitario || 0)
+        const subtotal = cantNum > 0 ? (cantNum * precNum) : precNum
 
         detallesAInsertar.push({
           tuboId,
@@ -470,73 +516,75 @@ router.put('/:id/confirmar', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), asyn
       // 2.b. Registrar recambios si existen
       if (recambios && recambios.length > 0) {
         for (const retId of recambios) {
-          let tuboRetornado = await tx.tubo.findUnique({
-            where: { id: retId }
+          // A. Verificar si es un tubo propio de la empresa existente en la base de datos
+          const tuboPropio = await tx.tubo.findFirst({
+            where: { id: retId, propietario: 'PROPIO', activo: true }
           })
           
-          if (!tuboRetornado) {
-            // Auto-crear tubo del cliente si no existe en la base de datos
-            // Intentar copiar gas del primer detalle de la entrega como referencia
-            const primerDetalle = entrega.detalles[0]
-            const tuboReferencia = primerDetalle ? await tx.tubo.findUnique({ where: { id: primerDetalle.tuboId } }) : null
-
-            tuboRetornado = await tx.tubo.create({
+          let tuboRetornadoId = null
+          let estadoAnterior = 'DEVUELTO'
+          
+          if (tuboPropio) {
+            // Si es un tubo propio de la empresa, actualizamos su estado y ubicación a DEVUELTO
+            tuboRetornadoId = tuboPropio.id
+            estadoAnterior = tuboPropio.estado
+            await tx.tubo.update({
+              where: { id: tuboPropio.id },
               data: {
-                id: retId,
-                serie: retId, // Usamos el ID como serie por defecto
-                gas: tuboReferencia ? tuboReferencia.gas : 'CO2',
-                capacidadLitros: tuboReferencia ? tuboReferencia.capacidadLitros : 40,
+                activo: true,
                 estado: 'DEVUELTO',
-                propietario: 'CLIENTE',
-                propietarioClienteId: entrega.clienteId,
                 clienteId: null,
                 ubicacion: camionAsociado ? `Camión ${camionAsociado.placa}` : 'Depósito',
                 camionId: camionId || null,
+              }
+            })
+
+            // Finalizar alquileres del tubo retornado si corresponden
+            await tx.alquiler.updateMany({
+              where: { tuboId: tuboRetornadoId, estado: { in: ['ACTIVO', 'VENCIDO'] } },
+              data:  { estado: 'FINALIZADO', fechaDevolucion: new Date() },
+            })
+
+            // Crear registro de Recambio
+            await tx.recambio.create({
+              data: {
+                entregaId: id,
+                tuboEntregadoId: tuboRetornadoId,
+                clienteId: entrega.clienteId,
+              }
+            })
+
+            // Auditoría del tubo retornado
+            await tx.auditoria.create({
+              data: {
+                tuboId:         tuboRetornadoId,
+                usuarioId:      req.user.id,
+                accion:         'Recambio registrado en entrega',
+                estadoAnterior: estadoAnterior,
+                estadoNuevo:    'DEVUELTO',
+                observaciones:  `Recambio devuelto en entrega ${entrega.numero}. Queda en ${camionAsociado ? 'camión ' + camionAsociado.placa : 'depósito'}.`,
+                metadata:       { entregaId: id, numero: entrega.numero, camionId }
               }
             })
           } else {
-            // Si el tubo ya existe en el sistema, lo actualizamos a DEVUELTO y lo asociamos al camión/depósito
-            await tx.tubo.update({
-              where: { id: retId },
+            // Si NO es propio, se guarda como registro puramente informativo en CilindroTerceroInfo
+            const primerDetalle = entrega.detalles[0]
+            const tuboRef = primerDetalle ? await tx.tubo.findUnique({ where: { id: primerDetalle.tuboId } }) : null
+            const parsed = parseGasYCapacidadInfo(retId, tuboRef)
+
+            await tx.cilindroTerceroInfo.create({
               data: {
-                estado: 'DEVUELTO',
-                clienteId: null,
-                ubicacion: camionAsociado ? `Camión ${camionAsociado.placa}` : 'Depósito',
-                camionId: camionId || null,
-                propietarioClienteId: tuboRetornado.propietario === 'CLIENTE' && !tuboRetornado.propietarioClienteId 
-                  ? entrega.clienteId 
-                  : tuboRetornado.propietarioClienteId
+                gas: parsed.gas,
+                capacidadLitros: parsed.capacidadLitros,
+                capacidadKg: parsed.capacidadKg,
+                estado: 'PENDIENTE',
+                clienteId: entrega.clienteId,
+                entregaId: id,
+                repartidorId: req.user.id,
+                observaciones: `Recibido por repartidor en entrega ${entrega.numero}. Detalle: ${retId}`
               }
             })
           }
-
-          // Finalizar alquileres del tubo retornado si corresponden
-          await tx.alquiler.updateMany({
-            where: { tuboId: retId, estado: { in: ['ACTIVO', 'VENCIDO'] } },
-            data:  { estado: 'FINALIZADO', fechaDevolucion: new Date() },
-          })
-
-          // Crear registro de Recambio
-          await tx.recambio.create({
-            data: {
-              entregaId: id,
-              tuboEntregadoId: retId,
-              clienteId: entrega.clienteId,
-            }
-          })
-
-          // Auditoría del tubo retornado
-          await tx.auditoria.create({
-            data: {
-              tuboId:         retId,
-              usuarioId:      req.user.id,
-              accion:         'Recambio registrado en entrega',
-              estadoAnterior: tuboRetornado.estado,
-              estadoNuevo:    'DEVUELTO',
-              observaciones:  `Recambio devuelto en entrega ${entrega.numero}. Queda en ${camionAsociado ? 'camión ' + camionAsociado.placa : 'depósito'}.`,
-              metadata:       { entregaId: id, numero: entrega.numero, camionId }
-            }
-          })
         }
       }
 
@@ -700,7 +748,7 @@ router.put('/:id/cancelar', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), async
 router.post('/:id/agregar-tubo', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), async (req, res, next) => {
   try {
     const { id } = req.params
-    const { tuboId, cantidadGas, unidadGas } = req.body
+    const { tuboId, cantidadGas, unidadGas, precioUnitario: reqPrecioUnitario } = req.body
 
     if (!tuboId) {
       return res.status(400).json({ error: 'Debe especificar el tuboId' })
@@ -748,7 +796,9 @@ router.post('/:id/agregar-tubo', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), 
       })
 
       let precioUnitario = 0
-      if (ultimaCarga && Number(ultimaCarga.precioUnitario) > 0) {
+      if (reqPrecioUnitario !== undefined && reqPrecioUnitario !== null && !isNaN(Number(reqPrecioUnitario))) {
+        precioUnitario = Number(reqPrecioUnitario)
+      } else if (ultimaCarga && Number(ultimaCarga.precioUnitario) > 0) {
         precioUnitario = Number(ultimaCarga.precioUnitario)
       } else if (precioGasInfo) {
         precioUnitario = Number(precioGasInfo.precioUnitario)
@@ -760,14 +810,16 @@ router.post('/:id/agregar-tubo', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), 
       if (cantidadGas !== undefined) {
         finalCantidadGas = Number(cantidadGas)
         if (unidadGas) finalUnidadGas = unidadGas
-      } else {
-        if (ultimaCarga) {
-          finalCantidadGas = Number(ultimaCarga.cantidad)
-          finalUnidadGas = ultimaCarga.unidad
-        }
+      } else if (tubo.estado === 'DISPONIBLE') {
+        finalCantidadGas = 0
+      } else if (ultimaCarga) {
+        finalCantidadGas = Number(ultimaCarga.cantidad)
+        finalUnidadGas = ultimaCarga.unidad
       }
 
-      const subtotal = finalCantidadGas * precioUnitario
+      const cantNum = Number(finalCantidadGas || 0)
+      const precNum = Number(precioUnitario || 0)
+      const subtotal = cantNum > 0 ? (cantNum * precNum) : precNum
 
       // 4. Crear el detalle de la entrega
       const nuevoDetalle = await tx.detalleEntrega.create({
@@ -784,7 +836,10 @@ router.post('/:id/agregar-tubo', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), 
           tubo: {
             select: {
               id: true,
-              gas: true
+              gas: true,
+              serie: true,
+              capacidadLitros: true,
+              capacidadKg: true
             }
           }
         }

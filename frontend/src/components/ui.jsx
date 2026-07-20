@@ -164,9 +164,10 @@ export function useToast() {
 
 export function ToastProvider() {
   const [toasts, setToasts] = useState([])
+  const [errorModalMsg, setErrorModalMsg] = useState(null)
+
   useEffect(() => {
     _showToast = (msg, type) => {
-      const id = Date.now()
       let cleanMsg = ''
       if (!msg) {
         cleanMsg = 'Error desconocido'
@@ -176,29 +177,85 @@ export function ToastProvider() {
         cleanMsg = msg.map(err => {
           const path = err.path ? `Campo "${err.path.join('.')}"` : ''
           return `${path ? path + ': ' : ''}${err.message}`
-        }).join(' | ')
+        }).join('\n')
       } else if (typeof msg === 'object') {
         cleanMsg = msg.message || msg.error || JSON.stringify(msg)
       } else {
         cleanMsg = String(msg)
       }
-      setToasts(t => [...t, { id, msg: cleanMsg, type }])
-      setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 1800)
+
+      if (type === 'error') {
+        // Para errores: abrir modal Pop-Up persistente en el centro
+        setErrorModalMsg(cleanMsg)
+      } else {
+        // Para éxito o información: mostrar toast flotante por 3.5 segundos
+        const id = Date.now()
+        setToasts(t => [...t, { id, msg: cleanMsg, type }])
+        setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3500)
+      }
     }
   }, [])
 
   return (
-    <div style={{ position: 'fixed', bottom: 20, right: 20, z: 999, display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {toasts.map(t => (
-        <div key={t.id} style={{
-          background: t.type === 'error' ? 'var(--red)' : t.type === 'success' ? 'var(--green)' : 'var(--blue-dark)',
-          color: '#fff', padding: '10px 16px', borderRadius: 8, fontSize: 12, fontWeight: 500,
-          boxShadow: '0 4px 12px rgba(0,0,0,.2)', maxWidth: 320,
-          animation: 'slideUp .2s ease',
-        }}>
-          {t.msg}
+    <>
+      {/* Pop-Up Modal de Error */}
+      {errorModalMsg && (
+        <div 
+          className="modal-overlay" 
+          style={{ zIndex: 10000, background: 'rgba(0, 0, 0, 0.6)', backdropFilter: 'blur(2px)' }}
+          onClick={() => setErrorModalMsg(null)}
+        >
+          <div 
+            className="modal" 
+            style={{ width: '100%', maxWidth: 440, borderRadius: 12, overflow: 'hidden', boxShadow: '0 20px 40px rgba(0,0,0,0.3)' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="modal-header" style={{ background: 'var(--red)', color: '#fff', padding: '14px 20px' }}>
+              <span className="modal-title" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: '#fff', fontSize: 15, fontWeight: 700 }}>
+                <i className="ti ti-alert-triangle" style={{ fontSize: 20 }} /> Ocurrió un Error
+              </span>
+              <button className="btn-icon" onClick={() => setErrorModalMsg(null)} style={{ color: '#fff', opacity: 0.9 }}>
+                <i className="ti ti-x" />
+              </button>
+            </div>
+            <div className="modal-body" style={{ padding: '20px 24px', fontSize: 14, lineHeight: '1.5', color: 'var(--text-primary)', whiteSpace: 'pre-wrap' }}>
+              {errorModalMsg}
+            </div>
+            <div className="modal-footer" style={{ padding: '12px 20px', background: 'var(--surface-1)', borderTop: '1px solid var(--border-light)', display: 'flex', justifyContent: 'flex-end' }}>
+              <button 
+                type="button" 
+                className="btn btn-primary" 
+                onClick={() => setErrorModalMsg(null)}
+                style={{ minWidth: 100, fontWeight: 600 }}
+                autoFocus
+              >
+                Entendido
+              </button>
+            </div>
+          </div>
         </div>
-      ))}
-    </div>
+      )}
+
+      {/* Toasts flotantes para información / éxito */}
+      <div style={{ position: 'fixed', bottom: 20, right: 20, zIndex: 9999, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {toasts.map(t => (
+          <div key={t.id} style={{
+            background: t.type === 'success' ? 'var(--green)' : 'var(--blue-dark)',
+            color: '#fff', padding: '10px 16px', borderRadius: 8, fontSize: 13, fontWeight: 500,
+            boxShadow: '0 4px 12px rgba(0,0,0,.2)', maxWidth: 360,
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+            animation: 'slideUp .2s ease',
+          }}>
+            <span>{t.msg}</span>
+            <button 
+              onClick={() => setToasts(prev => prev.filter(x => x.id !== t.id))}
+              style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', opacity: 0.8, padding: 0 }}
+            >
+              <i className="ti ti-x" />
+            </button>
+          </div>
+        ))}
+      </div>
+    </>
   )
 }

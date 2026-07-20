@@ -57,6 +57,7 @@ export default function CargasPage() {
   const [loading,  setLoading]  = useState(true)
   const [saving,   setSaving]   = useState(false)
   const [modal,    setModal]    = useState(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
   const [form,     setForm]     = useState(FORM_INICIAL)
   const [tuboSeleccionado, setTuboSeleccionado] = useState(null)
   const [page,     setPage]     = useState(1)
@@ -83,7 +84,7 @@ export default function CargasPage() {
       const resultados = await Promise.all(
         ESTADOS_CARGABLES.map(estado => api.get(`/tubos?estado=${estado}&limit=200`))
       )
-      const todos = resultados.flatMap(r => r.data.tubos).filter(t => !t.id.startsWith('CLI_') && !t.id.startsWith('CLI-'))
+      const todos = resultados.flatMap(r => r.data.tubos).filter(t => !t.id.startsWith('CLI_') && !t.id.startsWith('CLI-') && !(t._count?.recambiosComoEntregado > 0))
       // Ordenar: VACIO primero, luego resto
       todos.sort((a, b) => {
         const orden = { VACIO: 0, DEVUELTO: 1, DISPONIBLE: 2, EN_REVISION: 3, RESERVADO: 4 }
@@ -203,7 +204,7 @@ export default function CargasPage() {
     }
   }
 
-  async function handleSubmit() {
+  function handleSubmit() {
     if (tuboSeleccionado && !form.tuboId) {
       toast('Completá los campos obligatorios', 'error')
       return
@@ -212,6 +213,10 @@ export default function CargasPage() {
       toast('Completá los campos obligatorios', 'error')
       return
     }
+    setConfirmOpen(true)
+  }
+
+  async function guardarCarga() {
     setSaving(true)
     try {
       await api.post('/cargas', {
@@ -224,6 +229,7 @@ export default function CargasPage() {
         observaciones: form.observaciones || undefined,
       })
       toast(tuboSeleccionado ? 'Carga registrada — tubo pasó a estado CARGADO' : 'Carga en salón registrada con éxito', 'success')
+      setConfirmOpen(false)
       setModal(false)
       if (tab === 'pendientes') loadTubos()
       else loadHistorial()
@@ -628,6 +634,61 @@ export default function CargasPage() {
             style={{ height: 64 }}
           />
         </FormGroup>
+      </Modal>
+
+      {/* Modal de confirmación de carga */}
+      <Modal
+        open={confirmOpen}
+        title="¿Confirmar Registro de Carga?"
+        onClose={() => setConfirmOpen(false)}
+        width={400}
+        footer={
+          <>
+            <button className="btn" onClick={() => setConfirmOpen(false)}>Atrás</button>
+            <button className="btn btn-primary" onClick={guardarCarga} disabled={saving}>
+              {saving ? 'Registrando...' : 'Sí, Registrar Carga'}
+            </button>
+          </>
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}>
+            Por favor, verificá que los datos ingresados sean correctos antes de guardar:
+          </p>
+          
+          <div style={{ background: 'var(--bg-subtle)', borderRadius: 8, padding: '14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+              <span style={{ color: 'var(--text-muted)' }}>Destino:</span>
+              <span style={{ fontWeight: 600 }}>{tuboSeleccionado ? `Tubo ${form.tuboId}` : 'Carga en Salón'}</span>
+            </div>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+              <span style={{ color: 'var(--text-muted)' }}>Gas:</span>
+              <span style={{ fontWeight: 600 }}>{TIPO_GAS_LABEL[form.tipoGas] || form.tipoGas}</span>
+            </div>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, borderBottom: '1px dashed var(--border)', paddingBottom: 8 }}>
+              <span style={{ color: 'var(--text-muted)' }}>Cantidad:</span>
+              <span style={{ fontWeight: 700, color: 'var(--blue)' }}>
+                {formatNumberSpanish(form.cantidad)} {form.unidad === 'KG' ? 'kg' : 'm³'}
+              </span>
+            </div>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, paddingTop: 4 }}>
+              <span style={{ color: 'var(--text-muted)' }}>Precio Unitario:</span>
+              <span style={{ fontWeight: 600 }}>
+                {Number(calcPrecio || 0).toLocaleString('es-PY')} GS / {form.unidad === 'KG' ? 'kg' : 'm³'}
+              </span>
+            </div>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+              <span style={{ fontWeight: 600 }}>Monto Total:</span>
+              <span style={{ fontWeight: 800, fontSize: 15, color: 'var(--green)' }}>
+                {Number(calcMonto || Math.round(Number(form.cantidad || 0) * Number(calcPrecio || 0))).toLocaleString('es-PY')} GS
+              </span>
+            </div>
+          </div>
+        </div>
       </Modal>
     </>
   )

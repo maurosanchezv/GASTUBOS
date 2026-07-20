@@ -141,6 +141,7 @@ export default function CamionesPage() {
         !t.camionId && 
         !t.id.startsWith('CLI_') && 
         !t.id.startsWith('CLI-') &&
+        !(t._count?.recambiosComoEntregado > 0) &&
         ['DISPONIBLE', 'CARGADO', 'VACIO', 'DEVUELTO', 'EN_REVISION'].includes(t.estado)
       )
       setTubosDisponibles(elegibles)

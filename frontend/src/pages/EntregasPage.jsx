@@ -368,7 +368,7 @@ export default function EntregasPage() {
     }
     if (!mapaHistRef.current || mapaHistInstance.current) return
 
-    const conCoords = entregas.filter(e => e.latitud && e.longitud)
+    const conCoords = entregas.filter(e => e.latitud && e.longitud && e.confirmada && !e.cancelada)
     const center = conCoords.length > 0
       ? [conCoords[0].latitud, conCoords[0].longitud]
       : [-25.2867, -57.6474]
@@ -507,7 +507,13 @@ export default function EntregasPage() {
       let defaultUnidad = 'KG'
       let defaultPrecio = 0
 
-      if (r.data.cargas && r.data.cargas.length > 0) {
+      if (r.data.estado === 'DISPONIBLE') {
+        // Para un tubo DISPONIBLE (envase en depósito sin carga), la cantidad de gas es 0
+        defaultCant = 0
+        const gasNorm = r.data.gas?.toLowerCase() || ''
+        defaultUnidad = (gasNorm.includes('oxigeno') || gasNorm.includes('argon') || gasNorm.includes('nitrogeno') || gasNorm.includes('aire') || gasNorm.includes('mezcla')) ? 'M3' : 'KG'
+        defaultPrecio = 0
+      } else if (r.data.cargas && r.data.cargas.length > 0) {
         const ultimaCarga = r.data.cargas[0]
         defaultCant = Number(ultimaCarga.cantidad)
         defaultUnidad = ultimaCarga.unidad
@@ -612,7 +618,7 @@ export default function EntregasPage() {
 
   const f = k => e => setForm(p => ({ ...p, [k]: e.target.value }))
   const clienteSeleccionado = clientes.find(c => c.id === form.clienteId)
-  const entregasConCoords = entregas.filter(e => e.latitud && e.longitud)
+  const entregasConCoords = entregas.filter(e => e.latitud && e.longitud && e.confirmada && !e.cancelada)
 
   return (
     <>
@@ -907,8 +913,45 @@ export default function EntregasPage() {
                   </div>
                   <div style={{ marginBottom: 12 }}>
                     <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>TUBOS</div>
-                    <div style={{ fontSize: 28, fontWeight: 700, color: 'var(--blue)' }}>{form.tubosIds.length}</div>
+                    <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--blue)' }}>{form.tubosIds.length}</div>
                   </div>
+
+                  {/* Cálculo del Total Estimado de Entrega */}
+                  {(() => {
+                    const subtotalTubosCalculado = (form.tubosDetalles || []).reduce((acc, d) => {
+                      const cant = Number(d.cantidadGas || 0)
+                      const prec = Number(d.precioUnitario || 0)
+                      return acc + (cant > 0 ? (cant * prec) : prec)
+                    }, 0)
+                    const costoDeliv = Number(form.costoDelivery || 0)
+                    const totalGral = subtotalTubosCalculado + costoDeliv
+
+                    return (
+                      <>
+                        <div style={{ marginBottom: 10 }}>
+                          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>SUBTOTAL GAS</div>
+                          <div style={{ fontSize: 14, fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
+                            {subtotalTubosCalculado.toLocaleString('es-PY')} Gs
+                          </div>
+                        </div>
+                        {costoDeliv > 0 && (
+                          <div style={{ marginBottom: 10 }}>
+                            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>DELIVERY</div>
+                            <div style={{ fontSize: 14, fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
+                              {costoDeliv.toLocaleString('es-PY')} Gs
+                            </div>
+                          </div>
+                        )}
+                        <div style={{ marginBottom: 14, borderTop: '1px solid var(--border-mid)', paddingTop: 10 }}>
+                          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, marginBottom: 2 }}>TOTAL REMISIÓN</div>
+                          <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--blue)', fontFamily: 'var(--font-mono)' }}>
+                            {totalGral.toLocaleString('es-PY')} Gs
+                          </div>
+                        </div>
+                      </>
+                    )
+                  })()}
+
                   <div style={{ marginBottom: 12 }}>
                     <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>UBICACIÓN</div>
                     {form.latitud && form.longitud ? (
@@ -1271,10 +1314,18 @@ export default function EntregasPage() {
                       </span>
                     </td>
                     <td style={{ textAlign: 'center' }}>
-                      {Number(d.cantidadGas)} {d.unidadGas}<br />
-                      <span style={{ fontSize: '9px', color: '#888' }}>
-                        x {Number(d.precioUnitario).toLocaleString('es-PY')}
-                      </span>
+                      {Number(d.cantidadGas) > 0 ? (
+                        <>
+                          {formatNumberSpanish(d.cantidadGas)} {d.unidadGas}<br />
+                          <span style={{ fontSize: '9px', color: '#888' }}>
+                            x {Number(d.precioUnitario).toLocaleString('es-PY')}
+                          </span>
+                        </>
+                      ) : (
+                        <span style={{ fontSize: '10px', color: '#666', fontWeight: 500 }}>
+                          Envase Vacío
+                        </span>
+                      )}
                     </td>
                     <td style={{ textAlign: 'right', fontWeight: '500' }}>
                       {Number(d.subtotal).toLocaleString('es-PY')} GS
@@ -1374,10 +1425,18 @@ export default function EntregasPage() {
                       </span>
                     </td>
                     <td style={{ textAlign: 'center' }}>
-                      {formatNumberSpanish(d.cantidadGas)} {d.unidadGas}<br />
-                      <span style={{ fontSize: '9px', color: '#888' }}>
-                        x {Number(d.precioUnitario).toLocaleString('es-PY')}
-                      </span>
+                      {Number(d.cantidadGas) > 0 ? (
+                        <>
+                          {formatNumberSpanish(d.cantidadGas)} {d.unidadGas}<br />
+                          <span style={{ fontSize: '9px', color: '#888' }}>
+                            x {Number(d.precioUnitario).toLocaleString('es-PY')}
+                          </span>
+                        </>
+                      ) : (
+                        <span style={{ fontSize: '10px', color: '#555', fontWeight: 500 }}>
+                          Envase Vacío
+                        </span>
+                      )}
                     </td>
                     <td style={{ textAlign: 'right', fontWeight: '500' }}>
                       {Number(d.subtotal).toLocaleString('es-PY')} GS
@@ -1489,10 +1548,27 @@ function TuboChip({ tuboId, detail, onChange, onRemove }) {
           <option value="KG">KG</option>
           <option value="M3">M³</option>
         </select>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 8 }}>
-          <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>PRECIO:</span>
-          <span style={{ fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
-            {Number(detail?.precioUnitario || 0).toLocaleString('es-PY')} Gs
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 4 }}>
+          <label style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>PRECIO (Gs):</label>
+          <input 
+            type="number" 
+            min="0" 
+            step="500"
+            placeholder="0"
+            value={detail?.precioUnitario ?? ''} 
+            onChange={e => onChange(tuboId, 'precioUnitario', e.target.value)}
+            style={{ width: 95, minHeight: 32, padding: '4px 8px', fontSize: 13, fontFamily: 'var(--font-mono)' }}
+          />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 6 }}>
+          <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>SUBTOTAL:</span>
+          <span style={{ fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--blue)' }}>
+            {(() => {
+              const cant = Number(detail?.cantidadGas || 0)
+              const prec = Number(detail?.precioUnitario || 0)
+              const sub = cant > 0 ? (cant * prec) : prec
+              return sub.toLocaleString('es-PY')
+            })()} Gs
           </span>
         </div>
         <button type="button" className="btn-icon" onClick={() => onRemove(tuboId)} title="Quitar">

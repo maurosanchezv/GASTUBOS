@@ -49,6 +49,9 @@ export default function RepartoPage() {
     const saved = localStorage.getItem('printer_paper_width')
     return saved ? Number(saved) : 48
   })
+  const [duplicarTicket, setDuplicarTicket] = useState(() => {
+    return localStorage.getItem('printer_duplicar_ticket') !== 'false'
+  })
 
   const safeParseJSON = (key, fallback = []) => {
     try {
@@ -176,118 +179,140 @@ export default function RepartoPage() {
             return ' '.repeat(pad) + text
           }
 
-          builder.initialize()
-          
-          // Encabezado con Logo o fallback de texto
-          if (logoBytes) {
-            builder.addBytes(logoBytes)
-            builder.addTextLine('')
-          } else {
-            builder.alignCenter().boldOn().doubleSizeOn().addTextLine((nombre_empresa || 'GASTUBOS').toUpperCase()).doubleSizeOff()
-          }
-          
-          builder.alignCenter()
-          if (direccion) {
-            wrapText(direccion, width).forEach(l => builder.addTextLine(l))
-          }
-          if (telefono) {
-            wrapText('Tel: ' + telefono, width).forEach(l => builder.addTextLine(l))
-          }
-          builder.addTextLine(doubleLine())
-          
-          // Información de Remisión
-          builder.alignLeft().boldOn().addTextLine('REMISION: ' + entrega.numero).boldOff()
-          builder.addTextLine(line())
-
-          // Datos del Cliente (mismo orden que la remisión de la computadora)
-          const clienteText = 'Cliente: ' + (entrega.cliente?.nombre || '')
-          wrapText(clienteText, width).forEach(l => builder.addTextLine(l))
-          
-          builder.addTextLine('RUC/CI: ' + (entrega.cliente?.ruc || '-'))
-          
-          const dirText = 'Direccion: ' + (entrega.direccionEntrega || '')
-          wrapText(dirText, width).forEach(l => builder.addTextLine(l))
-          
-          builder.addTextLine('Fecha: ' + new Date(entrega.fechaEntrega).toLocaleString('es-PY'))
-          
-          const choferText = 'Chofer: ' + (entrega.repartidor?.nombre || 'Sin asignar')
-          wrapText(choferText, width).forEach(l => builder.addTextLine(l))
-          
-          builder.addTextLine('Tipo: ' + (entrega.tipoOperacion || '').replace('_', ' '))
-          builder.addTextLine(doubleLine())
-
-          // Detalle de Productos (Tubo/Gas - Cant - Precio - Subtotal)
-          builder.boldOn().addTextLine(justify('PRODUCTO', 'SUBTOTAL')).boldOff()
-          builder.addTextLine(line())
-
-          let subtotalItems = 0
-          entrega.detalles?.forEach(d => {
-            const capStr = d.tubo ? ` ${formatCapacidad(d.tubo)}` : ''
-            let desc = `${d.tuboId} (${d.tubo?.gas || ''}${capStr})`
-            if (d.tubo?.serie && d.tubo?.serie !== d.tuboId) {
-              desc += ` Nro:${d.tubo.serie}`
+          const construirTicket = (tituloCopia) => {
+            builder.initialize()
+            
+            // Encabezado con Logo o fallback de texto
+            if (logoBytes) {
+              builder.addBytes(logoBytes)
+              builder.addTextLine('')
+            } else {
+              builder.alignCenter().boldOn().doubleSizeOn().addTextLine((nombre_empresa || 'GASTUBOS').toUpperCase()).doubleSizeOff()
             }
-            const cant = `${formatNumberSpanish(d.cantidadGas)} ${d.unidadGas}`
-            const precioUnit = Number(d.precioUnitario).toLocaleString('es-PY')
-            const price = Number(d.subtotal).toLocaleString('es-PY') + ' GS'
+            
+            builder.alignCenter()
+            if (direccion) {
+              wrapText(direccion, width).forEach(l => builder.addTextLine(l))
+            }
+            if (telefono) {
+              wrapText('Tel: ' + telefono, width).forEach(l => builder.addTextLine(l))
+            }
+            builder.addTextLine(doubleLine())
+            
+            if (tituloCopia) {
+              builder.alignCenter().boldOn().addTextLine(tituloCopia).boldOff()
+              builder.addTextLine(line())
+            }
+            
+            // Información de Remisión
+            builder.alignLeft().boldOn().addTextLine('REMISION: ' + entrega.numero).boldOff()
+            builder.addTextLine(line())
 
-            builder.addTextLine(desc.slice(0, width))
-            builder.addTextLine(justify(`  ${cant} x ${precioUnit}`, price))
-            subtotalItems += Number(d.subtotal)
-          })
-          builder.addTextLine(line())
+            // Datos del Cliente (mismo orden que la remisión de la computadora)
+            const clienteText = 'Cliente: ' + (entrega.cliente?.nombre || '')
+            wrapText(clienteText, width).forEach(l => builder.addTextLine(l))
+            
+            builder.addTextLine('RUC/CI: ' + (entrega.cliente?.ruc || '-'))
+            
+            const dirText = 'Direccion: ' + (entrega.direccionEntrega || '')
+            wrapText(dirText, width).forEach(l => builder.addTextLine(l))
+            
+            builder.addTextLine('Fecha: ' + new Date(entrega.fechaEntrega).toLocaleString('es-PY'))
+            
+            const choferText = 'Chofer: ' + (entrega.repartidor?.nombre || 'Sin asignar')
+            wrapText(choferText, width).forEach(l => builder.addTextLine(l))
+            
+            builder.addTextLine('Tipo: ' + (entrega.tipoOperacion || '').replace('_', ' '))
+            builder.addTextLine(doubleLine())
 
-          // Totales
-          const deliveryCost = Number(entrega.costoDelivery || 0)
-          builder.addTextLine(justify('DELIVERY:', deliveryCost.toLocaleString('es-PY') + ' GS'))
-          builder.boldOn().addTextLine(justify('TOTAL:', (subtotalItems + deliveryCost).toLocaleString('es-PY') + ' GS')).boldOff()
-          builder.addTextLine(doubleLine())
+            // Detalle de Productos (Tubo/Gas - Cant - Precio - Subtotal)
+            builder.boldOn().addTextLine(justify('PRODUCTO', 'SUBTOTAL')).boldOff()
+            builder.addTextLine(line())
 
-          // Recambios/Devoluciones
-          const recsBT = recambiosParaImprimir(entrega)
-          if (recsBT.length > 0) {
-            builder.boldOn().addTextLine('RECAMBIOS RECIBIDOS:').boldOff()
-            recsBT.forEach(desc => {
-              const wrapped = wrapText(desc, width - 2)
-              wrapped.forEach((lineText, idx) => {
-                if (idx === 0) {
-                  builder.addTextLine('- ' + lineText)
-                } else {
-                  builder.addTextLine('  ' + lineText)
-                }
-              })
+            let subtotalItems = 0
+            entrega.detalles?.forEach(d => {
+              const capStr = d.tubo ? ` ${formatCapacidad(d.tubo)}` : ''
+              let desc = `${d.tuboId} (${d.tubo?.gas || ''}${capStr})`
+              if (d.tubo?.serie && d.tubo?.serie !== d.tuboId) {
+                desc += ` Nro:${d.tubo.serie}`
+              }
+              const cant = `${formatNumberSpanish(d.cantidadGas)} ${d.unidadGas}`
+              const precioUnit = Number(d.precioUnitario).toLocaleString('es-PY')
+              const price = Number(d.subtotal).toLocaleString('es-PY') + ' GS'
+
+              builder.addTextLine(desc.slice(0, width))
+              if (Number(d.cantidadGas) > 0) {
+                builder.addTextLine(justify(`  ${cant} x ${precioUnit}`, price))
+              } else {
+                builder.addTextLine(justify(`  1 Envase Vacío`, price))
+              }
+              subtotalItems += Number(d.subtotal)
             })
             builder.addTextLine(line())
+
+            // Totales
+            const deliveryCost = Number(entrega.costoDelivery || 0)
+            builder.addTextLine(justify('DELIVERY:', deliveryCost.toLocaleString('es-PY') + ' GS'))
+            builder.boldOn().addTextLine(justify('TOTAL:', (subtotalItems + deliveryCost).toLocaleString('es-PY') + ' GS')).boldOff()
+            builder.addTextLine(doubleLine())
+
+            // Recambios/Devoluciones
+            const recsBT = recambiosParaImprimir(entrega)
+            if (recsBT.length > 0) {
+              builder.boldOn().addTextLine('RECAMBIOS RECIBIDOS:').boldOff()
+              recsBT.forEach(desc => {
+                const wrapped = wrapText(desc, width - 2)
+                wrapped.forEach((lineText, idx) => {
+                  if (idx === 0) {
+                    builder.addTextLine('- ' + lineText)
+                  } else {
+                    builder.addTextLine('  ' + lineText)
+                  }
+                })
+              })
+              builder.addTextLine(line())
+            }
+
+            // Observaciones
+            if (entrega.observaciones) {
+              const obsText = 'Obs: ' + entrega.observaciones
+              wrapText(obsText, width).forEach(l => builder.addTextLine(l))
+              builder.addTextLine(line())
+            }
+            
+            // Firmas side-by-side
+            builder.addTextLine('').addTextLine('')
+            const lineLength = width >= 48 ? 18 : 13
+            const leftLine = '-'.repeat(lineLength)
+            const rightLine = '-'.repeat(lineLength)
+            const spacesBetweenLines = width - (lineLength * 2)
+            builder.addTextLine(leftLine + ' '.repeat(spacesBetweenLines) + rightLine)
+            
+            const labelLeft = 'Firma Chofer'
+            const labelRight = 'Firma Cliente'
+            const padLeft = Math.max(0, Math.floor((lineLength - labelLeft.length) / 2))
+            const padRight = Math.max(0, Math.floor((lineLength - labelRight.length) / 2))
+            
+            const strLeft = ' '.repeat(padLeft) + labelLeft + ' '.repeat(Math.max(0, lineLength - labelLeft.length - padLeft))
+            const strRight = ' '.repeat(padRight) + labelRight + ' '.repeat(Math.max(0, lineLength - labelRight.length - padRight))
+            
+            builder.addTextLine(strLeft + ' '.repeat(spacesBetweenLines) + strRight)
+            builder.addTextLine('')
+            
+            // Pie de ticket
+            builder.alignCenter().boldOn().addTextLine('Gracias por su preferencia!').boldOff()
           }
 
-          // Observaciones
-          if (entrega.observaciones) {
-            const obsText = 'Obs: ' + entrega.observaciones
-            wrapText(obsText, width).forEach(l => builder.addTextLine(l))
-            builder.addTextLine(line())
+          if (duplicarTicket) {
+            construirTicket('*** COPIA CHOFER ***')
+            builder.addTextLine('').addTextLine('').addTextLine('')
+            builder.alignCenter().addTextLine('- - - - - - - - - - - - - - - -')
+            builder.addTextLine('').addTextLine('').addTextLine('')
+            construirTicket('*** COPIA CLIENTE ***')
+          } else {
+            construirTicket(null)
           }
-          
-          // Firmas side-by-side
-          builder.addTextLine('').addTextLine('')
-          const lineLength = width >= 48 ? 18 : 13
-          const leftLine = '-'.repeat(lineLength)
-          const rightLine = '-'.repeat(lineLength)
-          const spacesBetweenLines = width - (lineLength * 2)
-          builder.addTextLine(leftLine + ' '.repeat(spacesBetweenLines) + rightLine)
-          
-          const labelLeft = 'Firma Chofer'
-          const labelRight = 'Firma Cliente'
-          const padLeft = Math.max(0, Math.floor((lineLength - labelLeft.length) / 2))
-          const padRight = Math.max(0, Math.floor((lineLength - labelRight.length) / 2))
-          
-          const strLeft = ' '.repeat(padLeft) + labelLeft + ' '.repeat(Math.max(0, lineLength - labelLeft.length - padLeft))
-          const strRight = ' '.repeat(padRight) + labelRight + ' '.repeat(Math.max(0, lineLength - labelRight.length - padRight))
-          
-          builder.addTextLine(strLeft + ' '.repeat(spacesBetweenLines) + strRight)
-          builder.addTextLine('')
-          
-          // Pie de ticket
-          builder.alignCenter().boldOn().addTextLine('Gracias por su preferencia!').boldOff()
+
           // Espaciado generoso al final para evitar superposiciones con la siguiente impresión
           builder.addTextLine('').addTextLine('').addTextLine('').addTextLine('').addTextLine('').addTextLine('')
           builder.feed(4)
@@ -368,6 +393,7 @@ export default function RepartoPage() {
   const [manualTuboId, setManualTuboId] = useState('')
   const [metodoPago, setMetodoPago] = useState('EFECTIVO')
   const [montoRecibido, setMontoRecibido] = useState('')
+  const [modalWarningParcial, setModalWarningParcial] = useState(false)
 
   // Estado para gestión de camión asignado al chofer
   const [camiones, setCamiones] = useState([])
@@ -716,10 +742,10 @@ export default function RepartoPage() {
       scanner.start(
         { facingMode: 'environment' },
         { fps: 10, qrbox: { width: 250, height: 250 } },
-        (text) => {
-          let id = text
+         (text) => {
+          let id = text.trim().toUpperCase()
           if (text.includes('/tubos/')) {
-            id = text.split('/tubos/')[1].split('?')[0].split('/')[0]
+            id = text.split('/tubos/')[1].split('?')[0].split('/')[0].trim().toUpperCase()
           }
           
           const pertenece = entrega.detalles?.some(d => d.tuboId === id)
@@ -732,7 +758,15 @@ export default function RepartoPage() {
               setScannedIds(prev => [...prev, id])
             }
           } else {
-            toast(`El tubo ${id} no pertenece a esta entrega`, 'error')
+            // Detener escáner antes de confirmar para que no siga capturando
+            stopScanner()
+            const confirmAdd = window.confirm(`El tubo ${id} no pertenece a esta remisión. ¿Deseas agregarlo al pedido de este cliente?`)
+            if (confirmAdd) {
+              agregarTuboAdicional(entrega.id, id)
+            } else {
+              // Si cancela, reanudamos el escáner
+              startScanner(entrega)
+            }
           }
           
           // Si ya escaneó todos, cerramos cámara automáticamente
@@ -794,8 +828,18 @@ export default function RepartoPage() {
     setMontoRecibido('')
   }
 
+  const solicitarConfirmarEntrega = (entregaId) => {
+    if (!activeEntrega) return
+    const totalDetalles = activeEntrega.detalles?.length || 0
+    if (scannedIds.length < totalDetalles) {
+      setModalWarningParcial(true)
+      return
+    }
+    ejecutarConfirmarEntrega(entregaId)
+  }
+
   // Confirmar entrega físicamente
-  const confirmarEntrega = async (entregaId) => {
+  const ejecutarConfirmarEntrega = async (entregaId) => {
     try {
       const payload = {
         confirmados: scannedIds,
@@ -825,6 +869,7 @@ export default function RepartoPage() {
         toast('Confirmado localmente (Fuera de Línea). Pendiente de sincronización.', 'success')
       }
       
+      setModalWarningParcial(false)
       cancelarEntregaActiva()
       fetchRuta()
       fetchHistorialHoy()
@@ -1403,15 +1448,46 @@ export default function RepartoPage() {
                         </div>
                       </div>
 
+                      {/* Banner de Estado de Escaneo en Paso 1 */}
+                      {scannedIds.length === 0 ? (
+                        <div className="alert alert-warning" style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 10, marginTop: 14 }}>
+                          <i className="ti ti-alert-triangle" style={{ fontSize: 22, color: 'var(--amber)', flexShrink: 0 }} />
+                          <div>
+                            <strong>Sin tubos escaneados:</strong> Escanea el código QR de cada tubo o ingrésalo manualmente para poder continuar.
+                          </div>
+                        </div>
+                      ) : scannedIds.length < (activeEntrega.detalles?.length || 0) ? (
+                        <div className="alert alert-warning" style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, background: '#fffbebf0', borderColor: '#f59e0b', color: '#92400e' }}>
+                          <i className="ti ti-alert-circle" style={{ fontSize: 22, color: '#f59e0b', flexShrink: 0 }} />
+                          <div>
+                            <strong>Quedan tubos pendientes:</strong> Has escaneado <strong>{scannedIds.length} de {activeEntrega.detalles?.length}</strong> tubos. Faltan <strong>{(activeEntrega.detalles?.length || 0) - scannedIds.length} tubo(s)</strong> por verificar.
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="alert alert-success" style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, background: '#f0fdf4', borderColor: '#22c55e', color: '#15803d' }}>
+                          <i className="ti ti-circle-check" style={{ fontSize: 22, color: '#22c55e', flexShrink: 0 }} />
+                          <div>
+                            <strong>¡Orden completa!</strong> Todos los {scannedIds.length} tubos de la orden han sido verificados.
+                          </div>
+                        </div>
+                      )}
+
                       {/* Botón de Siguiente */}
-                      <div style={{ marginTop: 24 }}>
+                      <div style={{ marginTop: 20 }}>
                         <button
-                          className="btn btn-primary"
-                          onClick={() => setEntregaStep(2)}
+                          className={`btn ${scannedIds.length < (activeEntrega.detalles?.length || 0) && scannedIds.length > 0 ? 'btn-warning' : 'btn-primary'}`}
+                          onClick={() => {
+                            if (scannedIds.length < (activeEntrega.detalles?.length || 0)) {
+                              toast(`Avanzando con ${(activeEntrega.detalles?.length || 0) - scannedIds.length} tubo(s) pendiente(s)`, 'warning')
+                            }
+                            setEntregaStep(2)
+                          }}
                           disabled={scannedIds.length === 0}
                           style={{ width: '100%', height: 48, fontSize: 14, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
                         >
-                          Siguiente: Retorno de Cilindros <i className="ti ti-arrow-right" />
+                          {scannedIds.length < (activeEntrega.detalles?.length || 0) && scannedIds.length > 0 
+                            ? 'Siguiente (Con tubos pendientes) ➔' 
+                            : 'Siguiente: Retorno de Cilindros ➔'}
                         </button>
                       </div>
                     </>
@@ -1721,7 +1797,7 @@ export default function RepartoPage() {
                           <button
                             className={`btn ${todosListos ? 'btn-success' : 'btn-warning'}`}
                             disabled={scannedIds.length === 0}
-                            onClick={() => confirmarEntrega(activeEntrega.id)}
+                            onClick={() => solicitarConfirmarEntrega(activeEntrega.id)}
                             style={{ width: '100%', height: 50, fontSize: 14, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
                           >
                             <i className="ti ti-check" />
@@ -1795,10 +1871,18 @@ export default function RepartoPage() {
                       </span>
                     </td>
                     <td style={{ textAlign: 'center' }}>
-                      {formatNumberSpanish(d.cantidadGas)} {d.unidadGas}<br />
-                      <span style={{ fontSize: '9px', color: '#888' }}>
-                        x {Number(d.precioUnitario).toLocaleString('es-PY')}
-                      </span>
+                      {Number(d.cantidadGas) > 0 ? (
+                        <>
+                          {formatNumberSpanish(d.cantidadGas)} {d.unidadGas}<br />
+                          <span style={{ fontSize: '9px', color: '#888' }}>
+                            x {Number(d.precioUnitario).toLocaleString('es-PY')}
+                          </span>
+                        </>
+                      ) : (
+                        <span style={{ fontSize: '10px', color: '#555', fontWeight: 500 }}>
+                          Envase Vacío
+                        </span>
+                      )}
                     </td>
                     <td style={{ textAlign: 'right', fontWeight: '500' }}>
                       {Number(d.subtotal).toLocaleString('es-PY')} GS
@@ -1915,10 +1999,18 @@ export default function RepartoPage() {
                       </span>
                     </td>
                     <td style={{ textAlign: 'center', paddingTop: '6px', paddingBottom: '4px' }}>
-                      {Number(d.cantidadGas)} {d.unidadGas}<br />
-                      <span style={{ fontSize: '9px', color: '#888' }}>
-                        x {Number(d.precioUnitario).toLocaleString('es-PY')}
-                      </span>
+                      {Number(d.cantidadGas) > 0 ? (
+                        <>
+                          {Number(d.cantidadGas)} {d.unidadGas}<br />
+                          <span style={{ fontSize: '9px', color: '#888' }}>
+                            x {Number(d.precioUnitario).toLocaleString('es-PY')}
+                          </span>
+                        </>
+                      ) : (
+                        <span style={{ fontSize: '10px', color: '#666', fontWeight: 500 }}>
+                          Envase Vacío
+                        </span>
+                      )}
                     </td>
                     <td style={{ textAlign: 'right', fontWeight: '500', paddingTop: '6px', paddingBottom: '4px' }}>
                       {Number(d.subtotal).toLocaleString('es-PY')} GS
@@ -1945,17 +2037,13 @@ export default function RepartoPage() {
 
 
             
-            {entregaSeleccionada.recambios && entregaSeleccionada.recambios.length > 0 && (
+            {recambiosParaImprimir(entregaSeleccionada || activeEntrega).length > 0 && (
               <div style={{ margin: '8px 0', fontSize: '10px', borderTop: '1px dashed #ddd', paddingTop: '6px' }}>
                 <strong style={{ display: 'block', marginBottom: 4 }}>Recambios Recibidos:</strong>
                 <ul style={{ paddingLeft: 14, margin: 0, color: '#555' }}>
-                  {entregaSeleccionada.recambios.map(r => {
-                    const tubo = r.tuboEntregado
-                    const desc = tubo.observaciones && (tubo.observaciones.includes(' ') || tubo.observaciones.length > 15)
-                      ? tubo.observaciones 
-                      : `${tubo.id} (${tubo.gas})`
-                    return <li key={r.id}>{desc}</li>
-                  })}
+                  {recambiosParaImprimir(entregaSeleccionada || activeEntrega).map((desc, i) => (
+                    <li key={i}>{desc}</li>
+                  ))}
                 </ul>
               </div>
             )}
@@ -2100,7 +2188,93 @@ export default function RepartoPage() {
               })}
             </div>
           )}
+          
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+            <input
+              type="checkbox"
+              id="duplicar_ticket_checkbox"
+              checked={duplicarTicket}
+              onChange={(e) => {
+                const checked = e.target.checked
+                setDuplicarTicket(checked)
+                localStorage.setItem('printer_duplicar_ticket', String(checked))
+              }}
+              style={{ width: 18, height: 18, cursor: 'pointer' }}
+            />
+            <label htmlFor="duplicar_ticket_checkbox" style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', cursor: 'pointer', userSelect: 'none' }}>
+              Duplicar ticket (Copia Chofer + Copia Cliente)
+            </label>
+          </div>
         </div>
+      </Modal>
+
+      {/* Modal de Advertencia por Tubos No Escaneados */}
+      <Modal
+        open={modalWarningParcial}
+        title="⚠️ Atención: Entrega Parcial"
+        onClose={() => setModalWarningParcial(false)}
+        width={440}
+        footer={
+          <div style={{ display: 'flex', gap: 10, width: '100%' }}>
+            <button 
+              className="btn btn-outline" 
+              onClick={() => {
+                setModalWarningParcial(false)
+                setEntregaStep(1)
+              }}
+              style={{ flex: 1, height: 42 }}
+            >
+              <i className="ti ti-scan" /> Volver a Escanear
+            </button>
+            <button 
+              className="btn" 
+              onClick={() => ejecutarConfirmarEntrega(activeEntrega?.id)}
+              style={{ flex: 1, height: 42, background: 'var(--red)', color: '#fff', borderColor: 'var(--red)', fontWeight: 700 }}
+            >
+              <i className="ti ti-check" /> Confirmar Parcial
+            </button>
+          </div>
+        }
+      >
+        {activeEntrega && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div className="alert alert-warning" style={{ fontSize: 12, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+              <i className="ti ti-alert-triangle" style={{ fontSize: 20, flexShrink: 0 }} />
+              <div>
+                <strong>Hay tubos que aún no has escaneado.</strong>
+                <div style={{ marginTop: 2 }}>
+                  Los tubos sin escanear no se entregarán al cliente y volverán al stock de tu camión/depósito.
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>
+                Tubos Escaneados ({scannedIds.length}):
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {scannedIds.map(sId => (
+                  <span key={sId} className="badge badge-green" style={{ fontFamily: 'var(--font-mono)' }}>
+                    ✓ {sId}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--red)', marginBottom: 6, textTransform: 'uppercase' }}>
+                Tubos Pendientes sin Escanear ({activeEntrega.detalles?.filter(d => !scannedIds.includes(d.tuboId)).length || 0}):
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {activeEntrega.detalles?.filter(d => !scannedIds.includes(d.tuboId)).map(d => (
+                  <span key={d.tuboId} className="badge badge-coral" style={{ fontFamily: 'var(--font-mono)' }}>
+                    ⚠ {d.tuboId} ({d.tubo?.gas})
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </Modal>
     </>
   )

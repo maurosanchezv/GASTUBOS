@@ -57,8 +57,11 @@ const tuboSchema = z.object({
 // ─── GET /api/tubos ───────────────────────────────────────────────────────────
 router.get('/', async (req, res, next) => {
   try {
-    const { estado, gas, propietario, clienteId, q, page = 1, limit = 50, disponibles } = req.query
+    const { estado, gas, propietario, clienteId, q, page = 1, limit = 50, disponibles, deTerceros } = req.query
     const where = { activo: true }
+    if (deTerceros === 'true') {
+      where.recambiosComoEntregado = { some: {} }
+    }
     if (estado)      where.estado      = estado
     if (disponibles === 'true') {
       where.estado = { in: ['DISPONIBLE', 'CARGADO', 'RESERVADO'] }
@@ -88,6 +91,9 @@ router.get('/', async (req, res, next) => {
         include: { 
           cliente: { select: { id: true, nombre: true } },
           camion: { select: { id: true, placa: true } },
+          _count: {
+            select: { recambiosComoEntregado: true }
+          }
         },
         orderBy: { id: 'asc' },
         skip: (Number(page) - 1) * Number(limit),
