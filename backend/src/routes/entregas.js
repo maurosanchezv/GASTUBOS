@@ -34,7 +34,12 @@ function parseGasYCapacidadInfo(str, tuboReferencia) {
 
   let numVal = null
   if (str && typeof str === 'string') {
-    const cleanStr = str.replace(/#\d+/g, '').trim()
+    // Si la cadena incluye prefijos de entrega, extraer únicamente la sección tras 'Detalle:'
+    const targetPart = str.includes('Detalle:') ? str.split('Detalle:')[1] : str
+    const cleanStr = targetPart
+      .replace(/#\d+/g, '')
+      .replace(/co2|co₂|m3|m³/gi, ' ')
+      .trim()
     const matchNumber = cleanStr.match(/(\d+(?:\.\d+)?)/)
     if (matchNumber) {
       numVal = parseFloat(matchNumber[1])

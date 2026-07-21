@@ -1,5 +1,6 @@
 // gastubos/frontend/src/components/ui.jsx
 // Componentes reutilizables usados en todas las páginas
+import { useState, useEffect } from 'react'
 
 const ESTADO_DESCRIPCIONES = {
   DISPONIBLE:  'Envase metálico vacío en depósito, listo para ser recargado, alquilado o vendido.',
@@ -61,11 +62,24 @@ export function EmptyState({ icon = 'ti-inbox', message = 'Sin resultados' }) {
 }
 
 // ── Modal genérico ─────────────────────────────────────────────
-export function Modal({ open, title, onClose, children, footer, width = 540 }) {
+export function Modal({ open, title, onClose, children, footer, width = 540, closeOnOverlayClick = false }) {
+  const [shaking, setShaking] = useState(false)
+
   if (!open) return null
+
+  const handleOverlayClick = (e) => {
+    if (e.target !== e.currentTarget) return
+    if (closeOnOverlayClick && onClose) {
+      onClose()
+    } else {
+      setShaking(true)
+      setTimeout(() => setShaking(false), 300)
+    }
+  }
+
   return (
-    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal" style={{ width: '100%', maxWidth: width }}>
+    <div className="modal-overlay" onClick={handleOverlayClick}>
+      <div className={`modal ${shaking ? 'modal-shaking' : ''}`} style={{ width: '100%', maxWidth: width }}>
         <div className="modal-header">
           <span className="modal-title">{title}</span>
           <button className="btn-icon" onClick={onClose}><i className="ti ti-x" /></button>
@@ -155,7 +169,6 @@ export function formatCapacidad(tubo) {
 }
 
 // ── Toast notification ─────────────────────────────────────────
-import { useState, useEffect } from 'react'
 
 let _showToast = null
 export function useToast() {

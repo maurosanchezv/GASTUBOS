@@ -92,7 +92,8 @@ router.post('/:id/adquirir', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), asyn
     const result = await prisma.$transaction(async (tx) => {
       const tuboId = trimmedSerie
       const finalGas = gas || registro.gas
-      const isAcetileno = finalGas.toLowerCase() === 'acetileno'
+      const finalGasLower = (finalGas || '').toLowerCase()
+      const isKg = finalGasLower === 'acetileno' || finalGasLower === 'co2'
 
       // 1. Crear nuevo tubo como propio usando la serie como ID
       const nuevoTubo = await tx.tubo.create({
@@ -100,8 +101,8 @@ router.post('/:id/adquirir', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), asyn
           id: tuboId,
           serie: trimmedSerie,
           gas: finalGas,
-          capacidadLitros: isAcetileno ? null : (capacidadLitros !== undefined && capacidadLitros !== null && capacidadLitros !== '' ? Number(capacidadLitros) : registro.capacidadLitros),
-          capacidadKg: isAcetileno ? (capacidadKg !== undefined && capacidadKg !== null && capacidadKg !== '' ? Number(capacidadKg) : registro.capacidadKg) : null,
+          capacidadLitros: !isKg ? (capacidadLitros !== undefined && capacidadLitros !== null && capacidadLitros !== '' ? Number(capacidadLitros) : registro.capacidadLitros) : null,
+          capacidadKg: isKg ? (capacidadKg !== undefined && capacidadKg !== null && capacidadKg !== '' ? Number(capacidadKg) : registro.capacidadKg) : null,
           estado: 'DISPONIBLE',
           propietario: 'PROPIO',
           ubicacion: ubicacion || 'Depósito',

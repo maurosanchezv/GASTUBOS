@@ -435,7 +435,10 @@ export default function TuboDetallePage() {
                               whiteSpace: "nowrap",
                             }}
                           >
-                            {new Date(c.fechaCarga).toLocaleDateString("es-PY")}
+                            {new Date(c.fechaCarga).toLocaleString("es-PY", {
+                              dateStyle: "short",
+                              timeStyle: "short",
+                            })}
                           </td>
                           <td>{GAS_LABELS[c.tipoGas] || c.tipoGas}</td>
                           <td style={{ fontWeight: 600 }}>
@@ -527,7 +530,10 @@ export default function TuboDetallePage() {
                           Operador: {c.operador?.nombre || c.operador?.username}
                         </span>
                         <span style={{ fontFamily: "var(--font-mono)" }}>
-                          {new Date(c.fechaCarga).toLocaleDateString("es-PY")}
+                          {new Date(c.fechaCarga).toLocaleString("es-PY", {
+                            dateStyle: "short",
+                            timeStyle: "short",
+                          })}
                         </span>
                       </div>
 
@@ -600,7 +606,19 @@ export default function TuboDetallePage() {
                                 timeStyle: "short",
                               })}
                             </td>
-                            <td>{a.accion}</td>
+                            <td>
+                              <div style={{ fontWeight: 500 }}>{a.accion}</div>
+                              {a.metadata?.cantidad && (
+                                <div style={{ fontSize: 11, color: "var(--blue)", fontWeight: 600, marginTop: 2, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                  ⛽ {Number(a.metadata.cantidad).toLocaleString("es-PY")} {a.metadata.unidad === 'KG' ? 'kg' : 'm³'}
+                                </div>
+                              )}
+                              {a.metadata?.numero && !a.metadata?.cantidad && (
+                                <div style={{ fontSize: 11, color: "var(--purple, #8b5cf6)", fontWeight: 600, marginTop: 2, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                  📄 Remisión: {a.metadata.numero}
+                                </div>
+                              )}
+                            </td>
                             <td style={{ color: "var(--text-secondary)" }}>
                               {a.usuario?.username}
                             </td>
@@ -666,14 +684,26 @@ export default function TuboDetallePage() {
                             alignItems: "center",
                           }}
                         >
-                          <strong
-                            style={{
-                              fontSize: 13,
-                              color: "var(--text-primary)",
-                            }}
-                          >
-                            {a.accion}
-                          </strong>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                            <strong
+                              style={{
+                                fontSize: 13,
+                                color: "var(--text-primary)",
+                              }}
+                            >
+                              {a.accion}
+                            </strong>
+                            {a.metadata?.cantidad && (
+                              <span style={{ fontSize: 11, color: "var(--blue)", fontWeight: 600 }}>
+                                ⛽ Carga: {Number(a.metadata.cantidad).toLocaleString("es-PY")} {a.metadata.unidad === 'KG' ? 'kg' : 'm³'}
+                              </span>
+                            )}
+                            {a.metadata?.numero && !a.metadata?.cantidad && (
+                              <span style={{ fontSize: 11, color: "var(--purple, #8b5cf6)", fontWeight: 600 }}>
+                                📄 Remisión: {a.metadata.numero}
+                              </span>
+                            )}
+                          </div>
                           <span
                             style={{
                               fontSize: 10,

@@ -552,29 +552,22 @@ export default function EntregasPage() {
       let defaultUnidad = 'KG'
       let defaultPrecio = 0
 
+      const gasNorm = r.data.gas ? r.data.gas.toString().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : ''
+      const esM3 = gasNorm.includes('oxigeno') || gasNorm.includes('argon') || gasNorm.includes('nitrogeno') || gasNorm.includes('aire') || gasNorm.includes('mezcla')
+      defaultUnidad = esM3 ? 'M3' : 'KG'
+
       if (r.data.estado === 'DISPONIBLE') {
         // Para un tubo DISPONIBLE (envase en depósito sin carga), la cantidad de gas es 0
         defaultCant = 0
-        const gasNorm = r.data.gas?.toLowerCase() || ''
-        defaultUnidad = (gasNorm.includes('oxigeno') || gasNorm.includes('argon') || gasNorm.includes('nitrogeno') || gasNorm.includes('aire') || gasNorm.includes('mezcla')) ? 'M3' : 'KG'
         defaultPrecio = 0
       } else if (r.data.cargas && r.data.cargas.length > 0) {
         const ultimaCarga = r.data.cargas[0]
-        defaultCant = Number(ultimaCarga.cantidad)
-        defaultUnidad = ultimaCarga.unidad
+        defaultCant = Number(ultimaCarga.cantidad || 0)
+        defaultUnidad = ultimaCarga.unidad || defaultUnidad
         defaultPrecio = Number(ultimaCarga.precioUnitario || 0)
       } else {
         defaultCant = r.data.capacidadKg ? Number(r.data.capacidadKg) : (Number(r.data.capacidadLitros) || 0)
-        const gasNorm = r.data.gas?.toLowerCase() || ''
-        defaultUnidad = (gasNorm.includes('oxigeno') || gasNorm.includes('argon') || gasNorm.includes('nitrogeno') || gasNorm.includes('aire') || gasNorm.includes('mezcla')) ? 'M3' : 'KG'
-        
-        // Buscar precio sugerido para el tipo de gas
-        const gasEnum = GAS_STRING_TO_ENUM[r.data.gas] || ''
-        try {
-          const pr = precios.length > 0 ? precios : (await api.get('/precios')).data
-          const priceInfo = pr.find(p => p.gas === gasEnum)
-          defaultPrecio = priceInfo ? Number(priceInfo.precioUnitario) : 0
-        } catch {}
+        defaultPrecio = 0
       }
 
       setForm(f => ({ 
@@ -1637,49 +1630,99 @@ function TuboChip({ tuboId, detail, onChange, onRemove }) {
   useEffect(() => {
     api.get(`/tubos/${tuboId}`).then(r => setTubo(r.data)).catch(() => {})
   }, [tuboId])
+
+  const esPrecioEditable = tubo?.estado === 'DISPONIBLE'
+  const cant = Number(detail?.cantidadGas || 0)
+  const prec = Number(detail?.precioUnitario || 0)
+  const subtotal = cant > 0 ? (cant * prec) : prec
+
   return (
     <div style={{
-      display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12,
-      padding: '10px 14px', background: 'var(--surface-2)',
-      borderRadius: 8, marginBottom: 8, fontSize: 12,
-      border: '1px solid var(--border)'
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 8,
+      padding: '12px 14px',
+      background: 'var(--surface-2)',
+      borderRadius: 8,
+      marginBottom: 8,
+      fontSize: 12,
+      border: '1px solid var(--border)',
+      boxSizing: 'border-box',
+      width: '100%',
+      overflow: 'hidden'
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 200px' }}>
-        {tubo && <GasDot gas={tubo.gas} />}
-        <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--blue)' }}>{tuboId}</span>
-        {tubo && (
-          <>
-            <span style={{ color: 'var(--text-secondary)' }}>{tubo.gas}</span>
-            <StateBadge estado={tubo.estado} />
-            {tubo.camion && (
-              <span className="badge badge-orange" style={{ fontWeight: 500 }} title={`En camión ${tubo.camion.placa}`}>
-                🚚 {tubo.camion.placa}
-              </span>
-            )}
-          </>
-        )}
+      {/* Encabezado: ID + Gas + Estado + Botón Quitar */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
+          {tubo && <GasDot gas={tubo.gas} />}
+          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--blue)', fontSize: 13 }}>{tuboId}</span>
+          {tubo && (
+            <>
+              <span style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>{tubo.gas}</span>
+              <StateBadge estado={tubo.estado} />
+              {tubo.camion && (
+                <span className="badge badge-orange" style={{ fontWeight: 500 }} title={`En camión ${tubo.camion.placa}`}>
+                  🚚 {tubo.camion.placa}
+                </span>
+              )}
+            </>
+          )}
+        </div>
+        <button type="button" className="btn-icon" onClick={() => onRemove(tuboId)} title="Quitar tubo" style={{ flexShrink: 0 }}>
+          <i className="ti ti-x" />
+        </button>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '0 0 auto', flexWrap: 'wrap' }}>
+
+      {/* Fila Inferior: Cantidad, Unidad, Precio y Subtotal en Flex Responsive */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: 8,
+        paddingTop: 8,
+        borderTop: '1px dashed var(--border)',
+      }}>
+        {/* Cantidad + Unidad */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <label style={{ fontSize: 10, color: 'var(--text-muted)' }}>CANTIDAD:</label>
+          <label style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>CANT:</label>
           <input 
             type="number" 
-            min="0" 
-            step="0.001"
             value={detail?.cantidadGas ?? ''} 
-            onChange={e => onChange(tuboId, 'cantidadGas', e.target.value)}
-            style={{ width: 80, minHeight: 32, padding: '4px 8px', fontSize: 13 }}
+            disabled
+            title="Cantidad fija según la carga o capacidad del tubo"
+            style={{ 
+              width: 65, 
+              minHeight: 30, 
+              padding: '2px 6px', 
+              fontSize: 12,
+              cursor: 'not-allowed',
+              opacity: 0.75,
+              background: 'var(--surface-3, #f5f5f5)',
+              textAlign: 'center'
+            }}
           />
+          <select 
+            value={detail?.unidadGas ?? 'KG'} 
+            disabled
+            title="Unidad predeterminada según el tipo de gas"
+            style={{ 
+              width: 58, 
+              minHeight: 30, 
+              padding: '2px 4px', 
+              fontSize: 12,
+              cursor: 'not-allowed',
+              opacity: 0.75,
+              background: 'var(--surface-3, #f5f5f5)'
+            }}
+          >
+            <option value="KG">KG</option>
+            <option value="M3">M³</option>
+          </select>
         </div>
-        <select 
-          value={detail?.unidadGas ?? 'KG'} 
-          onChange={e => onChange(tuboId, 'unidadGas', e.target.value)}
-          style={{ width: 68, minHeight: 32, padding: '4px 6px', fontSize: 13 }}
-        >
-          <option value="KG">KG</option>
-          <option value="M3">M³</option>
-        </select>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 4 }}>
+
+        {/* Precio Unitario */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <label style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>PRECIO (Gs):</label>
           <input 
             type="number" 
@@ -1688,23 +1731,28 @@ function TuboChip({ tuboId, detail, onChange, onRemove }) {
             placeholder="0"
             value={detail?.precioUnitario ?? ''} 
             onChange={e => onChange(tuboId, 'precioUnitario', e.target.value)}
-            style={{ width: 95, minHeight: 32, padding: '4px 8px', fontSize: 13, fontFamily: 'var(--font-mono)' }}
+            disabled={!esPrecioEditable}
+            title={!esPrecioEditable ? `Precio fijo precalculado para tubo ${tubo?.estado}` : 'Precio unitario editable'}
+            style={{ 
+              width: 90, 
+              minHeight: 30, 
+              padding: '2px 6px', 
+              fontSize: 12, 
+              fontFamily: 'var(--font-mono)',
+              cursor: !esPrecioEditable ? 'not-allowed' : 'text',
+              opacity: !esPrecioEditable ? 0.75 : 1,
+              background: !esPrecioEditable ? 'var(--surface-3, #f5f5f5)' : undefined,
+            }}
           />
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 6 }}>
+
+        {/* Subtotal */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>SUBTOTAL:</span>
           <span style={{ fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--blue)' }}>
-            {(() => {
-              const cant = Number(detail?.cantidadGas || 0)
-              const prec = Number(detail?.precioUnitario || 0)
-              const sub = cant > 0 ? (cant * prec) : prec
-              return sub.toLocaleString('es-PY')
-            })()} Gs
+            {subtotal.toLocaleString('es-PY')} Gs
           </span>
         </div>
-        <button type="button" className="btn-icon" onClick={() => onRemove(tuboId)} title="Quitar">
-          <i className="ti ti-x" />
-        </button>
       </div>
     </div>
   )

@@ -87,15 +87,17 @@ export default function CilindrosTercerosPage() {
 
     let capVal = isKg ? (capK !== '' ? capK : capL) : (capL !== '' ? capL : capK)
     if ((capVal === '' || capVal === null || isNaN(capVal)) && item.observaciones) {
-      const matchNum = item.observaciones.replace(/#\d+/g, '').match(/(\d+(?:\.\d+)?)/)
+      const targetPart = item.observaciones.includes('Detalle:') ? item.observaciones.split('Detalle:')[1] : item.observaciones
+      const cleanObs = targetPart.replace(/#\d+/g, '').replace(/co2|co₂|m3|m³/gi, ' ')
+      const matchNum = cleanObs.match(/(\d+(?:\.\d+)?)/)
       if (matchNum) capVal = Number(matchNum[1])
     }
 
     setForm({
       serie: '',
       gas: item.gas || 'Oxígeno',
-      capacidadLitros: isKg ? '' : (capVal || 6),
-      capacidadKg: isKg ? (capVal || 10) : '',
+      capacidadLitros: isKg ? '' : (capVal || ''),
+      capacidadKg: isKg ? (capVal || '') : '',
       observaciones: `Adquirido desde recepción de tercero (${item.cliente?.nombre || 'Cliente'}).`,
       ubicacion: 'Depósito'
     })

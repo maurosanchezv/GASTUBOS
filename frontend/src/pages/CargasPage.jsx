@@ -64,15 +64,9 @@ export default function CargasPage() {
   const [filtroGas, setFiltroGas] = useState('')
   const [filtroDesde, setFiltroDesde] = useState('')
   const [filtroHasta, setFiltroHasta] = useState('')
-  const [precios,  setPrecios]  = useState([])
-  const [calcPrecio, setCalcPrecio] = useState('')
+  const [calcPrecio, setCalcPrecio] = useState('')       // SIEMPRE manual, nunca se recalcula
   const [calcMonto, setCalcMonto] = useState('')
-
-  useEffect(() => {
-    api.get('/precios')
-      .then(res => setPrecios(res.data))
-      .catch(() => {})
-  }, [])
+  const [lastEditedField, setLastEditedField] = useState('cantidad') // 'cantidad' | 'monto'
 
   const limit = 50
 
@@ -88,7 +82,7 @@ export default function CargasPage() {
       // Ordenar: VACIO primero, luego resto
       todos.sort((a, b) => {
         const orden = { VACIO: 0, DEVUELTO: 1, DISPONIBLE: 2, EN_REVISION: 3, RESERVADO: 4 }
-        return (orden[a.estado] ?? 9) - (orden[b.estado] ?? 9)
+        return (orden[a.estado] ?? 99) - (orden[b.estado] ?? 99)
       })
       setTubos(todos)
     } catch { toast('Error al cargar tubos', 'error') }
@@ -99,11 +93,15 @@ export default function CargasPage() {
   const loadHistorial = useCallback(async () => {
     setLoading(true)
     try {
-      const params = new URLSearchParams({ page, limit })
-      if (filtroGas)   params.set('tipoGas', filtroGas)
-      if (filtroDesde) params.set('desde', new Date(filtroDesde).toISOString())
-      if (filtroHasta) params.set('hasta', new Date(filtroHasta + 'T23:59:59').toISOString())
-      const res = await api.get(`/cargas?${params}`)
+      const p = { page, limit }
+      if (filtroGas) p.tipoGas = filtroGas
+      if (filtroDesde) p.desde = new Date(filtroDesde).toISOString()
+      if (filtroHasta) {
+        const h = new Date(filtroHasta)
+        h.setHours(23, 59, 59, 999)
+        p.hasta = h.toISOString()
+      }
+      const res = await api.get('/cargas', { params: p })
       setCargas(res.data.cargas)
       setTotal(res.data.total)
     } catch { toast('Error al cargar historial', 'error') }
@@ -122,11 +120,6 @@ export default function CargasPage() {
 
     setTuboSeleccionado(tubo)
 
-    // Cargar precio sugerido y calcular monto estimado para la capacidad del tubo
-    const priceInfo = precios.find(p => p.gas === gasEnum)
-    const price = priceInfo ? Number(priceInfo.precioUnitario) : ''
-    const montoEst = (capVal && price) ? Math.round(capVal * price).toString() : ''
-
     setForm({
       ...FORM_INICIAL,
       tuboId:  tubo.id,
@@ -135,24 +128,18 @@ export default function CargasPage() {
       cantidad: capStr,
     })
 
-    setCalcPrecio(price)
-    setCalcMonto(montoEst)
+    setCalcPrecio('')
+    setCalcMonto('')
+    setLastEditedField('cantidad')
 
     setModal(true)
   }
 
   function handleGasChange(tipoGas) {
     setForm(prev => ({ ...prev, tipoGas, unidad: TIPO_GAS_UNIDAD[tipoGas] || '' }))
-    const priceInfo = precios.find(p => p.gas === tipoGas)
-    const price = priceInfo ? Number(priceInfo.precioUnitario) : ''
-    setCalcPrecio(price)
-
-    if (calcMonto && price) {
-      const qty = (Number(calcMonto) / price).toFixed(3)
-      setForm(prev => ({ ...prev, cantidad: qty }))
-    } else {
-      setForm(prev => ({ ...prev, cantidad: '' }))
-    }
+    setCalcPrecio('')
+    setCalcMonto('')
+    setLastEditedField('cantidad')
   }
 
   function abrirModalSalon() {
@@ -164,51 +151,56 @@ export default function CargasPage() {
       unidad: 'KG',
     })
 
-    // Cargar precio sugerido para el cálculo (por defecto CO2)
-    const priceInfo = precios.find(p => p.gas === 'CO2')
-    setCalcPrecio(priceInfo ? Number(priceInfo.precioUnitario) : '')
+    setCalcPrecio('')
     setCalcMonto('')
+    setLastEditedField('cantidad')
 
     setModal(true)
   }
 
-  const handleCalcMontoChange = (monto) => {
-    setCalcMonto(monto)
-    const m = Number(monto)
-    const p = Number(calcPrecio)
-    if (m && p) {
-      const qty = (m / p).toFixed(3)
-      setForm(prev => ({ ...prev, cantidad: qty }))
-    } else {
-      setForm(prev => ({ ...prev, cantidad: '' }))
-    }
-  }
-
-  const handleCalcPrecioChange = (precio) => {
-    setCalcPrecio(precio)
-    const p = Number(precio)
-    if (p) {
-      if (calcMonto) {
-        const qty = (Number(calcMonto) / p).toFixed(3)
-        setForm(prev => ({ ...prev, cantidad: qty }))
-      } else if (form.cantidad) {
-        const m = Math.round(Number(form.cantidad) * p)
-        setCalcMonto(m ? m.toString() : '')
-      }
-    } else {
-      setForm(prev => ({ ...prev, cantidad: '' }))
-    }
-  }
-
+  // 1. Cambia Cantidad -> recalcula Monto (T = Q × U). El precio no se toca.
   const handleCantidadChange = (cantidad) => {
     setForm(prev => ({ ...prev, cantidad }))
-    const qty = Number(cantidad)
-    const p = Number(calcPrecio)
-    if (qty && p) {
-      const m = Math.round(qty * p)
-      setCalcMonto(m ? m.toString() : '')
-    } else {
+    setLastEditedField('cantidad')
+    const q = Number(cantidad)
+    const u = Number(calcPrecio)
+
+    if (u > 0 && !isNaN(q) && cantidad !== '' && q >= 0) {
+      setCalcMonto(Math.round(q * u).toString())
+    } else if (cantidad === '') {
       setCalcMonto('')
+    }
+  }
+
+  // 2. Cambia Monto (el cliente trae plata fija) -> recalcula Cantidad (Q = T / U). El precio no se toca.
+  const handleCalcMontoChange = (monto) => {
+    setCalcMonto(monto)
+    setLastEditedField('monto')
+    const m = Number(monto)
+    const u = Number(calcPrecio)
+
+    if (u > 0 && !isNaN(m) && monto !== '' && m >= 0) {
+      const q = m / u
+      setForm(prev => ({ ...prev, cantidad: q.toFixed(3) }))
+    } else if (monto === '') {
+      setForm(prev => ({ ...prev, cantidad: '' }))
+    }
+  }
+
+  // 3. Cambia Precio -> recalcula SOLO el campo (Cantidad o Monto) que no fue el último editado por el usuario.
+  //    El precio nunca se recalcula a sí mismo.
+  const handleCalcPrecioChange = (precio) => {
+    setCalcPrecio(precio)
+    const u = Number(precio)
+
+    if (isNaN(u) || precio === '' || u < 0) return
+
+    if (lastEditedField === 'monto' && calcMonto !== '') {
+      const m = Number(calcMonto)
+      if (u > 0) setForm(prev => ({ ...prev, cantidad: (m / u).toFixed(3) }))
+    } else if (form.cantidad !== '') {
+      const q = Number(form.cantidad)
+      setCalcMonto(Math.round(q * u).toString())
     }
   }
 
@@ -633,11 +625,19 @@ export default function CargasPage() {
               />
             </FormGroup>
           </div>
-          {calcMonto && calcPrecio && (
-            <div style={{ fontSize: 11, color: 'var(--blue)', marginTop: 4, fontWeight: 600 }}>
-              Cálculo: {Number(calcMonto).toLocaleString('de-DE')} Gs. / {Number(calcPrecio).toLocaleString('de-DE')} Gs. = {formatNumberSpanish(Number(calcMonto) / Number(calcPrecio))} {form.unidad}
+          {!calcPrecio || Number(calcPrecio) <= 0 ? (
+            <div style={{ fontSize: 11, color: 'var(--amber, #d97706)', marginTop: 6, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+              <i className="ti ti-info-circle" /> Ingresá el precio unitario para calcular
             </div>
-          )}
+          ) : Number(form.cantidad) > 0 && calcMonto !== '' ? (
+            <div style={{ fontSize: 11, color: 'var(--blue)', marginTop: 6, fontWeight: 600 }}>
+              {lastEditedField === 'monto' ? (
+                <>Cálculo: {Number(calcMonto).toLocaleString('es-PY')} Gs. ÷ {Number(calcPrecio).toLocaleString('es-PY')} Gs./{form.unidad || 'unidad'} = {formatNumberSpanish(Number(form.cantidad))} {form.unidad || 'unidad'}</>
+              ) : (
+                <>Cálculo: {formatNumberSpanish(Number(form.cantidad))} {form.unidad || 'unidad'} × {Number(calcPrecio).toLocaleString('es-PY')} Gs./{form.unidad || 'unidad'} = {Number(calcMonto).toLocaleString('es-PY')} Gs.</>
+              )}
+            </div>
+          ) : null}
         </div>
 
         <FormGroup label="Observaciones">

@@ -464,6 +464,14 @@ textarea { resize: vertical; min-height: 72px; }
   box-shadow: 0 16px 48px rgba(0,0,0,.15);
   overflow: hidden; /* El scroll lo manejará el body */
 }
+@keyframes modal-shake {
+  0%, 100% { transform: scale(1) translateX(0); }
+  20%, 60% { transform: scale(1.01) translateX(-7px); }
+  40%, 80% { transform: scale(1.01) translateX(7px); }
+}
+.modal.modal-shaking {
+  animation: modal-shake 0.3s cubic-bezier(.36,.07,.19,.97);
+}
 .modal-header {
   padding: 16px 20px;
   border-bottom: 1px solid var(--border);
