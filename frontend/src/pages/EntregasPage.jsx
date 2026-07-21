@@ -21,7 +21,7 @@ delete L.Icon.Default.prototype._getIconUrl
 L.Icon.Default.mergeOptions({ iconUrl, iconRetinaUrl, shadowUrl })
 
 const EMPTY = {
-  clienteId: '', direccionEntrega: '', tipoOperacion: 'ENTREGA_SIMPLE',
+  clienteId: '', sucursalId: '', direccionEntrega: '', tipoOperacion: 'ENTREGA_SIMPLE',
   repartidorId: '', observaciones: '', tubosIds: [],
   tubosDetalles: [],
   fechaVencimiento: '', referencia: '',
@@ -395,6 +395,11 @@ export default function EntregasPage() {
     })
 
     mapaPickerInstance.current = { map, marker }
+    setTimeout(() => {
+      if (mapaPickerInstance.current?.map) {
+        mapaPickerInstance.current.map.invalidateSize()
+      }
+    }, 200)
   }, [mapaPickerAbierto])
 
   // Inicializar mapa historial cuando se abre
@@ -660,6 +665,57 @@ export default function EntregasPage() {
   const clienteSeleccionado = clientes.find(c => c.id === form.clienteId)
   const entregasConCoords = entregas.filter(e => e.latitud && e.longitud && e.confirmada && !e.cancelada)
 
+  const handleClienteChange = (e) => {
+    const cid = e.target.value
+    const c = clientes.find(x => x.id === cid)
+    if (!c) {
+      setForm(f => ({ ...f, clienteId: '', sucursalId: '', direccionEntrega: '', latitud: null, longitud: null }))
+      return
+    }
+
+    const sucs = c.sucursales || []
+    if (sucs.length > 0) {
+      const principal = sucs.find(s => s.esPrincipal) || sucs[0]
+      lastSelectedAddress.current = principal.direccion
+      setForm(f => ({
+        ...f,
+        clienteId: cid,
+        sucursalId: principal.id,
+        direccionEntrega: principal.direccion,
+        latitud: principal.latitud || null,
+        longitud: principal.longitud || null,
+      }))
+    } else {
+      lastSelectedAddress.current = c.direccion || ''
+      setForm(f => ({
+        ...f,
+        clienteId: cid,
+        sucursalId: '',
+        direccionEntrega: c.direccion || '',
+        latitud: c.latitud || null,
+        longitud: c.longitud || null,
+      }))
+    }
+  }
+
+  const handleSucursalChange = (e) => {
+    const sid = e.target.value
+    if (!clienteSeleccionado) return
+    const suc = (clienteSeleccionado.sucursales || []).find(s => s.id === sid)
+    if (suc) {
+      lastSelectedAddress.current = suc.direccion
+      setForm(f => ({
+        ...f,
+        sucursalId: suc.id,
+        direccionEntrega: suc.direccion,
+        latitud: suc.latitud || null,
+        longitud: suc.longitud || null,
+      }))
+    } else {
+      setForm(f => ({ ...f, sucursalId: '' }))
+    }
+  }
+
   return (
     <>
       <PageHeader title="Entregas" subtitle="Registrar y consultar entregas de tubos" />
@@ -681,7 +737,7 @@ export default function EntregasPage() {
 
                     <div className="form-group">
                       <label className="form-label">Cliente <span className="form-required">*</span></label>
-                      <select value={form.clienteId} onChange={f('clienteId')} required>
+                      <select value={form.clienteId} onChange={handleClienteChange} required>
                         <option value="">Seleccionar cliente...</option>
                         {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
                       </select>
@@ -695,26 +751,30 @@ export default function EntregasPage() {
                       </select>
                     </div>
 
+                    {/* Selector de Sucursal / Local si el cliente tiene múltiples */}
+                    {clienteSeleccionado?.sucursales?.length > 0 && (
+                      <div className="form-group col-span-2" style={{ background: 'var(--surface-2)', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)' }}>
+                        <label className="form-label" style={{ margin: 0, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <i className="ti ti-building-store" style={{ color: 'var(--blue)' }} />
+                          Local / Sucursal de Destino <span className="form-required">*</span>
+                        </label>
+                        <select value={form.sucursalId || ''} onChange={handleSucursalChange} required>
+                          <option value="">-- Seleccionar local de destino --</option>
+                          {clienteSeleccionado.sucursales.map(s => (
+                            <option key={s.id} value={s.id}>
+                              {s.nombre} {s.esPrincipal ? '(Matriz)' : ''} — {s.direccion} {s.ciudad ? `(${s.ciudad})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
                     {/* Dirección + Geolocalización */}
                     <div className="form-group col-span-2">
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                      <div style={{ marginBottom: 4 }}>
                         <label className="form-label" style={{ margin: 0 }}>
                           Dirección de entrega <span className="form-required">*</span>
                         </label>
-                        {clienteSeleccionado?.direccion && form.direccionEntrega !== clienteSeleccionado.direccion && (
-                          <button
-                            type="button"
-                            className="btn btn-sm"
-                            onClick={() => {
-                              lastSelectedAddress.current = clienteSeleccionado.direccion
-                              setForm(f => ({ ...f, direccionEntrega: clienteSeleccionado.direccion }))
-                              fetchDirecciones(clienteSeleccionado.direccion)
-                            }}
-                            style={{ fontSize: 11, padding: '2px 8px', height: 'auto', background: 'var(--surface-2)', border: '1px solid var(--border)' }}
-                          >
-                            <i className="ti ti-map-pin" style={{ color: 'var(--blue)' }} /> Usar dirección del cliente
-                          </button>
-                        )}
                       </div>
                       <div ref={addrRef} style={{ position: 'relative' }}>
                         <input type="text" value={form.direccionEntrega} onChange={f('direccionEntrega')}

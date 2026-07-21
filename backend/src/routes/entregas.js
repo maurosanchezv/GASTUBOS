@@ -60,6 +60,7 @@ function parseGasYCapacidadInfo(str, tuboReferencia) {
 
 const entregaSchema = z.object({
   clienteId:        z.string(),
+  sucursalId:       z.string().optional().nullable(),
   direccionEntrega: z.string().min(1),
   latitud:          z.number().optional(),
   longitud:         z.number().optional(),
@@ -124,6 +125,7 @@ router.get('/', async (req, res, next) => {
         where,
         include: {
           cliente:    { select: { id: true, nombre: true, ruc: true, telefono: true, contacto: true } },
+          sucursal:   true,
           creadoPor:  { select: { username: true, nombre: true } },
           repartidor: { select: { username: true, nombre: true } },
           detalles:   { include: { tubo: { select: { id: true, gas: true, capacidadLitros: true, capacidadKg: true } } } },
@@ -150,6 +152,7 @@ router.get('/numero/:numero', async (req, res, next) => {
       where: { numero: req.params.numero },
       include: {
         cliente:    true,
+        sucursal:   true,
         creadoPor:  { select: { username: true, nombre: true } },
         repartidor: { select: { username: true, nombre: true } },
         detalles:   { include: { tubo: { select: { id: true, gas: true, capacidadLitros: true, capacidadKg: true } } } },
@@ -267,6 +270,7 @@ router.post('/', requireRol('ADMIN', 'OPERADOR'), async (req, res, next) => {
         data: {
           numero,
           clienteId:        data.clienteId,
+          sucursalId:       data.sucursalId || null,
           direccionEntrega: data.direccionEntrega,
           latitud:          data.latitud,
           longitud:         data.longitud,
@@ -279,7 +283,7 @@ router.post('/', requireRol('ADMIN', 'OPERADOR'), async (req, res, next) => {
             create: detallesAInsertar,
           },
         },
-        include: { detalles: true },
+        include: { detalles: true, sucursal: true },
       })
 
       // 4. Actualizar estado de todos los tubos a RESERVADO (En Tránsito)

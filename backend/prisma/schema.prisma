@@ -124,8 +124,32 @@ model Cliente {
   entregas    Entrega[]
   recambios   Recambio[]
   cilindrosTerceros CilindroTerceroInfo[]
+  sucursales  SucursalCliente[]
 
   @@map("clientes")
+}
+
+// ─── SUCURSALES DE CLIENTES ───────────────────────────────────────────────────
+
+model SucursalCliente {
+  id          String   @id @default(cuid())
+  clienteId   String
+  cliente     Cliente  @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  nombre      String   // Ej: "Casa Matriz", "Sucursal San Lorenzo", "Planta Luque"
+  direccion   String   // Dirección física del local
+  ciudad      String?  // Ej: "San Lorenzo", "Luque", "Encarnación"
+  telefono    String?  // Teléfono específico del local
+  contacto    String?  // Persona encargada en este local
+  latitud     Float?   // Para mapa/GPS
+  longitud    Float?   // Para mapa/GPS
+  esPrincipal Boolean  @default(false)
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  entregas    Entrega[]
+
+  @@map("sucursales_clientes")
 }
 
 // ─── TUBOS ────────────────────────────────────────────────────────────────────
@@ -176,6 +200,8 @@ model Entrega {
   numero          String        @unique  // E-2025-001, generado en app
   clienteId       String
   cliente         Cliente       @relation(fields: [clienteId], references: [id])
+  sucursalId      String?
+  sucursal        SucursalCliente? @relation(fields: [sucursalId], references: [id])
   direccionEntrega String
   latitud         Float?
   longitud        Float?

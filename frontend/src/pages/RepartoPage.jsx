@@ -1046,7 +1046,14 @@ export default function RepartoPage() {
                         <span className={`badge ${tipo.className}`}>{tipo.label}</span>
                       </div>
 
-                      <div className="reparto-card-cli">{e.cliente?.nombre}</div>
+                      <div className="reparto-card-cli">
+                        {e.cliente?.nombre}
+                        {e.sucursal && (
+                          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--blue)', marginLeft: 8 }}>
+                            📍 {e.sucursal.nombre}
+                          </span>
+                        )}
+                      </div>
 
                       <div className="reparto-card-addr">
                         <i className="ti ti-map-pin" style={{ color: 'var(--text-muted)', marginTop: 2 }} />
