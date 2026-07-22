@@ -99,16 +99,23 @@ export default function CilindrosTercerosPage() {
       capacidadLitros: isKg ? '' : (capVal || ''),
       capacidadKg: isKg ? (capVal || '') : '',
       observaciones: `Adquirido desde recepción de tercero (${item.cliente?.nombre || 'Cliente'}).`,
-      ubicacion: 'Depósito'
+      ubicacion: 'Depósito',
+      propietario: 'PROPIO',
+      propietarioClienteId: item.clienteId || ''
     })
     setAdquirirModal(true)
   }
 
-  // Enviar formulario para registrar cilindro adquirido como PROPIO
+  // Enviar formulario para registrar cilindro adquirido
   const handleAdquirirSubmit = async (e) => {
     e.preventDefault()
     if (!form.serie.trim()) {
       toast('Debe ingresar el número de serie físico del cilindro', 'error')
+      return
+    }
+
+    if (form.propietario === 'CLIENTE' && !form.propietarioClienteId) {
+      toast('Debe seleccionar el cliente propietario', 'error')
       return
     }
 
@@ -121,12 +128,14 @@ export default function CilindrosTercerosPage() {
         capacidadLitros: isAcetileno ? undefined : Number(form.capacidadLitros),
         capacidadKg: isAcetileno ? Number(form.capacidadKg) : undefined,
         ubicacion: form.ubicacion,
-        observaciones: form.observaciones
+        observaciones: form.observaciones,
+        propietario: form.propietario,
+        propietarioClienteId: form.propietario === 'CLIENTE' ? form.propietarioClienteId : undefined,
       }
 
       await api.post(`/cilindros-terceros/${selectedItem.id}/adquirir`, payload)
 
-      toast(`Cilindro adquirido y registrado como propio (${nombre_empresa || 'Empresa'}) en estado DISPONIBLE`, 'success')
+      toast(`Cilindro adquirido y registrado en catálogo (${form.propietario === 'CLIENTE' ? 'Cliente' : nombre_empresa || 'Empresa'}) en estado DISPONIBLE`, 'success')
       setAdquirirModal(false)
       load()
     } catch (err) {
@@ -446,6 +455,31 @@ export default function CilindrosTercerosPage() {
                   <option value="">Seleccionar...</option>
                   {[1, 1.5, 2.5, 3, 4, 5, 6, 6.5, 7, 7.15, 7.5, 8.5].map(m3 => (
                     <option key={m3} value={m3}>{m3} m³</option>
+                  ))}
+                </select>
+              </FormGroup>
+            )}
+
+            <FormGroup label="Propietario del Cilindro">
+              <select
+                value={form.propietario}
+                onChange={e => setForm(prev => ({ ...prev, propietario: e.target.value }))}
+              >
+                <option value="PROPIO">{nombre_empresa || 'Propio de la Empresa'}</option>
+                <option value="CLIENTE">Cliente</option>
+              </select>
+            </FormGroup>
+
+            {form.propietario === 'CLIENTE' && (
+              <FormGroup label="Cliente Propietario *" required>
+                <select
+                  value={form.propietarioClienteId}
+                  onChange={e => setForm(prev => ({ ...prev, propietarioClienteId: e.target.value }))}
+                  required
+                >
+                  <option value="">Seleccionar cliente...</option>
+                  {clientes.map(c => (
+                    <option key={c.id} value={c.id}>{c.nombre} (RUC: {c.ruc || '—'})</option>
                   ))}
                 </select>
               </FormGroup>

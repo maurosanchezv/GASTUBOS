@@ -54,10 +54,14 @@ router.get('/', async (req, res, next) => {
 router.post('/:id/adquirir', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
   try {
     const { id } = req.params
-    const { serie, gas, capacidadLitros, capacidadKg, ubicacion, observaciones } = req.body
+    const { serie, gas, capacidadLitros, capacidadKg, ubicacion, observaciones, propietario, propietarioClienteId } = req.body
 
     if (!serie || !serie.trim()) {
       return res.status(400).json({ error: 'El número de serie del cilindro es obligatorio' })
+    }
+
+    if (propietario === 'CLIENTE' && !propietarioClienteId) {
+      return res.status(400).json({ error: 'Debe seleccionar el cliente propietario' })
     }
 
     const registro = await prisma.cilindroTerceroInfo.findUnique({
@@ -95,7 +99,7 @@ router.post('/:id/adquirir', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), asyn
       const finalGasLower = (finalGas || '').toLowerCase()
       const isKg = finalGasLower === 'acetileno' || finalGasLower === 'co2'
 
-      // 1. Crear nuevo tubo como propio usando la serie como ID
+      // 1. Crear nuevo tubo usando la serie como ID con el propietario correspondiente
       const nuevoTubo = await tx.tubo.create({
         data: {
           id: tuboId,
@@ -104,7 +108,8 @@ router.post('/:id/adquirir', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), asyn
           capacidadLitros: !isKg ? (capacidadLitros !== undefined && capacidadLitros !== null && capacidadLitros !== '' ? Number(capacidadLitros) : registro.capacidadLitros) : null,
           capacidadKg: isKg ? (capacidadKg !== undefined && capacidadKg !== null && capacidadKg !== '' ? Number(capacidadKg) : registro.capacidadKg) : null,
           estado: 'DISPONIBLE',
-          propietario: 'PROPIO',
+          propietario: propietario || 'PROPIO',
+          propietarioClienteId: propietario === 'CLIENTE' ? propietarioClienteId : null,
           ubicacion: ubicacion || 'Depósito',
           observaciones: observaciones || `Adquirido desde recepción de tercero (${registro.cliente?.nombre || 'Cliente'}). ID registro: ${id}`
         }
