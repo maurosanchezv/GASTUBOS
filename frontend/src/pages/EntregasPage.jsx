@@ -507,6 +507,23 @@ export default function EntregasPage() {
     }))
   }
 
+  async function quitarTuboAdicionalDeEntrega(entregaId, tuboId) {
+    if (!window.confirm(`¿Seguro que deseas eliminar el tubo ${tuboId} de este pedido?`)) return
+    try {
+      await api.delete(`/entregas/${entregaId}/quitar-tubo-adicional/${tuboId}`)
+      toast(`Tubo ${tuboId} removido del pedido con éxito`, 'success')
+      loadEntregas()
+      if (entregaSeleccionada) {
+        setEntregaSeleccionada(prev => ({
+          ...prev,
+          detalles: (prev.detalles || []).filter(d => d.tuboId !== tuboId)
+        }))
+      }
+    } catch (err) {
+      toast(err.response?.data?.error || 'Error al eliminar tubo del pedido', 'error')
+    }
+  }
+
   function updateTuboDetail(tuboId, key, value) {
     setForm(f => ({
       ...f,
@@ -1326,6 +1343,19 @@ export default function EntregasPage() {
                             <span style={{ fontSize: '9px', background: '#fef3c7', color: '#b45309', padding: '1px 4px', borderRadius: '3px', marginLeft: '4px', fontWeight: 'bold' }}>
                               (Agregado por repartidor)
                             </span>
+                          )}
+                          {!entregaSeleccionada.confirmada && !entregaSeleccionada.cancelada && d.esAdicional && (
+                            <button
+                              type="button"
+                              onClick={() => quitarTuboAdicionalDeEntrega(entregaSeleccionada.id, d.tuboId)}
+                              style={{
+                                border: 'none', background: 'transparent', color: '#ef4444',
+                                cursor: 'pointer', marginLeft: 6, padding: '2px 4px'
+                              }}
+                              title="Eliminar tubo adicional del pedido"
+                            >
+                              <i className="ti ti-trash" style={{ fontSize: 13 }} />
+                            </button>
                           )}
                           <br />
                           <span style={{ fontSize: '10px', color: '#666' }}>

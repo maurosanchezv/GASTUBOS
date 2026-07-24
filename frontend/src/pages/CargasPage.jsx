@@ -29,7 +29,7 @@ const GAS_STRING_TO_ENUM = {
   'Acetileno': 'ACETILENO',
 }
 
-const ESTADOS_CARGABLES = ['VACIO', 'DISPONIBLE', 'DEVUELTO', 'EN_REVISION', 'RESERVADO']
+const ESTADOS_CARGABLES = ['VACIO', 'DEVUELTO', 'DISPONIBLE']
 
 const formatNumberSpanish = (val) => {
   const num = Number(val)
@@ -81,7 +81,7 @@ export default function CargasPage() {
       const todos = resultados.flatMap(r => r.data.tubos).filter(t => !t.id.startsWith('CLI_') && !t.id.startsWith('CLI-') && !(t._count?.recambiosComoEntregado > 0))
       // Ordenar: VACIO primero, luego resto
       todos.sort((a, b) => {
-        const orden = { VACIO: 0, DEVUELTO: 1, DISPONIBLE: 2, EN_REVISION: 3, RESERVADO: 4 }
+        const orden = { VACIO: 0, DEVUELTO: 1, DISPONIBLE: 2 }
         return (orden[a.estado] ?? 99) - (orden[b.estado] ?? 99)
       })
       setTubos(todos)
@@ -439,92 +439,124 @@ export default function CargasPage() {
                         <th>Tubo</th>
                         <th>Gas cargado</th>
                         <th>Cantidad</th>
+                        <th>Precio Unit.</th>
+                        <th>Monto Total</th>
                         <th>Fecha</th>
                         <th>Operador</th>
                         <th>Obs.</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {cargas.map(c => (
-                        <tr key={c.id}>
-                          <td style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{c.numero}</td>
-                          <td>
-                            <span className={`badge ${c.tipoCarga === 'SALON' ? 'badge-REPARTIDOR' : 'badge-CARGADO'}`} style={{ fontSize: 10 }}>
-                              {c.tipoCarga === 'SALON' ? 'Salón' : 'Normal'}
-                            </span>
-                          </td>
-                          <td>
-                            {c.tubo ? (
-                              <>
-                                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600 }}>{c.tubo.id}</div>
-                                <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{c.tubo.serie}</div>
-                              </>
-                            ) : (
-                              <span style={{ fontSize: 12, fontStyle: 'italic', color: 'var(--text-muted)' }}>Carga en salón</span>
-                            )}
-                          </td>
-                          <td>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                              <GasDot gas={TIPO_GAS_LABEL[c.tipoGas]} />
-                              {TIPO_GAS_LABEL[c.tipoGas] || c.tipoGas}
-                            </div>
-                          </td>
-                          <td style={{ fontWeight: 600 }}>
-                            {Number(c.cantidad).toLocaleString('es-PY')} {c.unidad === 'KG' ? 'kg' : 'm³'}
-                          </td>
-                          <td style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
-                            {new Date(c.fechaCarga).toLocaleDateString('es-PY')}
-                          </td>
-                          <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                            {c.operador?.nombre || c.operador?.username}
-                          </td>
-                          <td style={{ fontSize: 11, color: 'var(--text-secondary)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {c.observaciones || '—'}
-                          </td>
-                        </tr>
-                      ))}
+                      {cargas.map(c => {
+                        const cant = Number(c.cantidad || 0)
+                        const pu = Number(c.precioUnitario || 0)
+                        const sub = cant * pu
+                        const uLabel = c.unidad === 'KG' ? 'kg' : 'm³'
+                        return (
+                          <tr key={c.id}>
+                            <td style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{c.numero}</td>
+                            <td>
+                              <span className={`badge ${c.tipoCarga === 'SALON' ? 'badge-REPARTIDOR' : 'badge-CARGADO'}`} style={{ fontSize: 10 }}>
+                                {c.tipoCarga === 'SALON' ? 'Salón' : 'Normal'}
+                              </span>
+                            </td>
+                            <td>
+                              {c.tubo ? (
+                                <>
+                                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600 }}>{c.tubo.id}</div>
+                                  <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{c.tubo.serie}</div>
+                                </>
+                              ) : (
+                                <span style={{ fontSize: 12, fontStyle: 'italic', color: 'var(--text-muted)' }}>Carga en salón</span>
+                              )}
+                            </td>
+                            <td>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <GasDot gas={TIPO_GAS_LABEL[c.tipoGas]} />
+                                {TIPO_GAS_LABEL[c.tipoGas] || c.tipoGas}
+                              </div>
+                            </td>
+                            <td style={{ fontWeight: 600 }}>
+                              {cant.toLocaleString('es-PY')} {uLabel}
+                            </td>
+                            <td style={{ fontSize: 11, fontFamily: 'var(--font-mono)' }}>
+                              {pu > 0 ? `${pu.toLocaleString('es-PY')} GS/${uLabel}` : '—'}
+                            </td>
+                            <td style={{ fontWeight: 600, fontFamily: 'var(--font-mono)', color: 'var(--blue)' }}>
+                              {sub > 0 ? `${sub.toLocaleString('es-PY')} GS` : '—'}
+                            </td>
+                            <td style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
+                              {new Date(c.fechaCarga).toLocaleDateString('es-PY')}
+                            </td>
+                            <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                              {c.operador?.nombre || c.operador?.username}
+                            </td>
+                            <td style={{ fontSize: 11, color: 'var(--text-secondary)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {c.observaciones || '—'}
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
 
                 {/* VISTA CARDS (Mobile) */}
                 <div className="mobile-list">
-                  {cargas.map(c => (
-                    <div key={c.id} className="list-card">
-                      <div className="list-card-header">
-                        <div className="list-card-title">{c.numero}</div>
-                        <div style={{ fontWeight: 700, color: 'var(--blue)' }}>
-                          {Number(c.cantidad).toLocaleString('es-PY')} {c.unidad === 'KG' ? 'kg' : 'm³'}
-                        </div>
-                      </div>
-                      <div className="list-card-body">
-                        <div className="list-card-item">
-                          <span className="list-card-label">Tubo</span>
-                          <span className="list-card-value">{c.tubo?.id || 'Carga en salón'}</span>
-                        </div>
-                        <div className="list-card-item">
-                          <span className="list-card-label">Gas</span>
-                          <span className="list-card-value" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <GasDot gas={TIPO_GAS_LABEL[c.tipoGas]} /> {TIPO_GAS_LABEL[c.tipoGas]}
-                          </span>
-                        </div>
-                        <div className="list-card-item">
-                          <span className="list-card-label">Fecha</span>
-                          <span className="list-card-value">{new Date(c.fechaCarga).toLocaleDateString('es-PY')}</span>
-                        </div>
-                        <div className="list-card-item">
-                          <span className="list-card-label">Operador</span>
-                          <span className="list-card-value">{c.operador?.username}</span>
-                        </div>
-                        {c.observaciones && (
-                          <div className="list-card-item col-span-2">
-                            <span className="list-card-label">Obs.</span>
-                            <span className="list-card-value" style={{ whiteSpace: 'normal', fontSize: 11 }}>{c.observaciones}</span>
+                  {cargas.map(c => {
+                    const cant = Number(c.cantidad || 0)
+                    const pu = Number(c.precioUnitario || 0)
+                    const sub = cant * pu
+                    const uLabel = c.unidad === 'KG' ? 'kg' : 'm³'
+                    return (
+                      <div key={c.id} className="list-card">
+                        <div className="list-card-header">
+                          <div className="list-card-title">{c.numero}</div>
+                          <div style={{ fontWeight: 700, color: 'var(--blue)' }}>
+                            {cant.toLocaleString('es-PY')} {uLabel}
                           </div>
-                        )}
+                        </div>
+                        <div className="list-card-body">
+                          <div className="list-card-item">
+                            <span className="list-card-label">Tubo</span>
+                            <span className="list-card-value">{c.tubo?.id || 'Carga en salón'}</span>
+                          </div>
+                          <div className="list-card-item">
+                            <span className="list-card-label">Gas</span>
+                            <span className="list-card-value" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <GasDot gas={TIPO_GAS_LABEL[c.tipoGas]} /> {TIPO_GAS_LABEL[c.tipoGas]}
+                            </span>
+                          </div>
+                          <div className="list-card-item">
+                            <span className="list-card-label">Precio Unit.</span>
+                            <span className="list-card-value" style={{ fontFamily: 'var(--font-mono)' }}>
+                              {pu > 0 ? `${pu.toLocaleString('es-PY')} GS/${uLabel}` : '—'}
+                            </span>
+                          </div>
+                          <div className="list-card-item">
+                            <span className="list-card-label">Monto Total</span>
+                            <span className="list-card-value" style={{ fontWeight: 600, color: 'var(--blue)', fontFamily: 'var(--font-mono)' }}>
+                              {sub > 0 ? `${sub.toLocaleString('es-PY')} GS` : '—'}
+                            </span>
+                          </div>
+                          <div className="list-card-item">
+                            <span className="list-card-label">Fecha</span>
+                            <span className="list-card-value">{new Date(c.fechaCarga).toLocaleDateString('es-PY')}</span>
+                          </div>
+                          <div className="list-card-item">
+                            <span className="list-card-label">Operador</span>
+                            <span className="list-card-value">{c.operador?.username}</span>
+                          </div>
+                          {c.observaciones && (
+                            <div className="list-card-item col-span-2">
+                              <span className="list-card-label">Obs.</span>
+                              <span className="list-card-value" style={{ whiteSpace: 'normal', fontSize: 11 }}>{c.observaciones}</span>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </>
             )}
@@ -566,14 +598,7 @@ export default function CargasPage() {
           </div>
         )}
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-          <FormGroup label="Tipo de Carga" required>
-            <select value={form.tipoCarga} onChange={e => setForm(prev => ({ ...prev, tipoCarga: e.target.value }))}>
-              <option value="NORMAL">Normal (Inventario)</option>
-              <option value="SALON">Salón (Mostrador)</option>
-            </select>
-          </FormGroup>
-
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <FormGroup label="Gas a cargar" required>
             <select value={form.tipoGas} onChange={e => handleGasChange(e.target.value)}>
               <option value="">Seleccionar...</option>

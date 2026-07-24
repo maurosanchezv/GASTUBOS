@@ -36,6 +36,27 @@ function EstadoRemision({ entrega }) {
 }
 
 // Item etiqueta/valor para el form-grid (mismo estilo que la ficha de tubo)
+function getObservacionesLimpias(entrega, detalles) {
+  if (!entrega?.observaciones) return null
+  const tuboIdsActuales = new Set((detalles || entrega.detalles || []).map(d => d.tuboId))
+  let partes = entrega.observaciones.split('|').map(s => s.trim()).filter(Boolean)
+  
+  partes = partes.filter(p => {
+    if (p.includes('Agregado por repartidor')) {
+      const match = p.match(/:\s*([^\]]+)\]/)
+      if (match && match[1]) {
+        const tuboIdNota = match[1].trim()
+        return tuboIdsActuales.has(tuboIdNota)
+      }
+      return (detalles || entrega.detalles || []).some(d => d.esAdicional)
+    }
+    return true
+  })
+
+  const res = partes.join(' | ').trim()
+  return res || null
+}
+
 function Campo({ label, value, mono, span }) {
   return (
     <div className={span ? 'col-span-2' : ''} style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
@@ -119,7 +140,7 @@ export default function RemisionPage() {
                 <Campo label="Teléfono" value={entrega.cliente?.telefono || '—'} mono />
                 <Campo label="Tipo de operación" value={TIPO_LABEL[entrega.tipoOperacion] || entrega.tipoOperacion} />
                 <Campo label="Dirección" value={entrega.direccionEntrega || '—'} span />
-                {entrega.observaciones && <Campo label="Observaciones" value={entrega.observaciones} span />}
+                {getObservacionesLimpias(entrega, detalles) && <Campo label="Observaciones" value={getObservacionesLimpias(entrega, detalles)} span />}
               </div>
             </div>
 

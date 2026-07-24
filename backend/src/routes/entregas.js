@@ -906,10 +906,11 @@ router.post('/:id/agregar-tubo', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), 
       }
 
       // 7. Registrar auditoría
+      const usuarioExisteAdd = req.user?.id ? await tx.usuario.findUnique({ where: { id: req.user.id } }) : null
       await tx.auditoria.create({
         data: {
           tuboId,
-          usuarioId: req.user.id,
+          usuarioId: usuarioExisteAdd ? usuarioExisteAdd.id : null,
           accion: `Tubo agregado a entrega en tránsito (${entrega.tipoOperacion})`,
           estadoAnterior: tubo.estado,
           estadoNuevo: 'RESERVADO',
@@ -921,6 +922,94 @@ router.post('/:id/agregar-tubo', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), 
     })
 
     res.status(201).json({ message: 'Tubo agregado con éxito a la entrega', detalle: resultado })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ─── DELETE /api/entregas/:id/quitar-tubo-adicional/:tuboId ───────────────────
+// Permite al repartidor (u operador) quitar un tubo adicional previamente añadido
+router.delete('/:id/quitar-tubo-adicional/:tuboId', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), async (req, res, next) => {
+  try {
+    const { id, tuboId } = req.params
+
+    // 1. Obtener la entrega y verificar estado
+    const entrega = await prisma.entrega.findUnique({
+      where: { id },
+      include: { detalles: true }
+    })
+
+    if (!entrega) return res.status(404).json({ error: 'Entrega no encontrada' })
+    if (entrega.confirmada) return res.status(400).json({ error: 'No se puede modificar una entrega ya confirmada' })
+    if (entrega.cancelada) return res.status(400).json({ error: 'No se puede modificar una entrega cancelada' })
+
+    // 2. Buscar el detalle correspondiente
+    const detalle = entrega.detalles.find(d => d.tuboId === tuboId)
+    if (!detalle) return res.status(404).json({ error: 'El tubo no se encuentra en esta entrega' })
+
+    if (!detalle.esAdicional) {
+      return res.status(400).json({ error: 'Solo se pueden eliminar tubos agregados adicionalmente por el repartidor' })
+    }
+
+    await prisma.$transaction(async (tx) => {
+      // 3. Eliminar el detalle de la entrega
+      await tx.detalleEntrega.delete({
+        where: { id: detalle.id }
+      })
+
+      // 4. Restaurar estado original del tubo
+      const estadoRestaurado = detalle.estadoAnterior || 'CARGADO'
+      await tx.tubo.update({
+        where: { id: tuboId },
+        data: {
+          estado: estadoRestaurado,
+          clienteId: null,
+          ubicacion: 'Planta/Salón'
+        }
+      })
+
+      // 5. Eliminar alquileres o ventas asociados a esta entrega y tubo si se crearon
+      await tx.alquiler.deleteMany({
+        where: { entregaId: id, tuboId }
+      })
+
+      await tx.venta.deleteMany({
+        where: { clienteId: entrega.clienteId, tuboId }
+      })
+
+      // 6. Limpiar observaciones de la entrega
+      if (entrega.observaciones) {
+        const remainingAdicionales = entrega.detalles.filter(d => d.id !== detalle.id && d.esAdicional)
+        let partes = entrega.observaciones.split('|').map(p => p.trim()).filter(Boolean)
+        
+        if (remainingAdicionales.length === 0) {
+          partes = partes.filter(p => !p.includes('Agregado por repartidor'))
+        } else {
+          partes = partes.filter(p => !p.includes(`: ${tuboId}]`))
+        }
+        
+        const obsLimpia = partes.join(' | ').trim()
+        await tx.entrega.update({
+          where: { id },
+          data: { observaciones: obsLimpia || null }
+        })
+      }
+
+      // 7. Registrar auditoría
+      const usuarioExiste = req.user?.id ? await tx.usuario.findUnique({ where: { id: req.user.id } }) : null
+      await tx.auditoria.create({
+        data: {
+          tuboId,
+          usuarioId: usuarioExiste ? usuarioExiste.id : null,
+          accion: `Tubo adicional eliminado de entrega en tránsito`,
+          estadoAnterior: 'RESERVADO',
+          estadoNuevo: estadoRestaurado,
+          metadata: { entregaId: id, numero: entrega.numero }
+        }
+      })
+    })
+
+    res.json({ message: 'Tubo adicional removido con éxito del pedido' })
   } catch (err) {
     next(err)
   }

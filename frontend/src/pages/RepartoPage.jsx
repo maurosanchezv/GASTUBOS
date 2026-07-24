@@ -28,6 +28,27 @@ const TIPO_INFO = {
   VENTA:          { label: 'Venta',    className: 'badge-tipo-VENTA' },
 }
 
+function getObservacionesLimpias(entrega) {
+  if (!entrega?.observaciones) return null
+  const tuboIdsActuales = new Set((entrega.detalles || []).map(d => d.tuboId))
+  let partes = entrega.observaciones.split('|').map(s => s.trim()).filter(Boolean)
+  
+  partes = partes.filter(p => {
+    if (p.includes('Agregado por repartidor')) {
+      const match = p.match(/:\s*([^\]]+)\]/)
+      if (match && match[1]) {
+        const tuboIdNota = match[1].trim()
+        return tuboIdsActuales.has(tuboIdNota)
+      }
+      return (entrega.detalles || []).some(d => d.esAdicional)
+    }
+    return true
+  })
+
+  const res = partes.join(' | ').trim()
+  return res || null
+}
+
 export default function RepartoPage() {
   const { user } = useAuthStore()
   const { nombre_empresa, direccion, telefono } = useConfigStore()
@@ -244,9 +265,6 @@ export default function RepartoPage() {
             entrega.detalles?.forEach(d => {
               const capStr = d.tubo ? ` ${formatCapacidad(d.tubo)}` : ''
               let desc = `${d.tuboId} (${d.tubo?.gas || ''}${capStr})`
-              if (d.esAdicional) {
-                desc += ' *ADICIONAL*'
-              }
               if (d.tubo?.serie && d.tubo?.serie !== d.tuboId) {
                 desc += ` Nro:${d.tubo.serie}`
               }
@@ -288,8 +306,9 @@ export default function RepartoPage() {
             }
 
             // Observaciones
-            if (entrega.observaciones) {
-              const obsText = 'Obs: ' + entrega.observaciones
+            const obsBT = getObservacionesLimpias(entrega)
+            if (obsBT) {
+              const obsText = 'Obs: ' + obsBT
               wrapText(obsText, width).forEach(l => builder.addTextLine(l))
               builder.addTextLine(line())
             }
@@ -571,6 +590,27 @@ export default function RepartoPage() {
       }
     } catch (err) {
       toast(err.response?.data?.error || 'Error al agregar tubo al pedido', 'error')
+    }
+  }
+
+  const quitarTuboAdicional = async (entregaId, tuboId) => {
+    if (!window.confirm(`¿Seguro que deseas eliminar el tubo ${tuboId} de este pedido?`)) return
+    try {
+      if (navigator.onLine) {
+        await api.delete(`/entregas/${entregaId}/quitar-tubo-adicional/${tuboId}`)
+        toast(`Tubo ${tuboId} removido del pedido con éxito`, 'success')
+        
+        fetchRuta()
+        setActiveEntrega(prev => ({
+          ...prev,
+          detalles: (prev.detalles || []).filter(d => d.tuboId !== tuboId)
+        }))
+        setScannedIds(prev => prev.filter(id => id !== tuboId))
+      } else {
+        toast('Se requiere conexión a internet para eliminar tubos del pedido', 'warning')
+      }
+    } catch (err) {
+      toast(err.response?.data?.error || 'Error al eliminar tubo del pedido', 'error')
     }
   }
 
@@ -1390,32 +1430,59 @@ export default function RepartoPage() {
                               {d.tubo?.gas} · {Number(d.cantidadGas)} {d.unidadGas}
                             </div>
                           </div>
-                          {verificado ? (
-                            <button
-                              type="button"
-                              onClick={() => setScannedIds(prev => prev.filter(id => id !== d.tuboId))}
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: 4,
-                                padding: '4px 8px',
-                                background: '#fee2e2',
-                                color: '#ef4444',
-                                border: 'none',
-                                borderRadius: 4,
-                                fontSize: 11,
-                                fontWeight: 600,
-                                cursor: 'pointer'
-                              }}
-                              title="Desmarcar / Volver a escanear"
-                            >
-                              <i className="ti ti-trash" style={{ fontSize: 12 }} /> Quitar
-                            </button>
-                          ) : (
-                            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)' }}>
-                              Pendiente
-                            </span>
-                          )}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            {verificado && (
+                              <button
+                                type="button"
+                                onClick={() => setScannedIds(prev => prev.filter(id => id !== d.tuboId))}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                  padding: '4px 8px',
+                                  background: 'var(--bg-subtle, #f3f4f6)',
+                                  color: 'var(--text-secondary, #4b5563)',
+                                  border: '1px solid var(--border, #d1d5db)',
+                                  borderRadius: 4,
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  cursor: 'pointer'
+                                }}
+                                title="Desmarcar / Volver a escanear"
+                              >
+                                <i className="ti ti-rotate-clockwise" style={{ fontSize: 12 }} /> Desmarcar
+                              </button>
+                            )}
+
+                            {!verificado && !d.esAdicional && (
+                              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)' }}>
+                                Pendiente
+                              </span>
+                            )}
+
+                            {d.esAdicional && (
+                              <button
+                                type="button"
+                                onClick={() => quitarTuboAdicional(activeEntrega.id, d.tuboId)}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                  padding: '4px 8px',
+                                  background: '#fee2e2',
+                                  color: '#ef4444',
+                                  border: 'none',
+                                  borderRadius: 4,
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  cursor: 'pointer'
+                                }}
+                                title="Eliminar tubo adicional del pedido"
+                              >
+                                <i className="ti ti-trash" style={{ fontSize: 12 }} /> Quitar
+                              </button>
+                            )}
+                          </div>
                         </div>
                       )
                     })}
@@ -1957,9 +2024,9 @@ export default function RepartoPage() {
             </div>
           )}
 
-          {(entregaParaImprimir || activeEntrega).observaciones && (
+          {getObservacionesLimpias(entregaParaImprimir || activeEntrega) && (
             <div style={{ margin: '8px 0', fontSize: '10px', fontStyle: 'italic', borderTop: '1px dashed #000', paddingTop: '4px' }}>
-              <strong>Obs:</strong> {(entregaParaImprimir || activeEntrega).observaciones}
+              <strong>Obs:</strong> {getObservacionesLimpias(entregaParaImprimir || activeEntrega)}
             </div>
           )}
           
