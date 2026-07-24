@@ -42,7 +42,7 @@ const formatNumberSpanish = (val) => {
 }
 
 const FORM_INICIAL = {
-  tuboId: '', tipoGas: '', unidad: '', cantidad: '',
+  tuboId: '', tipoGas: '', unidad: '', tipoCarga: 'NORMAL', cantidad: '',
   fechaCarga: new Date().toISOString().slice(0, 16), observaciones: '',
 }
 
@@ -125,6 +125,7 @@ export default function CargasPage() {
       tuboId:  tubo.id,
       tipoGas: gasEnum,
       unidad:  gasEnum ? TIPO_GAS_UNIDAD[gasEnum] : '',
+      tipoCarga: 'NORMAL',
       cantidad: capStr,
     })
 
@@ -149,6 +150,7 @@ export default function CargasPage() {
       tuboId: '',
       tipoGas: 'CO2',
       unidad: 'KG',
+      tipoCarga: 'SALON',
     })
 
     setCalcPrecio('')
@@ -223,6 +225,7 @@ export default function CargasPage() {
         tuboId:        tuboSeleccionado ? form.tuboId : undefined,
         tipoGas:       form.tipoGas,
         unidad:        form.unidad,
+        tipoCarga:     form.tipoCarga,
         cantidad:      Number(form.cantidad),
         precioUnitario: Number(calcPrecio) || 0,
         fechaCarga:    new Date(form.fechaCarga).toISOString(),
@@ -432,6 +435,7 @@ export default function CargasPage() {
                     <thead>
                       <tr>
                         <th>Número</th>
+                        <th>Tipo de carga</th>
                         <th>Tubo</th>
                         <th>Gas cargado</th>
                         <th>Cantidad</th>
@@ -444,6 +448,11 @@ export default function CargasPage() {
                       {cargas.map(c => (
                         <tr key={c.id}>
                           <td style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{c.numero}</td>
+                          <td>
+                            <span className={`badge ${c.tipoCarga === 'SALON' ? 'badge-REPARTIDOR' : 'badge-CARGADO'}`} style={{ fontSize: 10 }}>
+                              {c.tipoCarga === 'SALON' ? 'Salón' : 'Normal'}
+                            </span>
+                          </td>
                           <td>
                             {c.tubo ? (
                               <>
@@ -557,7 +566,14 @@ export default function CargasPage() {
           </div>
         )}
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+          <FormGroup label="Tipo de Carga" required>
+            <select value={form.tipoCarga} onChange={e => setForm(prev => ({ ...prev, tipoCarga: e.target.value }))}>
+              <option value="NORMAL">Normal (Inventario)</option>
+              <option value="SALON">Salón (Mostrador)</option>
+            </select>
+          </FormGroup>
+
           <FormGroup label="Gas a cargar" required>
             <select value={form.tipoGas} onChange={e => handleGasChange(e.target.value)}>
               <option value="">Seleccionar...</option>

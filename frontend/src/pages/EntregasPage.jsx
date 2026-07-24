@@ -321,7 +321,16 @@ export default function EntregasPage() {
     }
     if (!mapaHistRef.current || mapaHistInstance.current) return
 
-    const conCoords = entregas.filter(e => e.latitud && e.longitud && e.confirmada && !e.cancelada)
+    // Mostrar en el mapa únicamente entregas que tengan tubos ACTUALMENTE activos en el cliente (ENTREGADO / ALQUILADO)
+    const conCoords = entregas.filter(e => {
+      if (!e.latitud || !e.longitud || !e.confirmada || e.cancelada) return false
+      // Si el tubo fue devuelto al depósito, su estado ya no es ENTREGADO ni ALQUILADO
+      const tubosActivosEnCliente = e.detalles?.filter(d => 
+        !d.tubo || d.tubo.estado === 'ENTREGADO' || d.tubo.estado === 'ALQUILADO'
+      ) || []
+      return tubosActivosEnCliente.length > 0
+    })
+
     const center = conCoords.length > 0
       ? [conCoords[0].latitud, conCoords[0].longitud]
       : [-25.2867, -57.6474]
@@ -352,11 +361,12 @@ export default function EntregasPage() {
       if (groupDeliveries.length === 1) {
         // Un solo pedido en esta ubicación
         const e = first
-        const tubosList = e.detalles && e.detalles.length > 0
+        const detallesActivos = e.detalles?.filter(d => !d.tubo || d.tubo.estado === 'ENTREGADO' || d.tubo.estado === 'ALQUILADO') || []
+        const tubosList = detallesActivos.length > 0
           ? `<div style="margin-top:6px; border-top:1px solid #E4E4E7; padding-top:6px;">
-              <b style="font-size:11px; color:#52525B">Tubos entregados (${e.detalles.length}):</b>
+              <b style="font-size:11px; color:#52525B">Tubos activos en cliente (${detallesActivos.length}):</b>
               <ul style="margin:4px 0 0; padding-left:14px; font-size:11px; color:#3F3F46; line-height:1.4">
-                ${e.detalles.map(d => `
+                ${detallesActivos.map(d => `
                   <li>
                     <strong style="font-family:monospace; color:#18181B">${d.tuboId}</strong> 
                     (${d.tubo?.gas || 'N/A'})
@@ -381,21 +391,22 @@ export default function EntregasPage() {
             <span style="color:#52525B; font-size:11px;">${first.direccionEntrega}</span>
           </div>
           <div style="font-size:11px; font-weight:700; color:#71717A; margin-bottom:6px;">
-            Historial de entregas en este punto (${groupDeliveries.length}):
+            Tubos activos en este punto (${groupDeliveries.length} entregas):
           </div>
         `
 
         groupDeliveries.forEach((e, idx) => {
-          const tubosList = e.detalles && e.detalles.length > 0
+          const detallesActivos = e.detalles?.filter(d => !d.tubo || d.tubo.estado === 'ENTREGADO' || d.tubo.estado === 'ALQUILADO') || []
+          const tubosList = detallesActivos.length > 0
             ? `<ul style="margin:2px 0 0; padding-left:12px; font-size:11px; color:#52525B; list-style-type:circle;">
-                ${e.detalles.map(d => `
+                ${detallesActivos.map(d => `
                   <li>
                     <span style="font-family:monospace; font-weight:600">${d.tuboId}</span> 
                     (${d.tubo?.gas || 'N/A'})
                   </li>
                 `).join('')}
               </ul>`
-            : '<span style="font-style:italic;color:#A1A1AA">Sin tubos</span>';
+            : '<span style="font-style:italic;color:#A1A1AA">Sin tubos activos</span>';
 
           popupContent += `
             <div style="padding:6px 0; border-bottom:${idx === groupDeliveries.length - 1 ? 'none' : '1px dashed #E4E4E7'}">
@@ -564,7 +575,16 @@ export default function EntregasPage() {
 
   const f = k => e => setForm(p => ({ ...p, [k]: e.target.value }))
   const clienteSeleccionado = clientes.find(c => c.id === form.clienteId)
-  const entregasConCoords = entregas.filter(e => e.latitud && e.longitud && e.confirmada && !e.cancelada)
+  const entregasConCoords = entregas.filter(e => {
+    if (!e.latitud || !e.longitud || !e.confirmada || e.cancelada) return false
+    const tubosActivos = e.detalles?.filter(d => 
+      !d.tubo || d.tubo.estado === 'ENTREGADO' || d.tubo.estado === 'ALQUILADO'
+    ) || []
+    return tubosActivos.length > 0
+  })
+  const ubicacionesUnicasMapa = Array.from(new Set(
+    entregasConCoords.map(e => `${Number(e.latitud).toFixed(6)},${Number(e.longitud).toFixed(6)}`)
+  ))
 
   const handleClienteChange = (e) => {
     const cid = e.target.value
@@ -1024,13 +1044,13 @@ export default function EntregasPage() {
                   {loadingH ? 'Actualizando...' : 'Actualizar'}
                 </button>
 
-                {entregasConCoords.length > 0 && (
+                {ubicacionesUnicasMapa.length > 0 && (
                   <button className="btn" onClick={() => setMapaHistAbierto(v => !v)}
                     style={{ display: 'flex', alignItems: 'center', gap: 6, flex: '1 1 auto', justifyContent: 'center', maxWidth: '200px' }}>
                     <i className="ti ti-map" />
                     {mapaHistAbierto
                       ? 'Ocultar mapa'
-                      : `Mapa (${entregasConCoords.length})`}
+                      : `Mapa (${ubicacionesUnicasMapa.length})`}
                   </button>
                 )}
               </div>
@@ -1301,7 +1321,13 @@ export default function EntregasPage() {
                     {entregaSeleccionada.detalles?.map(d => (
                       <tr key={d.id}>
                         <td>
-                          <strong>{d.tuboId}</strong><br />
+                          <strong>{d.tuboId}</strong>
+                          {d.esAdicional && (
+                            <span style={{ fontSize: '9px', background: '#fef3c7', color: '#b45309', padding: '1px 4px', borderRadius: '3px', marginLeft: '4px', fontWeight: 'bold' }}>
+                              (Agregado por repartidor)
+                            </span>
+                          )}
+                          <br />
                           <span style={{ fontSize: '10px', color: '#666' }}>
                             {d.tubo?.gas}
                           </span>
@@ -1398,7 +1424,13 @@ export default function EntregasPage() {
                       {entregaSeleccionada.detalles?.map(d => (
                         <tr key={d.id}>
                           <td>
-                            <strong>{d.tuboId}</strong><br />
+                            <strong>{d.tuboId}</strong>
+                            {d.esAdicional && (
+                              <span style={{ fontSize: '9px', background: '#fef3c7', color: '#b45309', padding: '1px 4px', borderRadius: '3px', marginLeft: '4px', fontWeight: 'bold' }}>
+                                (Agregado por repartidor)
+                              </span>
+                            )}
+                            <br />
                             <span style={{ fontSize: '10px', color: '#666' }}>
                               {d.tubo?.gas}
                             </span>
@@ -1521,6 +1553,11 @@ export default function EntregasPage() {
                   <tr key={d.id}>
                     <td>
                       <strong>{d.tuboId}</strong>
+                      {d.esAdicional && (
+                        <span style={{ fontSize: '9px', background: '#fef3c7', color: '#b45309', padding: '1px 4px', borderRadius: '3px', marginLeft: '4px', fontWeight: 'bold' }}>
+                          (Agregado por repartidor)
+                        </span>
+                      )}
                       {showSerie && <span style={{ fontSize: '10px', color: '#555', display: 'block' }}>Nro: {d.tubo.serie}</span>}
                       <span style={{ fontSize: '10px', color: '#555', display: 'block' }}>
                         {d.tubo?.gas}{capStr}

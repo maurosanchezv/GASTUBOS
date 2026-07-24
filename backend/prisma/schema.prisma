@@ -44,6 +44,11 @@ enum TipoPropietario {
   CLIENTE
 }
 
+enum TipoCarga {
+  NORMAL
+  SALON
+}
+
 enum TipoOperacion {
   ENTREGA_SIMPLE   // entrega sin alquiler formal
   ALQUILER         // genera registro en Alquiler
@@ -244,6 +249,7 @@ model DetalleEntrega {
   // Estado del tubo justo antes de la entrega — usado para revertir al cancelar.
   // Opcional para que filas viejas (pre-migración) sigan funcionando con fallback.
   estadoAnterior EstadoTubo?
+  esAdicional    Boolean     @default(false)
 
   @@unique([entregaId, tuboId])
   @@map("detalles_entrega")
@@ -298,6 +304,7 @@ model Carga {
   tubo          Tubo?     @relation(fields: [tuboId], references: [id])
   tipoGas       TipoGas
   unidad        UnidadGas
+  tipoCarga     TipoCarga @default(NORMAL)
   cantidad      Decimal   @db.Decimal(10, 3)
   precioUnitario Decimal  @db.Decimal(10, 2) @default(0.00)
   fechaCarga    DateTime

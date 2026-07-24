@@ -418,55 +418,77 @@ export default function TuboDetallePage() {
                   <table>
                     <thead>
                       <tr>
-                        <th>Fecha</th>
+                        <th>Fecha/Hora</th>
+                        <th>Tipo de carga</th>
                         <th>Gas</th>
                         <th>Cantidad</th>
+                        <th>Precio Unit.</th>
+                        <th>Monto Total</th>
                         <th>Operador</th>
                         <th>Obs.</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {tubo.cargas.map((c) => (
-                        <tr key={c.id}>
-                          <td
-                            style={{
-                              fontFamily: "var(--font-mono)",
-                              fontSize: 11,
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {new Date(c.fechaCarga).toLocaleString("es-PY", {
-                              dateStyle: "short",
-                              timeStyle: "short",
-                            })}
-                          </td>
-                          <td>{GAS_LABELS[c.tipoGas] || c.tipoGas}</td>
-                          <td style={{ fontWeight: 600 }}>
-                            {Number(c.cantidad).toLocaleString("es-PY")}{" "}
-                            {c.unidad === "KG" ? "kg" : "m³"}
-                          </td>
-                          <td
-                            style={{
-                              color: "var(--text-secondary)",
-                              fontSize: 12,
-                            }}
-                          >
-                            {c.operador?.nombre || c.operador?.username}
-                          </td>
-                          <td
-                            style={{
-                              color: "var(--text-secondary)",
-                              fontSize: 11,
-                              maxWidth: 120,
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {c.observaciones || "—"}
-                          </td>
-                        </tr>
-                      ))}
+                      {tubo.cargas.map((c) => {
+                        const cant = Number(c.cantidad || 0);
+                        const pu = Number(c.precioUnitario || 0);
+                        const sub = cant * pu;
+                        const uLabel = c.unidad === 'KG' ? 'kg' : 'm³';
+                        return (
+                          <tr key={c.id}>
+                            <td
+                              style={{
+                                fontFamily: "var(--font-mono)",
+                                fontSize: 11,
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {new Date(c.fechaCarga).toLocaleString("es-PY", {
+                                dateStyle: "short",
+                                timeStyle: "short",
+                              })}
+                            </td>
+                            <td>
+                              <span
+                                className={`badge ${c.tipoCarga === 'SALON' ? 'badge-REPARTIDOR' : 'badge-CARGADO'}`}
+                                style={{ fontSize: 10 }}
+                              >
+                                {c.tipoCarga === 'SALON' ? 'Salón' : 'Normal'}
+                              </span>
+                            </td>
+                            <td>{GAS_LABELS[c.tipoGas] || c.tipoGas}</td>
+                            <td style={{ fontWeight: 600 }}>
+                              {cant.toLocaleString("es-PY")} {uLabel}
+                            </td>
+                            <td style={{ fontSize: 11, fontFamily: 'var(--font-mono)' }}>
+                              {pu > 0 ? `${pu.toLocaleString("es-PY")} GS/${uLabel}` : '—'}
+                            </td>
+                            <td style={{ fontWeight: 600, fontFamily: 'var(--font-mono)', color: 'var(--blue)' }}>
+                              {sub > 0 ? `${sub.toLocaleString("es-PY")} GS` : '—'}
+                            </td>
+                            <td
+                              style={{
+                                color: "var(--text-secondary)",
+                                fontSize: 12,
+                              }}
+                            >
+                              {c.operador?.nombre || c.operador?.username}
+                            </td>
+                            <td
+                              style={{
+                                color: "var(--text-secondary)",
+                                fontSize: 11,
+                                maxWidth: 120,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {c.observaciones || "—"}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -481,78 +503,96 @@ export default function TuboDetallePage() {
                     padding: "8px 0",
                   }}
                 >
-                  {tubo.cargas.map((c) => (
-                    <div
-                      key={c.id}
-                      style={{
-                        background: "var(--surface-2)",
-                        border: "1px solid var(--border)",
-                        borderRadius: 8,
-                        padding: 12,
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 4,
-                      }}
-                    >
+                  {tubo.cargas.map((c) => {
+                    const cant = Number(c.cantidad || 0);
+                    const pu = Number(c.precioUnitario || 0);
+                    const sub = cant * pu;
+                    const uLabel = c.unidad === 'KG' ? 'kg' : 'm³';
+                    return (
                       <div
+                        key={c.id}
                         style={{
+                          background: "var(--surface-2)",
+                          border: "1px solid var(--border)",
+                          borderRadius: 8,
+                          padding: 12,
                           display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
+                          flexDirection: "column",
+                          gap: 6,
                         }}
                       >
-                        <strong
-                          style={{ fontSize: 13, color: "var(--text-primary)" }}
-                        >
-                          {GAS_LABELS[c.tipoGas] || c.tipoGas}
-                        </strong>
-                        <span
-                          style={{
-                            fontSize: 11,
-                            fontWeight: 600,
-                            color: "var(--blue)",
-                          }}
-                        >
-                          {Number(c.cantidad).toLocaleString("es-PY")}{" "}
-                          {c.unidad === "KG" ? "kg" : "m³"}
-                        </span>
-                      </div>
-
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          fontSize: 11,
-                          color: "var(--text-secondary)",
-                        }}
-                      >
-                        <span>
-                          Operador: {c.operador?.nombre || c.operador?.username}
-                        </span>
-                        <span style={{ fontFamily: "var(--font-mono)" }}>
-                          {new Date(c.fechaCarga).toLocaleString("es-PY", {
-                            dateStyle: "short",
-                            timeStyle: "short",
-                          })}
-                        </span>
-                      </div>
-
-                      {c.observaciones && (
                         <div
                           style={{
-                            fontSize: 10,
-                            fontStyle: "italic",
-                            color: "var(--text-muted)",
-                            borderTop: "0.5px solid var(--border)",
-                            paddingTop: 4,
-                            marginTop: 2,
+                            display: "flex",
+                            justify: "space-between",
+                            alignItems: "center",
                           }}
                         >
-                          {c.observaciones}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <strong style={{ fontSize: 13, color: "var(--text-primary)" }}>
+                              {GAS_LABELS[c.tipoGas] || c.tipoGas}
+                            </strong>
+                            <span
+                              className={`badge ${c.tipoCarga === 'SALON' ? 'badge-REPARTIDOR' : 'badge-CARGADO'}`}
+                              style={{ fontSize: 9, padding: '1px 5px' }}
+                            >
+                              {c.tipoCarga === 'SALON' ? 'Salón' : 'Normal'}
+                            </span>
+                          </div>
+                          <span
+                            style={{
+                              fontSize: 12,
+                              fontWeight: 700,
+                              color: "var(--blue)",
+                            }}
+                          >
+                            {cant.toLocaleString("es-PY")} {uLabel}
+                          </span>
                         </div>
-                      )}
-                    </div>
-                  ))}
+
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            fontSize: 11,
+                            color: "var(--text-secondary)",
+                          }}
+                        >
+                          <span>
+                            Precio: <strong>{pu > 0 ? `${pu.toLocaleString("es-PY")} GS/${uLabel}` : '—'}</strong>
+                          </span>
+                          <span>
+                            Total: <strong style={{ color: 'var(--text-primary)' }}>{sub > 0 ? `${sub.toLocaleString("es-PY")} GS` : '—'}</strong>
+                          </span>
+                        </div>
+
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            fontSize: 11,
+                            color: "var(--text-secondary)",
+                          }}
+                        >
+                          <span>
+                            Operador: {c.operador?.nombre || c.operador?.username}
+                          </span>
+                          <span style={{ fontFamily: "var(--font-mono)" }}>
+                            {new Date(c.fechaCarga).toLocaleString("es-PY", {
+                              dateStyle: "short",
+                              timeStyle: "short",
+                            })}
+                          </span>
+                        </div>
+
+                        {c.observaciones && (
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                            Obs: {c.observaciones}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}

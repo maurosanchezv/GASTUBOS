@@ -133,7 +133,7 @@ router.get('/', async (req, res, next) => {
           sucursal:   true,
           creadoPor:  { select: { username: true, nombre: true } },
           repartidor: { select: { username: true, nombre: true } },
-          detalles:   { include: { tubo: { select: { id: true, gas: true, capacidadLitros: true, capacidadKg: true } } } },
+          detalles:   { include: { tubo: { select: { id: true, gas: true, capacidadLitros: true, capacidadKg: true, estado: true, clienteId: true } } } },
           recambios:  { include: { tuboEntregado: { select: { id: true, gas: true, observaciones: true } } } },
           cilindrosTerceros: true,
         },
@@ -160,7 +160,7 @@ router.get('/numero/:numero', async (req, res, next) => {
         sucursal:   true,
         creadoPor:  { select: { username: true, nombre: true } },
         repartidor: { select: { username: true, nombre: true } },
-        detalles:   { include: { tubo: { select: { id: true, gas: true, capacidadLitros: true, capacidadKg: true } } } },
+        detalles:   { include: { tubo: { select: { id: true, gas: true, capacidadLitros: true, capacidadKg: true, estado: true, clienteId: true } } } },
         recambios:  { include: { tuboEntregado: { select: { id: true, gas: true, observaciones: true } } } },
         cilindrosTerceros: true,
       },
@@ -229,8 +229,6 @@ router.post('/', requireRol('ADMIN', 'OPERADOR'), async (req, res, next) => {
         let precioUnitario = 0
         if (ultimaCargaTubo && Number(ultimaCargaTubo.precioUnitario) > 0) {
           precioUnitario = Number(ultimaCargaTubo.precioUnitario)
-        } else if (precioGasInfo) {
-          precioUnitario = Number(precioGasInfo.precioUnitario)
         }
 
         let cantidadGas = 0
@@ -811,8 +809,6 @@ router.post('/:id/agregar-tubo', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), 
         precioUnitario = Number(reqPrecioUnitario)
       } else if (ultimaCarga && Number(ultimaCarga.precioUnitario) > 0) {
         precioUnitario = Number(ultimaCarga.precioUnitario)
-      } else if (precioGasInfo) {
-        precioUnitario = Number(precioGasInfo.precioUnitario)
       }
 
       let finalCantidadGas = 0
@@ -841,7 +837,8 @@ router.post('/:id/agregar-tubo', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), 
           unidadGas: finalUnidadGas,
           precioUnitario,
           subtotal,
-          estadoAnterior: tubo.estado
+          estadoAnterior: tubo.estado,
+          esAdicional: true
         },
         include: {
           tubo: {
@@ -854,6 +851,18 @@ router.post('/:id/agregar-tubo', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), 
             }
           }
         }
+      })
+
+      // 4.1 Actualizar observaciones generales de la entrega
+      const notaAgregado = `[Agregado por repartidor en terreno: ${tuboId}]`
+      const observacionesExistentes = entrega.observaciones || ''
+      const nuevasObservaciones = observacionesExistentes
+        ? (observacionesExistentes.includes(notaAgregado) ? observacionesExistentes : `${observacionesExistentes} | ${notaAgregado}`)
+        : notaAgregado
+
+      await tx.entrega.update({
+        where: { id },
+        data: { observaciones: nuevasObservaciones }
       })
 
       // 5. Actualizar el tubo

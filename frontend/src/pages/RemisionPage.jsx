@@ -150,7 +150,14 @@ export default function RemisionPage() {
                           return (
                             <tr key={d.id}>
                               <td className="td-code">
-                                {d.tuboId}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                  <span>{d.tuboId}</span>
+                                  {d.esAdicional && (
+                                    <span className="badge badge-REPARTIDOR" style={{ fontSize: 10, padding: '2px 6px' }}>
+                                      Agregado por repartidor
+                                    </span>
+                                  )}
+                                </div>
                                 {showSerie && (
                                   <div style={{ fontSize: 10, color: 'var(--text-secondary)', fontWeight: 400 }}>Nro: {d.tubo.serie}</div>
                                 )}
@@ -174,7 +181,14 @@ export default function RemisionPage() {
                         <div key={d.id} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 8, padding: 12 }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                             <div>
-                              <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 13, color: 'var(--blue)' }}>{d.tuboId}</span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 13, color: 'var(--blue)' }}>{d.tuboId}</span>
+                                {d.esAdicional && (
+                                  <span className="badge badge-REPARTIDOR" style={{ fontSize: 9, padding: '1px 5px' }}>
+                                    Agregado por repartidor
+                                  </span>
+                                )}
+                              </div>
                               {showSerie && <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>Nro: {d.tubo.serie}</div>}
                             </div>
                             <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 13 }}>{gs(d.subtotal)}</span>

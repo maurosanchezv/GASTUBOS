@@ -244,6 +244,9 @@ export default function RepartoPage() {
             entrega.detalles?.forEach(d => {
               const capStr = d.tubo ? ` ${formatCapacidad(d.tubo)}` : ''
               let desc = `${d.tuboId} (${d.tubo?.gas || ''}${capStr})`
+              if (d.esAdicional) {
+                desc += ' *ADICIONAL*'
+              }
               if (d.tubo?.serie && d.tubo?.serie !== d.tuboId) {
                 desc += ` Nro:${d.tubo.serie}`
               }
@@ -1375,7 +1378,14 @@ export default function RepartoPage() {
                             style={{ color: verificado ? '#10b981' : 'var(--text-muted)', fontSize: 22 }}
                           />
                           <div style={{ flex: 1 }}>
-                            <strong style={{ fontFamily: 'var(--font-mono)' }}>{d.tuboId}</strong>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                              <strong style={{ fontFamily: 'var(--font-mono)' }}>{d.tuboId}</strong>
+                              {d.esAdicional && (
+                                <span className="badge badge-REPARTIDOR" style={{ fontSize: 9, padding: '1px 5px' }}>
+                                  Agregado por repartidor
+                                </span>
+                              )}
+                            </div>
                             <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 1 }}>
                               {d.tubo?.gas} · {Number(d.cantidadGas)} {d.unidadGas}
                             </div>
@@ -1886,6 +1896,11 @@ export default function RepartoPage() {
                   <tr key={d.id}>
                     <td>
                       <strong>{d.tuboId}</strong>
+                      {d.esAdicional && (
+                        <span style={{ fontSize: '9px', background: '#fef3c7', color: '#b45309', padding: '1px 4px', borderRadius: '3px', marginLeft: '4px', fontWeight: 'bold' }}>
+                          (Agregado por repartidor)
+                        </span>
+                      )}
                       {showSerie && <span style={{ fontSize: '10px', color: '#555', display: 'block' }}>Nro: {d.tubo.serie}</span>}
                       <span style={{ fontSize: '10px', color: '#555', display: 'block' }}>
                         {d.tubo?.gas}{capStr}
@@ -2014,7 +2029,13 @@ export default function RepartoPage() {
                 {entregaSeleccionada.detalles?.map(d => (
                   <tr key={d.id}>
                     <td style={{ paddingTop: '6px', paddingBottom: '4px' }}>
-                      <strong>{d.tuboId}</strong><br />
+                      <strong>{d.tuboId}</strong>
+                      {d.esAdicional && (
+                        <span style={{ fontSize: '9px', background: '#fef3c7', color: '#b45309', padding: '1px 4px', borderRadius: '3px', marginLeft: '4px', fontWeight: 'bold' }}>
+                          (Agregado por repartidor)
+                        </span>
+                      )}
+                      <br />
                       <span style={{ fontSize: '10px', color: '#555' }}>
                         {d.tubo?.gas}
                       </span>
