@@ -135,13 +135,12 @@ export default function CamionesPage() {
     try {
       // Obtener tubos que están en depósito/disponibles (no asignados a camiones y no entregados)
       const res = await api.get('/tubos', { params: { limit: 100 } })
-      // Filtrar tubos elegibles: activos, sin camionId, y estados correspondientes (excluyendo de terceros)
-      const elegibles = res.data.tubos.filter(t => 
-        t.activo && 
-        !t.camionId && 
-        !t.id.startsWith('CLI_') && 
+      // Filtrar tubos elegibles: activos, sin camionId, y estados correspondientes
+      const elegibles = res.data.tubos.filter(t =>
+        t.activo &&
+        !t.camionId &&
+        !t.id.startsWith('CLI_') &&
         !t.id.startsWith('CLI-') &&
-        !(t._count?.recambiosComoEntregado > 0) &&
         ['DISPONIBLE', 'CARGADO', 'VACIO', 'DEVUELTO', 'EN_REVISION'].includes(t.estado)
       )
       setTubosDisponibles(elegibles)

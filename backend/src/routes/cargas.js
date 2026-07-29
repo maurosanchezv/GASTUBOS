@@ -68,7 +68,7 @@ router.get('/tubo/:tuboId', async (req, res, next) => {
 })
 
 // ─── POST /api/cargas ─────────────────────────────────────────────────────────
-router.post('/', requireRol('ADMIN', 'OPERADOR'), async (req, res, next) => {
+router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
   try {
     const data = cargaSchema.parse(req.body)
 

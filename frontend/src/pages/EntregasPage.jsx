@@ -204,7 +204,7 @@ export default function EntregasPage() {
 
   useEffect(() => {
     api.get('/clientes').then(r => setClientes(r.data)).catch(() => {})
-    api.get('/usuarios').then(r => setUsuarios(r.data)).catch(() => {})
+    api.get('/usuarios/repartidores').then(r => setUsuarios(r.data)).catch(() => {})
     api.get('/precios').then(r => setPrecios(r.data)).catch(() => {})
     if (params.get('tubo')) agregarTubo(params.get('tubo'))
     if (params.get('tab')) setTab(params.get('tab'))

@@ -12,12 +12,6 @@ import { useAuthStore } from '../store/authStore.js'
 import api from '../services/api.js'
 import { formatCapacidad } from '../components/ui.jsx'
 
-const ESTADO_COLOR = {
-  DISPONIBLE:'#3B6D11', CARGADO:'#185FA5', VACIO:'#5F5E5A',
-  ENTREGADO:'#0F6E56',  ALQUILADO:'#534AB7', VENDIDO:'#BA7517',
-  RESERVADO:'#185FA5',  PERDIDO:'#A32D2D', DEVUELTO:'#993C1D', EN_REVISION:'#BA7517',
-}
-
 export default function TuboPublicoPage() {
   const { id }      = useParams()
   const { user }    = useAuthStore()
@@ -49,29 +43,21 @@ export default function TuboPublicoPage() {
     </div>
   )
 
-  const color = ESTADO_COLOR[tubo.estado] || '#888'
-
   return (
     <div style={styles.wrap}>
       <div style={styles.card}>
         {/* Header */}
-        <div style={{ background: color, padding: '20px 24px', borderRadius: '12px 12px 0 0' }}>
+        <div style={{ background: '#185FA5', padding: '20px 24px', borderRadius: '12px 12px 0 0' }}>
           <div style={{ fontSize: 22, fontWeight: 600, color: '#fff', fontFamily: 'monospace' }}>{tubo.id}</div>
           <div style={{ fontSize: 13, color: 'rgba(255,255,255,.8)', marginTop: 4 }}>
             {tubo.gas} · {formatCapacidad(tubo)}
           </div>
-          <span style={{ display:'inline-block', marginTop: 8, background:'rgba(255,255,255,.25)', color:'#fff', padding:'3px 10px', borderRadius:10, fontSize:12, fontWeight:600 }}>
-            {tubo.estado.replace('_',' ')}
-          </span>
         </div>
 
         {/* Info */}
         <div style={{ padding: '16px 24px' }}>
           {[
-            ['Propietario', tubo.propietario === 'CLIENTE' ? `CLIENTE - ${tubo.propietarioCliente?.nombre || tubo.cliente?.nombre || '—'}` : (tubo.nombre_empresa || 'PROPIO').toUpperCase()],
-            ['Ubicación',   tubo.ubicacion   || '—'],
-            ['Cliente',     tubo.cliente?.nombre || '—'],
-            ['Actualizado', new Date(tubo.updatedAt).toLocaleString('es-PY')],
+            ['Empresa', tubo.nombre_empresa || '—'],
           ].map(([k, v]) => (
             <div key={k} style={{ display:'flex', justifyContent:'space-between', padding:'8px 0', borderBottom:'0.5px solid rgba(0,0,0,.08)', fontSize:13 }}>
               <span style={{ color:'#888' }}>{k}</span>

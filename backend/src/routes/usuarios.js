@@ -6,6 +6,19 @@ import { prisma } from '../utils/prisma.js'
 import { requireAuth, requireRol } from '../middleware/auth.js'
 
 const router = Router()
+
+// GET /api/usuarios/repartidores — combo de asignación de entregas (ADMIN, SUPERVISOR, OPERADOR)
+router.get('/repartidores', requireAuth, requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
+  try {
+    const repartidores = await prisma.usuario.findMany({
+      where: { rol: 'REPARTIDOR', activo: true },
+      select: { id: true, nombre: true, username: true },
+      orderBy: { nombre: 'asc' },
+    })
+    res.json(repartidores)
+  } catch (err) { next(err) }
+})
+
 router.use(requireAuth, requireRol('ADMIN'))
 
 const usuarioSchema = z.object({

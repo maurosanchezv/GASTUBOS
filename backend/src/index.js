@@ -25,7 +25,7 @@ import cilindrosTercerosRoutes from './routes/cilindrosTerceros.js'
 const app  = express()
 const PORT = process.env.PORT || 3001
 
-app.set('trust proxy', 1) // Habilitar trust proxy para ngrok / proxies externos
+app.set('trust proxy', 1) // Habilitar trust proxy detrás de reverse proxy / balanceador
 
 // ─── Seguridad básica ─────────────────────────────────────────────────────────
 app.use(helmet())
@@ -41,15 +41,12 @@ app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
     if (allowedOrigins.includes(origin)) return callback(null, true);
-    if (origin.endsWith('.ngrok-free.app') || origin.endsWith('.ngrok-free.dev') || origin.includes('ngrok')) {
-      return callback(null, true);
-    }
     callback(null, false);
   },
   credentials: true,
 }))
 
-// Rate limiting global (Aumentado para evitar bloqueos por IP compartida en ngrok/demos)
+// Rate limiting global
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000, // 15 min
   max: 5000,

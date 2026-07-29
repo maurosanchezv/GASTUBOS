@@ -525,16 +525,17 @@ router.put('/:id/confirmar', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), asyn
       // 2.b. Registrar recambios si existen
       if (recambios && recambios.length > 0) {
         for (const retId of recambios) {
-          // A. Verificar si es un tubo propio de la empresa existente en la base de datos
+          // A. Verificar si es un tubo ya registrado en el sistema (propio o de un cliente)
           const tuboPropio = await tx.tubo.findFirst({
-            where: { id: retId, propietario: 'PROPIO', activo: true }
+            where: { id: retId, activo: true }
           })
-          
+
           let tuboRetornadoId = null
           let estadoAnterior = 'DEVUELTO'
-          
+
           if (tuboPropio) {
-            // Si es un tubo propio de la empresa, actualizamos su estado y ubicación a DEVUELTO
+            // Si ya está registrado, actualizamos su estado y ubicación a DEVUELTO
+            // en vez de tratarlo como cilindro de tercero desconocido
             tuboRetornadoId = tuboPropio.id
             estadoAnterior = tuboPropio.estado
             await tx.tubo.update({

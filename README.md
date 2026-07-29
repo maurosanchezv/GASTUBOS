@@ -32,6 +32,7 @@ Sistema web y móvil para gestionar tubos de gases industriales (CO₂, Oxígeno
 | **Impresión** | ESC/POS (Móvil) / HTML Print (Computadora) con transmisión fragmentada anti-desbordamiento |
 | **Reportes** | `jspdf` + `jspdf-autotable` |
 | **Seguridad** | JWT (8h) + BcryptJS + Helmet + Rate Limiters |
+| **Proceso (prod/dev servidor)** | PM2 + Nginx (reverse proxy + HTTPS con Let's Encrypt) |
 
 ---
 
@@ -85,13 +86,32 @@ gastubos/
 
 ---
 
+## 🌐 Ambientes desplegados
+
+El proyecto corre en un VPS propio (Hostinger, Ubuntu 24.04), con tres instancias completamente independientes: código, base de datos, variables de entorno, proceso y subdominio propios en cada una. Ninguna afecta a las demás.
+
+| Ambiente | URL | Rama | Puerto backend | Base de datos |
+|---|---|---|---|---|
+| **Desarrollo** | https://devapp.pms.com.py | `develop` | 3001 | `gastubos_dev` |
+| **Producción PMS** | https://app.pms.com.py | `main` | 3002 | `gastubos_prod` |
+| **Producción Cryopar** | https://app.cryopar.com.py | `main` (por ahora) | 3003 | `gastubos_cryopar` |
+
+Cada instancia usa PostgreSQL nativo (sin exposición a Internet, solo accesible en `localhost`), PM2 para mantener el backend corriendo como proceso, y Nginx como proxy inverso con certificado SSL propio (Let's Encrypt, renovación automática) sirviendo el build estático del frontend (`npm run build`).
+
+**Acceso al servidor:** por SSH con clave pública (sin contraseña), usuario `deploy`. Para incorporar un nuevo colaborador con acceso al servidor o al repositorio, ver la guía de despliegue interna del equipo.
+
+---
+
 ## ⚡ Guía de Inicio Rápido (Desarrollo local)
 
 Para una explicación exhaustiva de las terminales y del flujo en Android, consulta la [Guía de Desarrollo Detallada](file:///home/machine/chobi-gas/GASTUBOS/docs/guia_inicio_rapido_desarrollo.md).
 
 ### 1. Iniciar Base de Datos y Backend (WSL2)
+
+> Docker se usa acá únicamente como comodidad para tener PostgreSQL corriendo en tu PC local — **no se usa Docker en ningún ambiente desplegado** (dev/prod/Cryopar corren con PostgreSQL nativo + PM2 en el VPS, sin contenedores).
+
 ```bash
-# Levantar la base de datos
+# Levantar la base de datos (solo en tu PC local, no aplica al VPS)
 docker compose up -d postgres
 
 # Levantar backend
@@ -111,8 +131,10 @@ npm install
 npm run dev              # Correr frontend en http://localhost:5173
 ```
 
-### 3. Exponer el Entorno para Pruebas Remotas o Celular (ngrok + APK)
-Para probar la aplicación en tu celular o hacerle una demostración a un cliente externo:
+### 3. Exponer el entorno local para pruebas rápidas (ngrok)
+
+> Este método sigue siendo útil para demos puntuales o para probar cambios de un desarrollador individual antes de subirlos a `develop` — pero **para trabajo de equipo y pruebas del ambiente compartido, usar directamente https://devapp.pms.com.py**, que ya está desplegado y no depende de que nadie tenga ngrok corriendo en su máquina.
+
 ```bash
 # Exponer el puerto del frontend mediante ngrok
 ngrok http 5173
@@ -130,9 +152,29 @@ JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 ANDROID_HOME=/mnt/c/Users/TavaTeam/
 ```
 *El APK de depuración se generará en:* `frontend/android/app/build/outputs/apk/debug/app-debug.apk`
 
+### 4. Generar el APK apuntando a un ambiente desplegado (dev o prod)
+
+Para generar una versión de la app que use el servidor real (en vez de ngrok), el proceso es el mismo pero con la URL fija del ambiente correspondiente:
+
+```env
+# frontend/.env — para apuntar a desarrollo
+VITE_API_URL=https://devapp.pms.com.py/api
+
+# o para apuntar a producción PMS, cuando exista
+VITE_API_URL=https://app.pms.com.py/api
+```
+```bash
+npm run build && npx cap sync android
+cd android && ./gradlew assembleDebug
+```
+
+⚠️ **Importante:** la URL de la API queda fija dentro del `.apk` en el momento de compilar — no se puede cambiar después sin recompilar. Cada ambiente (dev/prod) necesita su propio `.apk`, no son intercambiables. Si el `.apk` da "Error de conexión" al abrir la app (aunque la web funcione bien en el navegador), verificar que `FRONTEND_URL` en el backend incluya `https://localhost` además del dominio real — el WebView de Capacitor hace las peticiones desde ese origen internamente.
+
 ---
 
 ## 👥 Usuarios de Prueba (Seed)
+
+> Los usuarios de seed solo existen en la base de datos de **desarrollo**. Nunca se cargan en producción.
 
 | Usuario | Contraseña | Rol | Acceso principal |
 |---------|------------|-----|------------------|
@@ -188,12 +230,24 @@ EN_REVISION → DISPONIBLE, VACIO, CARGADO
 
 ---
 
+## 📝 Migraciones — nota importante para el equipo
+
+Cualquier cambio en `schema.prisma` **debe generar su migración correspondiente antes de subir a `develop`**, con:
+```bash
+npx prisma migrate dev --name <descripcion-del-cambio>
+```
+Un cambio en el schema sin su migración generada queda invisible para cualquiera que clone el repo o despliegue una instancia nueva — el código espera columnas que la base de datos real no tiene, y las operaciones fallan en tiempo de ejecución (no en el build). Antes de mergear a `main`, confirmar que `git status` en `prisma/migrations/` no tenga cambios pendientes de generar.
+
+---
+
 ## 🔮 Roadmap / Próximas Versiones
 
 - [x] PWA / Aplicación nativa instalable en Android (Implementado vía Capacitor)
 - [x] Escaneo QR nativo desde la cámara móvil (Implementado vía `html5-qrcode` adaptado a Android)
 - [x] Generación y descarga de comprobantes en PDF (Implementado vía `jspdf`)
 - [x] Impresión térmica de remisiones con logotipos de la empresa (móvil y web).
+- [x] Despliegue en VPS propio con 3 ambientes independientes (desarrollo, producción PMS, producción Cryopar), HTTPS y proceso administrado con PM2.
 - [ ] Tareas cron automatizadas para la alerta y vencimiento de alquileres.
 - [ ] Envío automático de notificaciones por WhatsApp/Email al cliente ante vencimientos.
 - [ ] Módulo de facturación directa y registro de métodos de pago.
+- [ ] Backups automáticos programados de las 3 bases de datos en el VPS.

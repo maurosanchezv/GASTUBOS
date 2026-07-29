@@ -144,7 +144,7 @@ router.get('/:id', async (req, res, next) => {
 })
 
 // ─── POST /api/tubos ──────────────────────────────────────────────────────────
-router.post('/', requireRol('ADMIN', 'OPERADOR'), async (req, res, next) => {
+router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
   try {
     const data = tuboSchema.parse(req.body)
 
@@ -196,7 +196,7 @@ router.post('/', requireRol('ADMIN', 'OPERADOR'), async (req, res, next) => {
 })
 
 // ─── PATCH /api/tubos/:id ─────────────────────────────────────────────────────
-router.patch('/:id', requireRol('ADMIN', 'OPERADOR'), async (req, res, next) => {
+router.patch('/:id', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
   try {
     const tubo = await prisma.tubo.findUnique({ where: { id: req.params.id } })
     if (!tubo) return res.status(404).json({ error: 'Tubo no encontrado' })
@@ -226,7 +226,7 @@ const cambioEstadoSchema = z.object({
   clienteId:     z.string().optional().nullable(),
 })
 
-router.post('/:id/cambiar-estado', async (req, res, next) => {
+router.post('/:id/cambiar-estado', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
   try {
     const { estadoNuevo, observaciones, clienteId } = cambioEstadoSchema.parse(req.body)
     const tubo = await prisma.tubo.findUnique({ where: { id: req.params.id } })
