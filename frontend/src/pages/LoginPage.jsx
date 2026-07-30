@@ -128,6 +128,16 @@ export default function LoginPage() {
         <p style={{ textAlign: 'center', fontSize: 11, color: 'var(--text-muted)', marginTop: 20 }}>
           GasTubos v1.0 · Acceso seguro con JWT
         </p>
+        <div style={{ textAlign: 'center', marginTop: 12 }}>
+          <a 
+            href="/api/public/descargar-apk" 
+            download="GasTubos.apk"
+            className="btn btn-sm btn-outline" 
+            style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--text-secondary)' }}
+          >
+            <i className="ti ti-brand-android" style={{ fontSize: 16, color: '#22c55e' }} /> Descargar APK Móvil
+          </a>
+        </div>
       </div>
     </div>
   )

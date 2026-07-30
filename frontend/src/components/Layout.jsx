@@ -163,10 +163,12 @@ export default function Layout() {
       {/* LAUNCHER MÓVIL (Reemplaza al sidebar en pantallas pequeñas) */}
       <div className={`mobile-launcher ${sidebarOpen ? 'open' : ''}`}>
         <div className="mobile-launcher-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div className="logo-mark" style={{ width: 28, height: 28, fontSize: 14 }}><i className="ti ti-cylinder" /></div>
-            <div>
-              <div style={{ fontWeight: 600, fontSize: 13 }}>Menú Principal</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+            <img src={branding.isotipoSrc} alt="Isotipo Empresa" style={{ width: 32, height: 32, objectFit: 'contain', flexShrink: 0 }} />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {nombre_empresa && nombre_empresa !== 'Propio' ? nombre_empresa : 'GasTubos'}
+              </div>
               <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{user?.nombre} · {user?.rol}</div>
             </div>
           </div>

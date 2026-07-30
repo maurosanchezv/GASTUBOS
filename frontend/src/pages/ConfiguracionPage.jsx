@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useConfigStore } from '../store/configStore.js'
 import { PageHeader, FormGroup, useToast } from '../components/ui.jsx'
-import { DEFAULT_ISOTIPO_SRC, DEFAULT_LOGO_EMPRESA_SRC, getBrandingSources } from '../utils/logosSvg.js'
+import { getBrandingSources } from '../utils/logosSvg.js'
 
 export default function ConfiguracionPage() {
   const { nombre_empresa, direccion, telefono, isotipo_empresa, logo_empresa, updateConfig, loading } = useConfigStore()
@@ -60,34 +60,6 @@ export default function ConfiguracionPage() {
     setForm((prev) => ({ ...prev, [field]: '' }))
   }
 
-  const applyPreset = (presetName) => {
-    if (presetName === 'PMS') {
-      setForm((prev) => ({
-        ...prev,
-        nombre_empresa: 'PMS',
-        isotipo_empresa: DEFAULT_ISOTIPO_SRC,
-        logo_empresa: DEFAULT_LOGO_EMPRESA_SRC,
-      }))
-      toast('Preset PMS cargado', 'info')
-    } else if (presetName === 'Cryopar') {
-      setForm((prev) => ({
-        ...prev,
-        nombre_empresa: 'Cryopar',
-        isotipo_empresa: DEFAULT_ISOTIPO_SRC,
-        logo_empresa: DEFAULT_LOGO_EMPRESA_SRC,
-      }))
-      toast('Preset Cryopar cargado', 'info')
-    } else if (presetName === 'GasTubos') {
-      setForm((prev) => ({
-        ...prev,
-        nombre_empresa: 'GasTubos',
-        isotipo_empresa: '',
-        logo_empresa: '',
-      }))
-      toast('Preset predeterminado cargado', 'info')
-    }
-  }
-
   const handleSubmit = async (e) => {
     e.preventDefault()
     setSaving(true)
@@ -109,22 +81,6 @@ export default function ConfiguracionPage() {
         <div style={{ maxWidth: 680 }}>
           <form onSubmit={handleSubmit} className="card">
             <div className="card-title" style={{ marginBottom: 20 }}>Datos de Identidad y Marca</div>
-
-            {/* Presets Rápidos */}
-            <div style={{ marginBottom: 24, padding: 14, background: 'var(--surface-hover)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
-              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Presets Rápidos de Marca (1 Clic)</div>
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => applyPreset('PMS')}>
-                  <i className="ti ti-brand-abstract" /> Cargar Preset PMS
-                </button>
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => applyPreset('Cryopar')}>
-                  <i className="ti ti-snowflake" /> Cargar Preset Cryopar
-                </button>
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => applyPreset('GasTubos')}>
-                  <i className="ti ti-reload" /> Usar Predeterminado GasTubos
-                </button>
-              </div>
-            </div>
 
             <div className="form-grid">
               <FormGroup label="Nombre de la Empresa (Marca)" hint="Reemplaza la palabra 'Propio' en listados de tubos y etiquetas QR" required>

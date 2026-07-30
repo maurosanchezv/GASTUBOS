@@ -4,6 +4,11 @@ import express from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
 import rateLimit from 'express-rate-limit'
+import path from 'path'
+import { fileURLToPath } from 'url'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 
 import authRoutes     from './routes/auth.js'
 import tuboRoutes     from './routes/tubos.js'
@@ -64,7 +69,15 @@ app.use(express.json({ limit: '5mb' }))
 app.use(express.urlencoded({ limit: '5mb', extended: true }))
 
 // ─── Rutas públicas (sin auth) ────────────────────────────────────────────────
-// Accedidas al escanear QR desde celular
+// Accedidas al escanear QR desde celular o descargar la APK
+app.get('/api/public/descargar-apk', (req, res) => {
+  const apkPath = path.resolve(__dirname, '../../frontend/android/app/build/outputs/apk/debug/app-debug.apk')
+  res.download(apkPath, 'GasTubos.apk', (err) => {
+    if (err && !res.headersSent) {
+      res.status(404).json({ error: 'El archivo APK no se encuentra en el servidor' })
+    }
+  })
+})
 app.use('/api/public/tubos', publicRoutes)
 
 // ─── API protegida ────────────────────────────────────────────────────────────
