@@ -21,33 +21,44 @@ const OFICINA = ['ADMIN', 'SUPERVISOR', 'OPERADOR']
 
 const NAV = [
   {
-    group: 'Operación General',
+    group: 'PRINCIPAL',
     items: [
       { to: '/',          icon: 'ti-layout-dashboard', label: 'Dashboard' },
-      { to: '/tubos',      icon: 'ti-cylinder',         label: 'Tubos',        restrictedTo: OFICINA },
-      { to: '/reparto',    icon: 'ti-truck-delivery',   label: 'Hoja de Ruta' },
-      { to: '/entregas',   icon: 'ti-truck',            label: 'Entregas',     restrictedTo: OFICINA },
-      { to: '/devoluciones', icon: 'ti-arrow-back',     label: 'Devoluciones', restrictedTo: OFICINA },
-      { to: '/cargas',     icon: 'ti-flame',            label: 'Cargas',       restrictedTo: OFICINA },
     ],
   },
   {
-    group: 'Clientes y Gestión',
+    group: 'OPERACIÓN GENERAL',
     items: [
-      { to: '/clientes',  icon: 'ti-users',            label: 'Clientes',           restrictedTo: OFICINA },
-      { to: '/alquileres',icon: 'ti-clock',            label: 'Alquileres',         restrictedTo: OFICINA },
-      { to: '/ventas',    icon: 'ti-receipt-2',        label: 'Ventas',             restrictedTo: OFICINA },
-      { to: '/cilindros-terceros', icon: 'ti-box',    label: 'Cilindros Terceros', restrictedTo: OFICINA },
+      { to: '/tubos',              icon: 'ti-cylinder',       label: 'Tubos',                 restrictedTo: OFICINA },
+      { to: '/cilindros-terceros', icon: 'ti-box',            label: 'Cilindros de Terceros', restrictedTo: OFICINA },
+      { to: '/camiones',           icon: 'ti-caravan',        label: 'Camiones',              restrictedTo: OFICINA },
+      { to: '/reparto',            icon: 'ti-truck-delivery', label: 'Hoja de Ruta' },
+      { to: '/entregas',           icon: 'ti-truck',          label: 'Entregas',              restrictedTo: OFICINA },
+      { to: '/cargas',             icon: 'ti-flame',          label: 'Cargas',                restrictedTo: OFICINA },
+      { to: '/devoluciones',       icon: 'ti-arrow-back',     label: 'Devoluciones',          restrictedTo: OFICINA },
+      { to: '/alquileres',         icon: 'ti-clock',          label: 'Alquileres',            restrictedTo: OFICINA },
     ],
   },
   {
-    group: 'Administración',
+    group: 'CLIENTES Y GESTIÓN',
     items: [
-      { to: '/reportes',   icon: 'ti-chart-bar',       label: 'Reportes',     restrictedTo: OFICINA },
-      { to: '/camiones',   icon: 'ti-caravan',         label: 'Camiones',     restrictedTo: OFICINA },
-      { to: '/usuarios',   icon: 'ti-user-cog',        label: 'Usuarios',     restrictedTo: ['ADMIN'] },
-      { to: '/configuracion', icon: 'ti-settings',     label: 'Configuración', restrictedTo: ['ADMIN'] },
-      { to: '/auditoria',  icon: 'ti-file-text',       label: 'Auditoría',    restrictedTo: ['ADMIN'] },
+      { to: '/clientes',  icon: 'ti-users',     label: 'Clientes', restrictedTo: OFICINA },
+      { to: '/ventas',    icon: 'ti-receipt-2', label: 'Ventas',   restrictedTo: OFICINA },
+    ],
+  },
+  {
+    group: 'ADMINISTRACIÓN',
+    items: [
+      { to: '/reportes',      icon: 'ti-chart-bar', label: 'Reportes',      restrictedTo: OFICINA },
+      { to: '/auditoria',     icon: 'ti-file-text', label: 'Auditoría',     restrictedTo: ['ADMIN'] },
+      { to: '/usuarios',      icon: 'ti-user-cog',  label: 'Usuarios',      restrictedTo: ['ADMIN'] },
+      { to: '/configuracion', icon: 'ti-settings',  label: 'Configuración', restrictedTo: ['ADMIN'] },
+    ],
+  },
+  {
+    group: 'MI CUENTA',
+    items: [
+      { to: '/perfil', icon: 'ti-user', label: 'Mi Perfil' },
     ],
   },
 ]
@@ -87,9 +98,13 @@ export default function Layout() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <img src={branding.isotipoSrc} alt="Isotipo" style={{ width: 36, height: 36, objectFit: 'contain', flexShrink: 0 }} />
             <div style={{ minWidth: 0 }}>
-              <div className="logo-text" style={{ fontSize: 16, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {nombre_empresa && nombre_empresa !== 'Propio' ? nombre_empresa : 'GasTubos'}
-              </div>
+              {logo_empresa ? (
+                <img src={branding.logoSrc} alt="Logo" style={{ height: 28, maxWidth: 130, objectFit: 'contain', display: 'block' }} />
+              ) : (
+                <div className="logo-text" style={{ fontSize: 16, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {nombre_empresa && nombre_empresa !== 'Propio' ? nombre_empresa : 'GasTubos'}
+                </div>
+              )}
               <div className="logo-sub">Gestión Industrial v1.0</div>
             </div>
           </div>
@@ -166,9 +181,13 @@ export default function Layout() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
             <img src={branding.isotipoSrc} alt="Isotipo Empresa" style={{ width: 32, height: 32, objectFit: 'contain', flexShrink: 0 }} />
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {nombre_empresa && nombre_empresa !== 'Propio' ? nombre_empresa : 'GasTubos'}
-              </div>
+              {logo_empresa ? (
+                <img src={branding.logoSrc} alt="Logo Empresa" style={{ height: 24, maxWidth: 120, objectFit: 'contain', display: 'block' }} />
+              ) : (
+                <div style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {nombre_empresa && nombre_empresa !== 'Propio' ? nombre_empresa : 'GasTubos'}
+                </div>
+              )}
               <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{user?.nombre} · {user?.rol}</div>
             </div>
           </div>

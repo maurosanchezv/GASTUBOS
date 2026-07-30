@@ -51,7 +51,8 @@ function getObservacionesLimpias(entrega) {
 
 export default function RepartoPage() {
   const { user } = useAuthStore()
-  const { nombre_empresa, direccion, telefono } = useConfigStore()
+  const { nombre_empresa, direccion, telefono, isotipo_empresa, logo_empresa } = useConfigStore()
+  const branding = getBrandingSources(isotipo_empresa, logo_empresa)
   const { toast } = useToast()
 
   const [entregas, setEntregas] = useState([])
@@ -558,7 +559,10 @@ export default function RepartoPage() {
     if (!activeEntrega) return
     const subtotalScanned = (activeEntrega.detalles || [])
       .filter(d => scannedIds.includes(d.tuboId))
-      .reduce((acc, d) => acc + Number(d.subtotal), 0)
+      .reduce((acc, d) => {
+        const val = Number(d.subtotal ?? (d.cantidadGas > 0 ? d.cantidadGas * d.precioUnitario : d.precioUnitario) ?? 0)
+        return acc + (isNaN(val) ? 0 : val)
+      }, 0)
     
     const delivery = Number(activeEntrega.costoDelivery || 0)
     setMontoRecibido(subtotalScanned + delivery)
@@ -864,7 +868,10 @@ export default function RepartoPage() {
     setNuevoRecambioId('')
     setManualTuboId('')
     setMetodoPago('EFECTIVO')
-    const subtotal = entrega.detalles?.reduce((acc, d) => acc + Number(d.subtotal), 0) || 0
+    const subtotal = (entrega.detalles || []).reduce((acc, d) => {
+      const val = Number(d.subtotal ?? (d.cantidadGas > 0 ? d.cantidadGas * d.precioUnitario : d.precioUnitario) ?? 0)
+      return acc + (isNaN(val) ? 0 : val)
+    }, 0)
     const delivery = Number(entrega.costoDelivery || 0)
     setMontoRecibido(subtotal + delivery)
   }
@@ -1401,11 +1408,11 @@ export default function RepartoPage() {
 
                   {/* Checklist de tubos */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {activeEntrega.detalles?.map(d => {
+                    {activeEntrega.detalles?.map((d, i) => {
                       const verificado = scannedIds.includes(d.tuboId)
                       return (
                         <div
-                          key={d.id}
+                          key={d.id || d.tuboId || i}
                           style={{
                             display: 'flex', alignItems: 'center',
                             padding: '10px 12px', background: verificado ? '#ecfdf5' : 'var(--surface-2)',
@@ -1427,7 +1434,7 @@ export default function RepartoPage() {
                               )}
                             </div>
                             <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 1 }}>
-                              {d.tubo?.gas} · {Number(d.cantidadGas)} {d.unidadGas}
+                              {d.tubo?.gas || 'Cilindro'} · {d.cantidadGas !== undefined && d.cantidadGas !== null ? `${formatNumberSpanish(d.cantidadGas)} ${d.unidadGas || ''}` : 'Envase Vacío'}
                             </div>
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1500,19 +1507,13 @@ export default function RepartoPage() {
                         </div>
 
                         {escaneando ? (
-                          <Modal
-                            open={escaneando}
-                            title="Escanear Código de Tubo"
-                            onClose={stopScanner}
-                            width={400}
+                          <button
+                            className="btn btn-danger"
+                            onClick={stopScanner}
+                            style={{ width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, height: 52, fontSize: 14 }}
                           >
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 15, alignItems: 'center', background: '#000', padding: 12, borderRadius: 8 }}>
-                              <div id={SCANNER_ID} style={{ width: '100%', maxWidth: '320px', overflow: 'hidden' }} />
-                              <button className="btn btn-danger" onClick={stopScanner} style={{ width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, height: 42 }}>
-                                <i className="ti ti-player-stop" style={{ fontSize: 16 }} /> Apagar Cámara / Cancelar
-                              </button>
-                            </div>
-                          </Modal>
+                            <i className="ti ti-player-stop" style={{ fontSize: 20 }} /> Apagar Cámara / Cancelar
+                          </button>
                         ) : (
                           <button
                             className="btn btn-primary"
@@ -1523,6 +1524,19 @@ export default function RepartoPage() {
                           </button>
                         )}
                       </div>
+
+                      {/* Escáner de cámara visible si está activo (Overlay pantalla completa original) */}
+                      {escaneando && (
+                        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: '#000', display: 'flex', flexDirection: 'column' }}>
+                          <div style={{ padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#111' }}>
+                            <span style={{ color: '#fff', fontWeight: 600 }}>Escanear QR de Tubo</span>
+                            <button className="btn btn-sm" onClick={stopScanner} style={{ background: '#333', color: '#fff' }}>Cerrar</button>
+                          </div>
+                          <div style={{ flex: 1, position: 'relative' }}>
+                            <div id={SCANNER_ID} style={{ width: '100%', height: '100%' }} />
+                          </div>
+                        </div>
+                      )}
 
                       {/* Ingreso manual alternativo */}
                       <div style={{ marginBottom: 16, background: 'var(--surface-2)', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--border)' }}>
@@ -1922,11 +1936,11 @@ export default function RepartoPage() {
                 </div>
               </div>
             </div>
-            )
+          )
         )}
       </div>
 
-      {(entregaParaImprimir || activeEntrega) && createPortal(
+      {entregaParaImprimir && createPortal(
         <div className="print-ticket-container">
           <div className="ticket-header">
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', marginBottom: '10px' }}>
@@ -1935,16 +1949,16 @@ export default function RepartoPage() {
             </div>
             {direccion ? <p style={{ margin: 0, fontSize: '10px' }}>{direccion}</p> : <p style={{ margin: 0, fontSize: '10px' }}>Gestión de Gases Industriales</p>}
             {telefono && <p style={{ margin: '2px 0 0', fontSize: '10px' }}>Tel: {telefono}</p>}
-            <p style={{ margin: '4px 0 0', fontSize: '11px', fontWeight: 'bold' }}>REMISIÓN: {(entregaParaImprimir || activeEntrega).numero}</p>
+            <p style={{ margin: '4px 0 0', fontSize: '11px', fontWeight: 'bold' }}>REMISIÓN: {entregaParaImprimir.numero}</p>
           </div>
           
           <div style={{ margin: '8px 0', fontSize: '11px' }}>
-            <strong>Cliente:</strong> {(entregaParaImprimir || activeEntrega).cliente?.nombre}<br />
-            <strong>RUC/CI:</strong> {(entregaParaImprimir || activeEntrega).cliente?.ruc || '—'}<br />
-            <strong>Dirección:</strong> {(entregaParaImprimir || activeEntrega).direccionEntrega}<br />
-            <strong>Fecha:</strong> {new Date((entregaParaImprimir || activeEntrega).fechaEntrega).toLocaleString('es-PY')}<br />
-            <strong>Chofer:</strong> {(entregaParaImprimir || activeEntrega).repartidor?.nombre || 'Sin asignar'}<br />
-            <strong>Tipo:</strong> {(entregaParaImprimir || activeEntrega).tipoOperacion.replace('_', ' ')}
+            <strong>Cliente:</strong> {entregaParaImprimir.cliente?.nombre}<br />
+            <strong>RUC/CI:</strong> {entregaParaImprimir.cliente?.ruc || '—'}<br />
+            <strong>Dirección:</strong> {entregaParaImprimir.direccionEntrega}<br />
+            <strong>Fecha:</strong> {new Date(entregaParaImprimir.fechaEntrega).toLocaleString('es-PY')}<br />
+            <strong>Chofer:</strong> {entregaParaImprimir.repartidor?.nombre || 'Sin asignar'}<br />
+            <strong>Tipo:</strong> {entregaParaImprimir.tipoOperacion.replace('_', ' ')}
           </div>
           
           <table className="ticket-table">
@@ -1956,7 +1970,7 @@ export default function RepartoPage() {
               </tr>
             </thead>
             <tbody>
-              {(entregaParaImprimir || activeEntrega).detalles?.map(d => {
+              {entregaParaImprimir.detalles?.map(d => {
                 const capStr = d.tubo ? ` (${formatCapacidad(d.tubo)})` : '';
                 const showSerie = d.tubo?.serie && d.tubo?.serie !== d.tuboId;
                 return (
@@ -1996,37 +2010,36 @@ export default function RepartoPage() {
               <tr style={{ borderTop: '1px dashed #000' }}>
                 <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>DELIVERY:</td>
                 <td style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>
-                  {Number((entregaParaImprimir || activeEntrega).costoDelivery || 0).toLocaleString('es-PY')} GS
+                  {Number(entregaParaImprimir.costoDelivery || 0).toLocaleString('es-PY')} GS
                 </td>
               </tr>
               <tr>
                 <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px' }}>TOTAL:</td>
                 <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px', color: 'var(--blue)' }}>
                   {(
-                    ((entregaParaImprimir || activeEntrega).detalles?.reduce((acc, d) => acc + Number(d.subtotal), 0) || 0) +
-                    Number((entregaParaImprimir || activeEntrega).costoDelivery || 0)
+                    (entregaParaImprimir.detalles?.reduce((acc, d) => acc + Number(d.subtotal), 0) || 0) +
+                    Number(entregaParaImprimir.costoDelivery || 0)
                   ).toLocaleString('es-PY')} GS
                 </td>
               </tr>
             </tbody>
           </table>
 
-
           
-          {recambiosParaImprimir((entregaParaImprimir || activeEntrega)).length > 0 && (
+          {recambiosParaImprimir(entregaParaImprimir).length > 0 && (
             <div style={{ margin: '8px 0', fontSize: '10px', borderTop: '1px dashed #000', paddingTop: '4px' }}>
               <strong>Recambios Recibidos:</strong>
               <ul style={{ paddingLeft: 14, margin: 0 }}>
-                {recambiosParaImprimir((entregaParaImprimir || activeEntrega)).map((desc, i) => (
+                {recambiosParaImprimir(entregaParaImprimir).map((desc, i) => (
                   <li key={i}>{desc}</li>
                 ))}
               </ul>
             </div>
           )}
 
-          {getObservacionesLimpias(entregaParaImprimir || activeEntrega) && (
+          {getObservacionesLimpias(entregaParaImprimir) && (
             <div style={{ margin: '8px 0', fontSize: '10px', fontStyle: 'italic', borderTop: '1px dashed #000', paddingTop: '4px' }}>
-              <strong>Obs:</strong> {getObservacionesLimpias(entregaParaImprimir || activeEntrega)}
+              <strong>Obs:</strong> {getObservacionesLimpias(entregaParaImprimir)}
             </div>
           )}
           

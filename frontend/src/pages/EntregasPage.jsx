@@ -323,17 +323,25 @@ export default function EntregasPage() {
     if (!mapaHistRef.current || mapaHistInstance.current) return
 
     // Mostrar en el mapa únicamente entregas que tengan tubos ACTUALMENTE activos en el cliente (ENTREGADO / ALQUILADO)
+    const getLat = e => e.latitud || e.sucursal?.latitud || e.cliente?.latitud
+    const getLng = e => e.longitud || e.sucursal?.longitud || e.cliente?.longitud
+
     const conCoords = entregas.filter(e => {
-      if (!e.latitud || !e.longitud || !e.confirmada || e.cancelada) return false
-      // Si el tubo fue devuelto al depósito, su estado ya no es ENTREGADO ni ALQUILADO
+      const lat = getLat(e)
+      const lng = getLng(e)
+      if (!lat || !lng || !e.confirmada || e.cancelada) return false
+      // Filtrar tubos que sigan activos en manos del cliente ('ENTREGADO' o 'ALQUILADO')
       const tubosActivosEnCliente = e.detalles?.filter(d => 
         !d.tubo || d.tubo.estado === 'ENTREGADO' || d.tubo.estado === 'ALQUILADO'
       ) || []
       return tubosActivosEnCliente.length > 0
     })
 
-    const center = conCoords.length > 0
-      ? [conCoords[0].latitud, conCoords[0].longitud]
+    const firstLat = conCoords.length > 0 ? getLat(conCoords[0]) : null
+    const firstLng = conCoords.length > 0 ? getLng(conCoords[0]) : null
+
+    const center = firstLat && firstLng
+      ? [firstLat, firstLng]
       : [-25.2867, -57.6474]
 
     const map = L.map(mapaHistRef.current).setView(center, 12)
@@ -344,7 +352,9 @@ export default function EntregasPage() {
     // Agrupar entregas por coordenada exacta (6 decimales)
     const groups = {}
     conCoords.forEach(e => {
-      const key = `${Number(e.latitud).toFixed(6)},${Number(e.longitud).toFixed(6)}`
+      const lat = getLat(e)
+      const lng = getLng(e)
+      const key = `${Number(lat).toFixed(6)},${Number(lng).toFixed(6)}`
       if (!groups[key]) {
         groups[key] = []
       }
@@ -593,15 +603,19 @@ export default function EntregasPage() {
 
   const f = k => e => setForm(p => ({ ...p, [k]: e.target.value }))
   const clienteSeleccionado = clientes.find(c => c.id === form.clienteId)
+  const getLat = e => e.latitud || e.sucursal?.latitud || e.cliente?.latitud
+  const getLng = e => e.longitud || e.sucursal?.longitud || e.cliente?.longitud
   const entregasConCoords = entregas.filter(e => {
-    if (!e.latitud || !e.longitud || !e.confirmada || e.cancelada) return false
+    const lat = getLat(e)
+    const lng = getLng(e)
+    if (!lat || !lng || !e.confirmada || e.cancelada) return false
     const tubosActivos = e.detalles?.filter(d => 
       !d.tubo || d.tubo.estado === 'ENTREGADO' || d.tubo.estado === 'ALQUILADO'
     ) || []
     return tubosActivos.length > 0
   })
   const ubicacionesUnicasMapa = Array.from(new Set(
-    entregasConCoords.map(e => `${Number(e.latitud).toFixed(6)},${Number(e.longitud).toFixed(6)}`)
+    entregasConCoords.map(e => `${Number(getLat(e)).toFixed(6)},${Number(getLng(e)).toFixed(6)}`)
   ))
 
   const handleClienteChange = (e) => {
@@ -1062,15 +1076,13 @@ export default function EntregasPage() {
                   {loadingH ? 'Actualizando...' : 'Actualizar'}
                 </button>
 
-                {ubicacionesUnicasMapa.length > 0 && (
-                  <button className="btn" onClick={() => setMapaHistAbierto(v => !v)}
-                    style={{ display: 'flex', alignItems: 'center', gap: 6, flex: '1 1 auto', justifyContent: 'center', maxWidth: '200px' }}>
-                    <i className="ti ti-map" />
-                    {mapaHistAbierto
-                      ? 'Ocultar mapa'
-                      : `Mapa (${ubicacionesUnicasMapa.length})`}
-                  </button>
-                )}
+                <button className="btn" onClick={() => setMapaHistAbierto(v => !v)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, flex: '1 1 auto', justifyContent: 'center', maxWidth: '200px' }}>
+                  <i className="ti ti-map" />
+                  {mapaHistAbierto
+                    ? 'Ocultar mapa'
+                    : `Mapa (${ubicacionesUnicasMapa.length})`}
+                </button>
               </div>
 
               {/* Mapa de historial */}
