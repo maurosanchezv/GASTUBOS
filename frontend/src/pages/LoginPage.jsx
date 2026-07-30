@@ -1,15 +1,23 @@
-// gastubos/frontend/src/pages/LoginPage.jsx
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore.js'
+import { useConfigStore } from '../store/configStore.js'
+import { getBrandingSources } from '../utils/logosSvg.js'
 
 export default function LoginPage() {
   const [form, setForm]     = useState({ username: '', password: '' })
   const [verPassword, setVerPassword] = useState(false)
   const [error, setError]   = useState('')
   const { login, loading }  = useAuthStore()
+  const { nombre_empresa, isotipo_empresa, logo_empresa, fetchPublicBranding } = useConfigStore()
   const navigate            = useNavigate()
   const [params]            = useSearchParams()
+
+  useEffect(() => {
+    fetchPublicBranding()
+  }, [])
+
+  const branding = getBrandingSources(isotipo_empresa, logo_empresa)
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -31,19 +39,23 @@ export default function LoginPage() {
       background: 'var(--bg)', padding: 16,
     }}>
       <div style={{ width: '100%', maxWidth: 360 }}>
-        {/* Logo */}
-        <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <div style={{
-            width: 52, height: 52,
-            background: 'var(--blue)',
-            borderRadius: 14,
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            marginBottom: 14,
-          }}>
-            <i className="ti ti-cylinder" style={{ fontSize: 26, color: '#fff' }} />
+        {/* Logo de Marca e Isotipo */}
+        <div style={{ textAlign: 'center', marginBottom: 28 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <img 
+              src={branding.isotipoSrc} 
+              alt="Isotipo Empresa" 
+              style={{ width: 64, height: 64, objectFit: 'contain' }} 
+            />
+            <img 
+              src={branding.logoSrc} 
+              alt="Logo Empresa" 
+              style={{ height: 48, maxWidth: 220, objectFit: 'contain' }} 
+            />
           </div>
-          <div style={{ fontSize: 22, fontWeight: 700 }}>GasTubos</div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>Sistema de Gestión Industrial</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 500 }}>
+            {nombre_empresa && nombre_empresa !== 'Propio' ? nombre_empresa : 'GasTubos'} — Sistema de Gestión Industrial
+          </div>
         </div>
 
         <form onSubmit={handleSubmit} style={{

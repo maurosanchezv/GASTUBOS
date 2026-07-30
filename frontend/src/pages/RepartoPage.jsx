@@ -8,7 +8,7 @@ import { useConfigStore } from '../store/configStore.js'
 import { PageHeader, Spinner, EmptyState, StateBadge, Modal, formatCapacidad } from '../components/ui.jsx'
 import { useToast } from '../components/ui.jsx'
 import { EscPosBuilder, generarLogoEscPos } from '../utils/escPosBuilder.js'
-import { LOGO_TUBOS_SVG, LOGO_PMS_SVG } from '../utils/logosSvg.js'
+import { LOGO_TUBOS_SVG, LOGO_PMS_SVG, getBrandingSources } from '../utils/logosSvg.js'
 
 const SCANNER_ID = 'reparto-qr-reader'
 
@@ -19,7 +19,7 @@ const formatNumberSpanish = (val) => {
   if (Number.isInteger(rounded)) {
     return rounded.toString()
   }
-  return rounded.toFixed(3).replace('.', ',')
+  return rounded.toString().replace('.', ',')
 }
 
 const TIPO_INFO = {
@@ -160,7 +160,7 @@ export default function RepartoPage() {
     
     let logoBytes = null
     try {
-      logoBytes = await generarLogoEscPos()
+      logoBytes = await generarLogoEscPos(branding.isotipoSrc, branding.logoSrc)
     } catch (e) {
       console.warn("No se pudo generar el logo para la impresion:", e)
     }
@@ -1930,8 +1930,8 @@ export default function RepartoPage() {
         <div className="print-ticket-container">
           <div className="ticket-header">
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', marginBottom: '10px' }}>
-              <div style={{ width: '40px', height: '40px', display: 'flex', alignItems: 'center' }} dangerouslySetInnerHTML={{ __html: LOGO_TUBOS_SVG }} />
-              <div style={{ width: '108px', height: '40px', display: 'flex', alignItems: 'center' }} dangerouslySetInnerHTML={{ __html: LOGO_PMS_SVG }} />
+              <img src={branding.isotipoSrc} alt="Isotipo" style={{ width: '40px', height: '40px', objectFit: 'contain' }} />
+              <img src={branding.logoSrc} alt="Logo" style={{ width: '108px', height: '40px', objectFit: 'contain' }} />
             </div>
             {direccion ? <p style={{ margin: 0, fontSize: '10px' }}>{direccion}</p> : <p style={{ margin: 0, fontSize: '10px' }}>Gestión de Gases Industriales</p>}
             {telefono && <p style={{ margin: '2px 0 0', fontSize: '10px' }}>Tel: {telefono}</p>}
@@ -2067,8 +2067,8 @@ export default function RepartoPage() {
           <div className="ticket-preview">
             <div className="ticket-header">
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', marginBottom: '10px' }}>
-                <div style={{ width: '40px', height: '40px', display: 'flex', alignItems: 'center' }} dangerouslySetInnerHTML={{ __html: LOGO_TUBOS_SVG }} />
-                <div style={{ width: '108px', height: '40px', display: 'flex', alignItems: 'center' }} dangerouslySetInnerHTML={{ __html: LOGO_PMS_SVG }} />
+                <img src={branding.isotipoSrc} alt="Isotipo" style={{ width: '40px', height: '40px', objectFit: 'contain' }} />
+                <img src={branding.logoSrc} alt="Logo" style={{ width: '108px', height: '40px', objectFit: 'contain' }} />
               </div>
               {direccion ? <p style={{ margin: 0, fontSize: '10px', color: '#666' }}>{direccion}</p> : <p style={{ margin: 0, fontSize: '10px', color: '#666' }}>Gestión de Gases Industriales</p>}
               {telefono && <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#666' }}>Tel: {telefono}</p>}

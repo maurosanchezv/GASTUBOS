@@ -2,6 +2,8 @@
 import { useState, useEffect } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore.js'
+import { useConfigStore } from '../store/configStore.js'
+import { getBrandingSources } from '../utils/logosSvg.js'
 
 const GAS_COLORS = {
   'CO2':       '#1A5FA8', 'CO₂':      '#1A5FA8',
@@ -18,58 +20,62 @@ export const gasColor = (g) => {
 const OFICINA = ['ADMIN', 'SUPERVISOR', 'OPERADOR']
 
 const NAV = [
-  { group: null,         items: [
-    { to: '/',           icon: 'ti-layout-dashboard', label: 'Dashboard' },
-  ]},
-  { group: 'Operaciones', items: [
-    { to: '/tubos',      icon: 'ti-cylinder',         label: 'Tubos',        restrictedTo: OFICINA },
-    { to: '/cilindros-terceros', icon: 'ti-package',  label: 'Cilindros de Terceros', restrictedTo: OFICINA },
-    { to: '/camiones',   icon: 'ti-truck',            label: 'Camiones',     restrictedTo: OFICINA },
-    { to: '/reparto',    icon: 'ti-route',            label: 'Hoja de Ruta' },
-    { to: '/entregas',   icon: 'ti-truck-delivery',   label: 'Entregas',     restrictedTo: OFICINA },
-    { to: '/cargas',     icon: 'ti-gas-station',      label: 'Cargas',       restrictedTo: OFICINA },
-    { to: '/devoluciones',icon: 'ti-arrow-back-up',   label: 'Devoluciones', restrictedTo: ['ADMIN', 'SUPERVISOR', 'OPERADOR', 'REPARTIDOR'] },
-    { to: '/alquileres', icon: 'ti-calendar-time',    label: 'Alquileres',   restrictedTo: OFICINA, badge: true },
-  ]},
-  { group: 'Gestión', items: [
-    { to: '/clientes',   icon: 'ti-users',            label: 'Clientes', restrictedTo: OFICINA },
-    { to: '/ventas',     icon: 'ti-shopping-cart',    label: 'Ventas',   restrictedTo: OFICINA },
-  ]},
-  { group: 'Sistema', items: [
-    { to: '/reportes',   icon: 'ti-chart-bar',        label: 'Reportes', restrictedTo: ['ADMIN', 'SUPERVISOR'] },
-    { to: '/auditoria',  icon: 'ti-list-details',     label: 'Auditoría', restrictedTo: ['ADMIN', 'SUPERVISOR'] },
-    { to: '/usuarios',   icon: 'ti-shield-lock',      label: 'Usuarios', restrictedTo: ['ADMIN'] },
-    { to: '/configuracion',icon: 'ti-settings',         label: 'Configuración', restrictedTo: ['ADMIN'] },
-  ]},
-  { group: 'Mi Cuenta', items: [
-    { to: '/perfil',     icon: 'ti-user-circle',      label: 'Mi Perfil' },
-  ]},
+  {
+    group: 'Operación General',
+    items: [
+      { to: '/',          icon: 'ti-layout-dashboard', label: 'Dashboard' },
+      { to: '/tubos',      icon: 'ti-cylinder',         label: 'Tubos',        restrictedTo: OFICINA },
+      { to: '/reparto',    icon: 'ti-truck-delivery',   label: 'Hoja de Ruta' },
+      { to: '/entregas',   icon: 'ti-truck',            label: 'Entregas',     restrictedTo: OFICINA },
+      { to: '/devoluciones', icon: 'ti-arrow-back',     label: 'Devoluciones', restrictedTo: OFICINA },
+      { to: '/cargas',     icon: 'ti-flame',            label: 'Cargas',       restrictedTo: OFICINA },
+    ],
+  },
+  {
+    group: 'Clientes y Gestión',
+    items: [
+      { to: '/clientes',  icon: 'ti-users',            label: 'Clientes',           restrictedTo: OFICINA },
+      { to: '/alquileres',icon: 'ti-clock',            label: 'Alquileres',         restrictedTo: OFICINA },
+      { to: '/ventas',    icon: 'ti-receipt-2',        label: 'Ventas',             restrictedTo: OFICINA },
+      { to: '/cilindros-terceros', icon: 'ti-box',    label: 'Cilindros Terceros', restrictedTo: OFICINA },
+    ],
+  },
+  {
+    group: 'Administración',
+    items: [
+      { to: '/reportes',   icon: 'ti-chart-bar',       label: 'Reportes',     restrictedTo: OFICINA },
+      { to: '/camiones',   icon: 'ti-caravan',         label: 'Camiones',     restrictedTo: OFICINA },
+      { to: '/usuarios',   icon: 'ti-user-cog',        label: 'Usuarios',     restrictedTo: ['ADMIN'] },
+      { to: '/configuracion', icon: 'ti-settings',     label: 'Configuración', restrictedTo: ['ADMIN'] },
+      { to: '/auditoria',  icon: 'ti-file-text',       label: 'Auditoría',    restrictedTo: ['ADMIN'] },
+    ],
+  },
 ]
 
-// Items del bottom-nav móvil. El REPARTIDOR ve un layout simplificado.
 const BOTTOM_NAV = [
-  { to: '/',         icon: 'ti-layout-dashboard',  label: 'Inicio',   restrictedTo: OFICINA },
+  { to: '/',          icon: 'ti-layout-dashboard', label: 'Inicio' },
+  { to: '/reparto',    icon: 'ti-truck-delivery',   label: 'Reparto' },
   { to: '/tubos',    icon: 'ti-cylinder',          label: 'Tubos',    restrictedTo: OFICINA },
-  { to: '/reparto',  icon: 'ti-route',             label: 'Ruta',     restrictedTo: ['REPARTIDOR'] },
-  { to: '/entregas', icon: 'ti-truck-delivery',    label: 'Entregas', restrictedTo: OFICINA },
-  { to: '/clientes', icon: 'ti-users',             label: 'Clientes', restrictedTo: OFICINA },
+  { to: '/entregas', icon: 'ti-truck',             label: 'Entregas', restrictedTo: OFICINA },
 ]
 
 export default function Layout() {
   const { user, logout } = useAuthStore()
+  const { nombre_empresa, isotipo_empresa, logo_empresa, fetchConfig } = useConfigStore()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [vencidos, setVencidos] = useState(0)
 
   useEffect(() => {
-    // El REPARTIDOR no tiene acceso al endpoint de alquileres — evitar la llamada.
-    if (user?.rol === 'REPARTIDOR') return
-    import('../services/api.js').then(({ default: api }) =>
-      api.get('/alquileres/vencidos').then(r => setVencidos(r.data.length)).catch(() => {})
-    )
-  }, [user?.rol])
+    fetchConfig()
+  }, [])
 
-  const initials = user?.nombre?.split(' ').map(w => w[0]).slice(0,2).join('').toUpperCase() || 'U'
+  const branding = getBrandingSources(isotipo_empresa, logo_empresa)
+  const initials = user?.nombre
+    ? user.nombre.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()
+    : 'U'
+
+  // Calcular alquileres vencidos para badge
+  const [vencidos, setVencidos] = useState(0)
 
   return (
     <div className="app-shell">
@@ -78,10 +84,14 @@ export default function Layout() {
       {/* SIDEBAR */}
       <nav className={`app-sidebar ${sidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-logo">
-          <div className="logo-mark"><i className="ti ti-cylinder" /></div>
-          <div>
-            <div className="logo-text">GasTubos</div>
-            <div className="logo-sub">Gestión Industrial v1.0</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <img src={branding.isotipoSrc} alt="Isotipo" style={{ width: 36, height: 36, objectFit: 'contain', flexShrink: 0 }} />
+            <div style={{ minWidth: 0 }}>
+              <div className="logo-text" style={{ fontSize: 16, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {nombre_empresa && nombre_empresa !== 'Propio' ? nombre_empresa : 'GasTubos'}
+              </div>
+              <div className="logo-sub">Gestión Industrial v1.0</div>
+            </div>
           </div>
         </div>
 

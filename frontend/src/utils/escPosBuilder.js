@@ -1,6 +1,6 @@
 // gastubos/frontend/src/utils/escPosBuilder.js
 // --- ESC/POS Binary Command Builder ---
-import { LOGO_TUBOS_SVG, LOGO_PMS_SVG } from './logosSvg.js';
+import { DEFAULT_ISOTIPO_SRC, DEFAULT_LOGO_EMPRESA_SRC } from './logosSvg.js';
 
 export class EscPosBuilder {
   constructor() {
@@ -64,8 +64,16 @@ export class EscPosBuilder {
     return this.addBytes([0x1D, 0x21, 0x00]);
   }
 
-  feed(lines = 3) {
-    return this.addBytes([0x1B, 0x64, lines]);
+  doubleHeightOn() {
+    return this.addBytes([0x1D, 0x21, 0x01]);
+  }
+
+  feedLines(n = 1) {
+    return this.addBytes([0x1B, 0x64, n]);
+  }
+
+  cut() {
+    return this.addBytes([0x1D, 0x56, 0x42, 0x00]);
   }
 
   addQRCode(data) {
@@ -98,40 +106,36 @@ export class EscPosBuilder {
   }
 
   addRasterImage(pixels, width, height) {
-    const widthBytes = width / 8;
-    const imageBytes = [];
+    const widthBytes = Math.ceil(width / 8);
+    const mode = 0; 
+
+    this.addBytes([0x1D, 0x76, 0x30, mode]);
+    this.addBytes([widthBytes & 0xFF, (widthBytes >> 8) & 0xFF]);
+    this.addBytes([height & 0xFF, (height >> 8) & 0xFF]);
 
     for (let y = 0; y < height; y++) {
-      for (let x = 0; x < widthBytes; x++) {
-        let byte = 0;
+      for (let xByte = 0; xByte < widthBytes; xByte++) {
+        let byteVal = 0;
         for (let bit = 0; bit < 8; bit++) {
-          const pixelX = x * 8 + bit;
-          const pixelIndex = (y * width + pixelX) * 4;
-          const r = pixels[pixelIndex];
-          const g = pixels[pixelIndex + 1];
-          const b = pixels[pixelIndex + 2];
-          const a = pixels[pixelIndex + 3];
-          
-          let isBlack = 0;
-          if (a > 50) {
-            const gray = 0.299 * r + 0.587 * g + 0.114 * b;
-            if (gray < 128) {
-              isBlack = 1;
+          const x = xByte * 8 + bit;
+          if (x < width) {
+            const idx = (y * width + x) * 4;
+            const r = pixels[idx];
+            const g = pixels[idx + 1];
+            const b = pixels[idx + 2];
+            const alpha = pixels[idx + 3];
+
+            const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+            const isBlack = alpha > 128 && luminance < 128;
+
+            if (isBlack) {
+              byteVal |= (1 << (7 - bit));
             }
           }
-          byte = (byte << 1) | isBlack;
         }
-        imageBytes.push(byte);
+        this.buffer.push(byteVal);
       }
     }
-
-    const xL = widthBytes % 256;
-    const xH = Math.floor(widthBytes / 256);
-    const yL = height % 256;
-    const yH = Math.floor(height / 256);
-
-    this.addBytes([0x1D, 0x76, 0x30, 0x00, xL, xH, yL, yH]);
-    this.addBytes(imageBytes);
     return this;
   }
 
@@ -140,7 +144,7 @@ export class EscPosBuilder {
   }
 }
 
-export function generarLogoEscPos() {
+export function generarLogoEscPos(isotipoSrc = DEFAULT_ISOTIPO_SRC, logoSrc = DEFAULT_LOGO_EMPRESA_SRC) {
   return new Promise((resolve, reject) => {
     try {
       const canvas = document.createElement('canvas');
@@ -178,7 +182,7 @@ export function generarLogoEscPos() {
       };
       
       const onError = (err) => {
-        reject(new Error("Error al cargar las imágenes SVG del logo: " + err));
+        reject(new Error("Error al cargar las imágenes del logo: " + err));
       };
       
       imgTubos.onload = onImageLoaded;
@@ -186,8 +190,8 @@ export function generarLogoEscPos() {
       imgPms.onload = onImageLoaded;
       imgPms.onerror = onError;
       
-      imgTubos.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(LOGO_TUBOS_SVG);
-      imgPms.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(LOGO_PMS_SVG);
+      imgTubos.src = isotipoSrc || DEFAULT_ISOTIPO_SRC;
+      imgPms.src = logoSrc || DEFAULT_LOGO_EMPRESA_SRC;
     } catch (e) {
       reject(e);
     }
