@@ -8,6 +8,229 @@ const router = Router()
 router.use(requireAuth)
 router.use(requireRol('ADMIN', 'SUPERVISOR'))
 
+// GET /api/reportes/resumen?periodo=hoy|semana|mes|custom&desde=&hasta=
+router.get('/resumen', async (req, res, next) => {
+  try {
+    const { periodo = 'hoy', desde, hasta } = req.query
+    const ahora = new Date()
+    let startDate, endDate
+
+    if (desde && hasta) {
+      startDate = new Date(desde)
+      endDate = new Date(hasta)
+      if (hasta.length === 10) {
+        endDate.setHours(23, 59, 59, 999)
+      }
+    } else if (periodo === 'semana') {
+      startDate = new Date(ahora)
+      const day = startDate.getDay()
+      const diff = startDate.getDate() - day + (day === 0 ? -6 : 1)
+      startDate.setDate(diff)
+      startDate.setHours(0, 0, 0, 0)
+      endDate = new Date(ahora)
+      endDate.setHours(23, 59, 59, 999)
+    } else if (periodo === 'mes') {
+      startDate = new Date(ahora.getFullYear(), ahora.getMonth(), 1, 0, 0, 0, 0)
+      endDate = new Date(ahora)
+      endDate.setHours(23, 59, 59, 999)
+    } else {
+      // Por defecto HOY
+      startDate = new Date(ahora)
+      startDate.setHours(0, 0, 0, 0)
+      endDate = new Date(ahora)
+      endDate.setHours(23, 59, 59, 999)
+    }
+
+    const [entregas, cargas, porEstado, alquileresVencidos, tercerosPendientes] = await Promise.all([
+      prisma.entrega.findMany({
+        where: {
+          fechaEntrega: { gte: startDate, lte: endDate },
+        },
+        include: {
+          cliente: { select: { id: true, nombre: true, ruc: true, tipo: true } },
+          repartidor: { select: { id: true, nombre: true, username: true } },
+          detalles: {
+            select: {
+              id: true,
+              subtotal: true,
+              cantidadGas: true,
+              unidadGas: true,
+              precioUnitario: true,
+              tuboId: true,
+            }
+          }
+        },
+        orderBy: { fechaEntrega: 'desc' },
+      }),
+
+      prisma.carga.findMany({
+        where: {
+          fechaCarga: { gte: startDate, lte: endDate }
+        },
+        include: {
+          operador: { select: { id: true, nombre: true, username: true } },
+          tubo: { select: { id: true, gas: true } }
+        },
+        orderBy: { fechaCarga: 'desc' }
+      }),
+
+      prisma.tubo.groupBy({
+        by: ['estado'],
+        where: { activo: true },
+        _count: { estado: true },
+      }),
+
+      prisma.alquiler.count({
+        where: { estado: 'ACTIVO', fechaVencimiento: { lt: ahora } },
+      }),
+
+      prisma.cilindroTerceroInfo.count({
+        where: { estado: 'PENDIENTE' }
+      })
+    ])
+
+    // KPI Metrics calculation
+    let totalFacturado = 0
+    let montoRecibido = 0
+    let entregasConcretadas = 0
+    let entregasCanceladas = 0
+
+    const entregasProcesadas = entregas.map(e => {
+      const subtotalProductos = (e.detalles || []).reduce((sum, d) => sum + Number(d.subtotal || 0), 0)
+      const delivery = Number(e.costoDelivery || 0)
+      const totalOperacion = subtotalProductos + delivery
+      const recibido = Number(e.montoRecibido || 0)
+
+      let estadoCobro = 'PENDIENTE'
+      if (e.cancelada) {
+        estadoCobro = 'NO_CONCRETADO'
+        entregasCanceladas++
+      } else {
+        if (e.confirmada) entregasConcretadas++
+        if (recibido >= totalOperacion && totalOperacion > 0) {
+          estadoCobro = 'COBRADO'
+        } else if (recibido > 0) {
+          estadoCobro = 'PARCIAL'
+        } else {
+          estadoCobro = 'PENDIENTE'
+        }
+
+        totalFacturado += totalOperacion
+        montoRecibido += recibido
+      }
+
+      return {
+        id: e.id,
+        numero: e.numero,
+        fechaEntrega: e.fechaEntrega,
+        clienteNombre: e.cliente?.nombre || 'Cliente sin nombre',
+        repartidorNombre: e.repartidor?.nombre || e.repartidor?.username || 'Sin repartidor',
+        tipoOperacion: e.tipoOperacion,
+        subtotalProductos,
+        costoDelivery: delivery,
+        totalOperacion,
+        montoRecibido: recibido,
+        metodoPago: e.metodoPago || 'NO_ESPECIFICADO',
+        confirmada: e.confirmada,
+        cancelada: e.cancelada,
+        estadoCobro
+      }
+    })
+
+    const saldoPendiente = Math.max(0, totalFacturado - montoRecibido)
+
+    // Agrupación de Cargas por Tipo de Gas y Unidad
+    const cargasGroupMap = {}
+    cargas.forEach(c => {
+      const key = `${c.tipoGas}_${c.unidad}`
+      if (!cargasGroupMap[key]) {
+        cargasGroupMap[key] = {
+          tipoGas: c.tipoGas,
+          unidad: c.unidad,
+          conteo: 0,
+          cantidadTotal: 0,
+          valorTotal: 0
+        }
+      }
+      const cant = Number(c.cantidad || 0)
+      const prec = Number(c.precioUnitario || 0)
+      cargasGroupMap[key].conteo += 1
+      cargasGroupMap[key].cantidadTotal += cant
+      cargasGroupMap[key].valorTotal += cant * prec
+    })
+
+    const cargasPorGas = Object.values(cargasGroupMap).map(g => ({
+      ...g,
+      promedioCarga: g.conteo > 0 ? (g.cantidadTotal / g.conteo) : 0
+    }))
+
+    // Rendición por repartidor
+    const repartidoresMap = {}
+    entregas.filter(e => !e.cancelada).forEach(e => {
+      const rId = e.repartidorId || 'SIN_ASIGNAR'
+      const rNombre = e.repartidor?.nombre || e.repartidor?.username || 'Sin asignación'
+      if (!repartidoresMap[rId]) {
+        repartidoresMap[rId] = {
+          repartidorId: rId,
+          repartidorNombre: rNombre,
+          entregasCount: 0,
+          totalFacturado: 0,
+          montoRecibido: 0,
+          efectivo: 0,
+          transferencia: 0,
+          otrosMetodos: 0,
+          saldoPendiente: 0
+        }
+      }
+      const subtotalProductos = (e.detalles || []).reduce((sum, d) => sum + Number(d.subtotal || 0), 0)
+      const totalOperacion = subtotalProductos + Number(e.costoDelivery || 0)
+      const recibido = Number(e.montoRecibido || 0)
+      const metodo = (e.metodoPago || '').toUpperCase()
+
+      repartidoresMap[rId].entregasCount += 1
+      repartidoresMap[rId].totalFacturado += totalOperacion
+      repartidoresMap[rId].montoRecibido += recibido
+
+      if (metodo.includes('EFECTIVO')) {
+        repartidoresMap[rId].efectivo += recibido
+      } else if (metodo.includes('TRANSFERENCIA') || metodo.includes('BANCO')) {
+        repartidoresMap[rId].transferencia += recibido
+      } else {
+        repartidoresMap[rId].otrosMetodos += recibido
+      }
+
+      repartidoresMap[rId].saldoPendiente += Math.max(0, totalOperacion - recibido)
+    })
+
+    const rendicionRepartidores = Object.values(repartidoresMap)
+
+    const estadosMap = Object.fromEntries(
+      porEstado.map(r => [r.estado, r._count.estado])
+    )
+
+    res.json({
+      periodo,
+      rango: { startDate, endDate },
+      kpis: {
+        totalFacturado,
+        montoRecibido,
+        saldoPendiente,
+        entregasConcretadas,
+        entregasCanceladas,
+        cargasRealizadas: cargas.length
+      },
+      ventasYCobros: entregasProcesadas,
+      cargasPorGas,
+      rendicionRepartidores,
+      inventario: {
+        porEstado: estadosMap,
+        alquileresVencidos,
+        tercerosPendientes
+      }
+    })
+  } catch (err) { next(err) }
+})
+
 // GET /api/reportes/dashboard — todos los indicadores del dashboard en una sola llamada
 router.get('/dashboard', async (req, res, next) => {
   try {
@@ -119,3 +342,4 @@ router.get('/movimientos', async (req, res, next) => {
 })
 
 export default router
+

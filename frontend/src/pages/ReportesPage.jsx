@@ -1,49 +1,66 @@
 // gastubos/frontend/src/pages/ReportesPage.jsx
 import { useEffect, useState, useRef } from 'react'
 import api from '../services/api.js'
-import { PageHeader, Spinner, GasDot, useToast } from '../components/ui.jsx'
+import { PageHeader, Spinner, GasDot, useToast, EmptyState } from '../components/ui.jsx'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 
-const GAS_COLORS = { CO2:'#1A5FA8','CO₂':'#1A5FA8',Oxígeno:'#00695C',Argón:'#5B21B6',Nitrógeno:'#52525B',Acetileno:'#B45309' }
-const gasColor = g => { for(const k in GAS_COLORS) if(g?.includes(k)) return GAS_COLORS[k]; return '#9A3412' }
+const GAS_COLORS = { CO2: '#1A5FA8', 'CO₂': '#1A5FA8', Oxígeno: '#00695C', Argón: '#5B21B6', Nitrógeno: '#52525B', Acetileno: '#B45309' }
 
 const ESTADO_COLORS = {
-  DISPONIBLE:'#2E7D32',CARGADO:'#1A5FA8',VACIO:'#52525B',ENTREGADO:'#00695C',
-  ALQUILADO:'#5B21B6',VENDIDO:'#B45309',RESERVADO:'#1A5FA8',PERDIDO:'#B91C1C',
-  DEVUELTO:'#9A3412',EN_REVISION:'#B45309'
+  DISPONIBLE: '#2E7D32', CARGADO: '#1A5FA8', VACIO: '#52525B', ENTREGADO: '#00695C',
+  ALQUILADO: '#5B21B6', VENDIDO: '#B45309', RESERVADO: '#1A5FA8', PERDIDO: '#B91C1C',
+  DEVUELTO: '#9A3412', EN_REVISION: '#B45309'
+}
+
+const formatGs = (val) => 'Gs. ' + Number(val || 0).toLocaleString('es-PY')
+const formatNum = (val) => {
+  const num = Number(val || 0)
+  if (isNaN(num)) return '0'
+  if (Number.isInteger(num)) {
+    return num.toLocaleString('es-PY')
+  }
+  const rounded = Math.round(num * 100) / 100
+  return rounded.toLocaleString('es-PY', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
 }
 
 export default function ReportesPage() {
-  const [dash,   setDash]   = useState(null)
-  const [gases,  setGases]  = useState([])
-  const [clientes, setClientes] = useState([])
-  const [loading, setLoading] = useState(true)
   const { toast } = useToast()
 
-  // Exportar reportes
+  // Filtros de Periodo
+  const [periodo, setPeriodo] = useState('hoy') // hoy | semana | mes | custom
+  const [desde, setDesde] = useState(() => new Date().toISOString().slice(0, 10))
+  const [hasta, setHasta] = useState(() => new Date().toISOString().slice(0, 10))
+
+  // Estado de Datos
+  const [resumen, setResumen] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  // Exportar reportes menu
   const [exportMenuAbierto, setExportMenuAbierto] = useState(false)
   const exportRef = useRef(null)
 
-  const fetchData = async () => {
+  const fetchResumen = async () => {
     setLoading(true)
     try {
-      const [d, g, c] = await Promise.all([
-        api.get('/reportes/dashboard'),
-        api.get('/reportes/gases'),
-        api.get('/reportes/tubos-por-cliente'),
-      ])
-      setDash(d.data); setGases(g.data); setClientes(c.data)
+      let url = `/reportes/resumen?periodo=${periodo}`
+      if (periodo === 'custom') {
+        url += `&desde=${desde}&hasta=${hasta}`
+      }
+      const res = await api.get(url)
+      setResumen(res.data)
     } catch (err) {
-      toast('Error al cargar datos de reportes', 'error')
+      toast('Error al cargar datos del reporte', 'error')
     } finally {
       setLoading(false)
     }
   }
 
-  useEffect(() => { fetchData() }, [])
+  useEffect(() => {
+    fetchResumen()
+  }, [periodo, desde, hasta])
 
-  // Cerrar menus al hacer clic afuera
+  // Cerrar menu exportar al hacer clic afuera
   useEffect(() => {
     const handler = e => {
       if (exportRef.current && !exportRef.current.contains(e.target)) setExportMenuAbierto(false)
@@ -52,167 +69,160 @@ export default function ReportesPage() {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  const handleExport = async (tipo, formato, dataItem = null) => {
+  const kpis = resumen?.kpis || {}
+  const ventasYCobros = resumen?.ventasYCobros || []
+  const cargasPorGas = resumen?.cargasPorGas || []
+  const inventario = resumen?.inventario || {}
+  const estadosArr = Object.entries(inventario.porEstado || {}).sort((a, b) => b[1] - a[1])
+  const maxE = Math.max(...estadosArr.map(e => e[1]), 1)
+
+  // Exportar PDF o CSV
+  const handleExport = (formato) => {
     setExportMenuAbierto(false)
-    let dataToExport = []
-    let title = ""
-    let filename = `reporte_${tipo}_${new Date().toISOString().slice(0, 10)}`
+    if (!resumen) return
 
-    try {
-      if (tipo === 'mes' || tipo === 'anio') {
-        const ahora = new Date()
-        const desde = new Date(ahora.getFullYear(), tipo === 'mes' ? ahora.getMonth() : 0, 1)
-        const r = await api.get(`/auditoria?desde=${desde.toISOString()}&limit=2000`)
-        dataToExport = r.data.registros
-        title = tipo === 'mes' ? "REPORTE MENSUAL DE ACTIVIDAD" : "REPORTE ANUAL DE ACTIVIDAD"
-        
-        if (dataToExport.length === 0) return toast('No hay movimientos en este periodo', 'info')
+    const labelPeriodo = periodo === 'hoy' ? 'HOY' : periodo === 'semana' ? 'ESTA SEMANA' : periodo === 'mes' ? 'ESTE MES' : `DEL ${desde} AL ${hasta}`
+    const fechaActual = new Date().toLocaleString('es-PY')
+    const filename = `reporte_gastubos_${periodo}_${new Date().toISOString().slice(0, 10)}`
 
-        if (formato === 'pdf') {
-          const doc = new jsPDF()
-          doc.setFontSize(18)
-          doc.setTextColor(26, 95, 168)
-          doc.text(title, 14, 20)
-          doc.setFontSize(10)
-          doc.setTextColor(100)
-          doc.text(`Generado el: ${new Date().toLocaleString('es-PY')}`, 14, 28)
+    if (formato === 'pdf') {
+      try {
+        const doc = new jsPDF()
+        doc.setFontSize(16)
+        doc.setTextColor(26, 95, 168)
+        doc.text('RESUMEN DE OPERACIONES Y VENTAS — GASTUBOS', 14, 18)
 
-          const tableData = dataToExport.map(a => [
-            new Date(a.createdAt).toLocaleDateString('es-PY'),
-            a.usuario?.username,
-            a.tubo?.id,
-            a.accion,
-            a.estadoNuevo || '—'
+        doc.setFontSize(10)
+        doc.setTextColor(100)
+        doc.text(`Periodo: ${labelPeriodo} | Generado el: ${fechaActual}`, 14, 25)
+
+        // Resumen de KPIs
+        doc.setFontSize(12)
+        doc.setTextColor(0)
+        doc.text('1. INDICADORES CLAVE (KPIS)', 14, 34)
+
+        autoTable(doc, {
+          startY: 38,
+          head: [['Total Facturado', 'Entregas Concretadas', 'Entregas Canceladas', 'Cargas Realizadas']],
+          body: [
+            [
+              formatGs(kpis.totalFacturado),
+              `${kpis.entregasConcretadas || 0}`,
+              `${kpis.entregasCanceladas || 0}`,
+              `${kpis.cargasRealizadas || 0}`
+            ]
+          ],
+          headStyles: { fillColor: [26, 95, 168] },
+          theme: 'grid'
+        })
+
+        // Detalle de Ventas y Entregas
+        doc.setFontSize(12)
+        doc.setTextColor(0)
+        doc.text('2. DETALLE DE VENTAS Y ENTREGAS', 14, doc.lastAutoTable.finalY + 12)
+
+        const ventasBody = ventasYCobros.map(v => [
+          new Date(v.fechaEntrega).toLocaleDateString('es-PY'),
+          v.numero,
+          v.clienteNombre,
+          v.repartidorNombre,
+          v.tipoOperacion,
+          formatGs(v.totalOperacion),
+          v.cancelada ? 'Cancelada' : v.confirmada ? 'Concretada' : 'Pendiente'
+        ])
+
+        autoTable(doc, {
+          startY: doc.lastAutoTable.finalY + 16,
+          head: [['Fecha', 'Remisión', 'Cliente', 'Repartidor', 'Operación', 'Total (Gs.)', 'Estado']],
+          body: ventasBody,
+          headStyles: { fillColor: [15, 118, 110] },
+          theme: 'striped',
+          styles: { fontSize: 8 }
+        })
+
+        // Cargas por Gas
+        if (cargasPorGas.length > 0) {
+          doc.setFontSize(12)
+          doc.setTextColor(0)
+          doc.text('3. RESUMEN DE CARGAS DE GAS', 14, doc.lastAutoTable.finalY + 12)
+
+          const cargasBody = cargasPorGas.map(c => [
+            c.tipoGas,
+            c.unidad,
+            c.conteo,
+            `${formatNum(c.cantidadTotal)} ${c.unidad}`,
+            formatGs(c.valorTotal),
+            `${formatNum(c.promedioCarga)} ${c.unidad}`
           ])
 
           autoTable(doc, {
-            startY: 35,
-            head: [['Fecha', 'Usuario', 'Tubo', 'Acción', 'Estado']],
-            body: tableData,
+            startY: doc.lastAutoTable.finalY + 16,
+            head: [['Gas', 'Unidad', 'Cargas', 'Cantidad Total', 'Valor Total (Gs.)', 'Promedio']],
+            body: cargasBody,
+            headStyles: { fillColor: [180, 83, 9] },
             theme: 'grid',
-            headStyles: { fillColor: [26, 95, 168] }
+            styles: { fontSize: 8 }
           })
-          doc.save(`${filename}.pdf`)
-        } else {
-          const headers = ['Fecha', 'Usuario', 'Tubo', 'Accion', 'Estado Nuevo', 'Observaciones']
-          const rows = dataToExport.map(a => [
-            new Date(a.createdAt).toLocaleString('es-PY'),
-            a.usuario?.username,
-            a.tubo?.id,
-            a.accion,
-            a.estadoNuevo || '—',
-            a.observaciones || '—'
-          ])
-          const csvContent = "\uFEFF" + [headers, ...rows].map(r => r.map(c => `"${c}"`).join(',')).join('\n')
-          const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-          const url = URL.createObjectURL(blob)
-          const link = document.createElement('a')
-          link.href = url
-          link.download = `${filename}.csv`
-          link.click()
         }
-        return toast('Reporte generado correctamente', 'success')
+
+        doc.save(`${filename}.pdf`)
+        toast('Reporte PDF descargado correctamente', 'success')
+      } catch (err) {
+        toast('Error al generar PDF de reporte', 'error')
       }
-
-      if (formato === 'pdf') {
-      const doc = new jsPDF()
-      doc.setFontSize(18)
-      doc.setTextColor(26, 95, 168)
-      doc.text("INFORME GASTUBOS", 14, 20)
-      
-      doc.setFontSize(10)
-      doc.setTextColor(100)
-      doc.text(`Generado el: ${new Date().toLocaleString('es-PY')}`, 14, 28)
-
-      if (tipo === 'cliente' && dataItem) {
-        doc.setFontSize(14)
-        doc.setTextColor(0)
-        doc.text(`Reporte de Cliente: ${dataItem.nombre}`, 14, 40)
-        autoTable(doc, {
-          startY: 45,
-          head: [['Detalle', 'Valor']],
-          body: [
-            ['Cliente', dataItem.nombre],
-            ['Tipo', dataItem.tipo],
-            ['Tubos Asignados', dataItem._count?.tubos || 0]
-          ],
-          headStyles: { fillColor: [26, 95, 168] }
-        })
-      } else {
-        // Reporte General
-        doc.setFontSize(14)
-        doc.setTextColor(0)
-        doc.text("Inventario por Estado", 14, 40)
-        const estadosData = Object.entries(dash?.porEstado || {}).map(([k, v]) => [k.replace('_', ' '), v])
-        autoTable(doc, {
-          startY: 45,
-          head: [['Estado', 'Cantidad']],
-          body: estadosData,
-          theme: 'striped',
-          headStyles: { fillColor: [26, 95, 168] }
-        })
-
-        doc.text("Uso por Tipo de Gas", 14, doc.lastAutoTable.finalY + 15)
-        const gasesData = gases.map(g => [g.gas, g._count?.gas || 0])
-        autoTable(doc, {
-          startY: doc.lastAutoTable.finalY + 20,
-          head: [['Tipo de Gas', 'Cantidad de Tubos']],
-          body: gasesData,
-          theme: 'striped',
-          headStyles: { fillColor: [0, 105, 92] }
-        })
-      }
-
-      doc.save(`${filename}.pdf`)
-      toast('PDF generado correctamente', 'success')
     } else {
       // CSV
-      let csvContent = "\uFEFF"
-      if (tipo === 'cliente' && dataItem) {
-        csvContent += "REPORTE DE CLIENTE\nNombre,Tipo,Tubos\n"
-        csvContent += `"${dataItem.nombre}","${dataItem.tipo}",${dataItem._count?.tubos}\n`
-      } else {
-        csvContent += "REPORTE ESTADÍSTICO GENERAL\n\n"
-        csvContent += "ESTADOS\nEstado,Cantidad\n"
-        Object.entries(dash?.porEstado || {}).forEach(([k, v]) => { csvContent += `"${k}",${v}\n` })
-        csvContent += "\nGASES\nGas,Cantidad\n"
-        gases.forEach(g => { csvContent += `"${g.gas}",${g._count?.gas || 0}\n` })
+      try {
+        let csv = '\uFEFF'
+        csv += `REPORTE DE NEGOCIO GASTUBOS - ${labelPeriodo}\n`
+        csv += `Generado el: ${fechaActual}\n\n`
+
+        csv += `1. RESUMEN GENERAL (KPIS)\n`
+        csv += `Total Facturado,Entregas Concretadas,Entregas Canceladas,Cargas Realizadas\n`
+        csv += `"${kpis.totalFacturado}","${kpis.entregasConcretadas}","${kpis.entregasCanceladas}","${kpis.cargasRealizadas}"\n\n`
+
+        csv += `2. DETALLE DE VENTAS Y ENTREGAS\n`
+        csv += `Fecha,Remisión,Cliente,Repartidor,Operación,Total Operación Gs,Estado\n`
+        ventasYCobros.forEach(v => {
+          const estadoStr = v.cancelada ? 'Cancelada' : v.confirmada ? 'Concretada' : 'Pendiente'
+          csv += `"${new Date(v.fechaEntrega).toLocaleDateString('es-PY')}","${v.numero}","${v.clienteNombre}","${v.repartidorNombre}","${v.tipoOperacion}",${v.totalOperacion},"${estadoStr}"\n`
+        })
+
+        csv += `\n3. CARGAS DE GAS\n`
+        csv += `Gas,Unidad,Cargas Realizadas,Cantidad Total,Valor Total Gs,Promedio por Carga\n`
+        cargasPorGas.forEach(c => {
+          csv += `"${c.tipoGas}","${c.unidad}",${c.conteo},${c.cantidadTotal},${c.valorTotal},${c.promedioCarga}\n`
+        })
+
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = `${filename}.csv`
+        link.click()
+        toast('Planilla Excel/CSV descargada correctamente', 'success')
+      } catch (err) {
+        toast('Error al exportar CSV', 'error')
       }
-
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `${filename}.csv`
-      link.click()
-      toast('Planilla generada correctamente', 'success')
     }
-  } catch (err) {
-    toast('Error al generar reporte', 'error')
   }
-}
-
-const estadosArr = Object.entries(dash?.porEstado || {}).sort((a,b) => b[1]-a[1])
-  const maxE = Math.max(...estadosArr.map(e => e[1]), 1)
-  const maxG = Math.max(...gases.map(g => g._count?.gas || 0), 1)
-  const maxC = Math.max(...clientes.map(c => c._count?.tubos || 0), 1)
 
   return (
     <>
       <PageHeader
-        title="Reportes"
-        subtitle="Indicadores y estadísticas del sistema"
+        title="Reportes de Operaciones"
+        subtitle="Resumen de ventas, entregas, cargas de gas y stock por periodo"
         actions={
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            <button className="btn" onClick={fetchData} disabled={loading}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, flex: '1 1 auto', justifyContent: 'center', maxWidth: '200px' }}>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center' }}>
+            <button className="btn" onClick={fetchResumen} disabled={loading}
+              style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <i className={`ti ti-refresh ${loading ? 'ti-spin' : ''}`} />
-              {loading ? 'Cargando...' : 'Actualizar'}
+              Actualizar
             </button>
-            
-            <div ref={exportRef} style={{ position: 'relative', flex: '1 1 auto', maxWidth: '200px' }}>
+
+            <div ref={exportRef} style={{ position: 'relative' }}>
               <button className="btn btn-primary" onClick={() => setExportMenuAbierto(!exportMenuAbierto)}
-                style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', justifyContent: 'center' }}>
+                style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <i className="ti ti-download" />
                 Exportar
               </button>
@@ -220,37 +230,17 @@ const estadosArr = Object.entries(dash?.porEstado || {}).sort((a,b) => b[1]-a[1]
                 <div style={{
                   position: 'absolute', top: '100%', right: 0, marginTop: 4,
                   background: 'var(--surface)', border: '1px solid var(--border)',
-                  borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                  zIndex: 100, minWidth: 220, overflow: 'hidden'
+                  borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                  zIndex: 100, minWidth: 200, overflow: 'hidden'
                 }}>
-                  <div style={{ padding: '8px 12px', fontSize: 11, color: 'var(--text-muted)', background: 'var(--surface-2)', fontWeight: 600 }}>REPORTE MENSUAL</div>
-                  <div className="export-item" onClick={() => handleExport('mes', 'pdf')}
+                  <div style={{ padding: '8px 12px', fontSize: 11, color: 'var(--text-muted)', background: 'var(--surface-2)', fontWeight: 600 }}>EXPORTAR FILTRO ACTUAL</div>
+                  <div className="export-item" onClick={() => handleExport('pdf')}
                     style={{ padding: '10px 14px', cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <i className="ti ti-file-type-pdf" style={{ color: '#e11d48' }} /> Actividad del mes (PDF)
+                    <i className="ti ti-file-type-pdf" style={{ color: '#e11d48' }} /> Documento PDF
                   </div>
-                  <div className="export-item" onClick={() => handleExport('mes', 'csv')}
+                  <div className="export-item" onClick={() => handleExport('csv')}
                     style={{ padding: '10px 14px', cursor: 'pointer', fontSize: 13, borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <i className="ti ti-file-spreadsheet" style={{ color: '#16a34a' }} /> Actividad del mes (Excel)
-                  </div>
-
-                  <div style={{ padding: '8px 12px', fontSize: 11, color: 'var(--text-muted)', background: 'var(--surface-2)', fontWeight: 600, borderTop: '1px solid var(--border)' }}>REPORTE ANUAL</div>
-                  <div className="export-item" onClick={() => handleExport('anio', 'pdf')}
-                    style={{ padding: '10px 14px', cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <i className="ti ti-file-type-pdf" style={{ color: '#e11d48' }} /> Actividad del año (PDF)
-                  </div>
-                  <div className="export-item" onClick={() => handleExport('anio', 'csv')}
-                    style={{ padding: '10px 14px', cursor: 'pointer', fontSize: 13, borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <i className="ti ti-file-spreadsheet" style={{ color: '#16a34a' }} /> Actividad del año (Excel)
-                  </div>
-
-                  <div style={{ padding: '8px 12px', fontSize: 11, color: 'var(--text-muted)', background: 'var(--surface-2)', fontWeight: 600, borderTop: '1px solid var(--border)' }}>ESTADÍSTICAS ACTUALES</div>
-                  <div className="export-item" onClick={() => handleExport('general', 'pdf')}
-                    style={{ padding: '10px 14px', cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <i className="ti ti-chart-bar" style={{ color: 'var(--blue)' }} /> Informe Estadístico (PDF)
-                  </div>
-                  <div className="export-item" onClick={() => handleExport('general', 'csv')}
-                    style={{ padding: '10px 14px', cursor: 'pointer', fontSize: 13, borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <i className="ti ti-file-spreadsheet" style={{ color: '#16a34a' }} /> Datos Dashboard (Excel)
+                    <i className="ti ti-file-spreadsheet" style={{ color: '#16a34a' }} /> Planilla Excel (CSV)
                   </div>
                 </div>
               )}
@@ -258,136 +248,335 @@ const estadosArr = Object.entries(dash?.porEstado || {}).sort((a,b) => b[1]-a[1]
           </div>
         }
       />
+
       <div className="app-content">
-        {loading && !dash ? <Spinner /> : (
-          <>
-            {/* Summary stats */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: 12, marginBottom: 20 }}>
+
+        {/* BARRA DE FILTRO DE PERIODO */}
+        <div style={{
+          background: 'var(--surface)',
+          border: '1px solid var(--border)',
+          borderRadius: 12,
+          padding: '12px 16px',
+          marginBottom: 20,
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          justify: 'space-between',
+          gap: 12
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <i className="ti ti-calendar" style={{ fontSize: 16 }} /> Periodo:
+            </span>
+
+            <div style={{ display: 'inline-flex', background: 'var(--surface-2)', padding: 3, borderRadius: 8, border: '1px solid var(--border)' }}>
               {[
-                ['Total tubos', dash?.tubosTotal, 'stat-blue', 'ti-cylinder'],
-                ['Clientes', dash?.clientesActivos, 'stat-green', 'ti-users'],
-                ['Alquileres vencidos', dash?.alquileresVencidos, dash?.alquileresVencidos > 0 ? 'stat-red' : 'stat-gray', 'ti-alert-circle'],
-              ].map(([l, v, cls, icon]) => (
-                <div key={l} className="stat-card">
-                  <div className="stat-label"><i className={`ti ${icon}`} /> {l}</div>
-                  <div className={`stat-value ${cls}`}>{v ?? 0}</div>
-                </div>
+                ['hoy', 'Hoy'],
+                ['semana', 'Esta semana'],
+                ['mes', 'Este mes'],
+                ['custom', 'Personalizado']
+              ].map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => setPeriodo(key)}
+                  style={{
+                    padding: '6px 14px',
+                    fontSize: 12,
+                    fontWeight: periodo === key ? 700 : 500,
+                    border: 'none',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    background: periodo === key ? 'var(--blue)' : 'transparent',
+                    color: periodo === key ? '#fff' : 'var(--text-primary)',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  {label}
+                </button>
               ))}
             </div>
+          </div>
 
-            <div className="responsive-grid">
-              {/* Tubos por estado */}
-              <div className="card">
-                <div className="card-header"><div className="card-title">Tubos por estado</div></div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {estadosArr.map(([estado, count]) => (
-                    <div key={estado} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <div style={{ width: 90, fontSize: 11, color: 'var(--text-secondary)', textAlign: 'right', flexShrink: 0, fontWeight: 500 }}>
-                        {estado.replace('_',' ')}
-                      </div>
-                      <div style={{ flex: 1, background: 'var(--surface-2)', borderRadius: 10, height: 10, overflow: 'hidden', border: '1px solid var(--border)' }}>
-                        <div style={{ width: `${(count/maxE*100).toFixed(0)}%`, height: '100%', background: ESTADO_COLORS[estado] || '#888', borderRadius: 10, transition: 'width .6s ease' }} />
-                      </div>
-                      <div style={{ fontSize: 12, fontWeight: 700, width: 25, flexShrink: 0, color: 'var(--text-primary)' }}>{count}</div>
-                    </div>
-                  ))}
-                </div>
+          {periodo === 'custom' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Desde:</span>
+                <input
+                  type="date"
+                  value={desde}
+                  onChange={e => setDesde(e.target.value)}
+                  style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', fontSize: 12 }}
+                />
               </div>
-
-              {/* Gases */}
-              <div className="card">
-                <div className="card-header"><div className="card-title">Gases más utilizados</div></div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {gases.map(g => (
-                    <div key={g.gas} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <GasDot gas={g.gas} />
-                      <div style={{ width: 85, fontSize: 11, color: 'var(--text-secondary)', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 500 }}>{g.gas}</div>
-                      <div style={{ flex: 1, background: 'var(--surface-2)', borderRadius: 10, height: 10, overflow: 'hidden', border: '1px solid var(--border)' }}>
-                        <div style={{ width: `${((g._count?.gas||0)/maxG*100).toFixed(0)}%`, height: '100%', background: gasColor(g.gas), borderRadius: 10, transition: 'width .6s ease' }} />
-                      </div>
-                      <div style={{ fontSize: 12, fontWeight: 700, width: 25, color: 'var(--text-primary)' }}>{g._count?.gas}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Clientes con más tubos asignados */}
-              <div className="card col-span-2">
-                <div className="card-header"><div className="card-title">Clientes con más tubos asignados</div></div>
-                
-                {/* Desktop Table */}
-                <div className="table-wrap hide-mobile">
-                  <table>
-                    <thead><tr><th>Cliente</th><th>Tipo</th><th>Cant. Tubos</th><th>Distribución</th><th style={{ textAlign: 'right' }}>Acciones</th></tr></thead>
-                    <tbody>
-                      {clientes.filter(c => c._count?.tubos > 0).map(c => (
-                        <tr key={c.id}>
-                          <td style={{ fontWeight: 600, color: 'var(--blue)' }}>{c.nombre}</td>
-                          <td><span className={`badge badge-${c.tipo}`}>{c.tipo}</span></td>
-                          <td style={{ fontWeight: 700, fontSize: 13 }}>{c._count?.tubos}</td>
-                          <td style={{ width: '30%' }}>
-                            <div style={{ background: 'var(--surface-2)', borderRadius: 10, height: 8, overflow: 'hidden', border: '1px solid var(--border)' }}>
-                              <div style={{ width: `${((c._count?.tubos||0)/maxC*100).toFixed(0)}%`, height: '100%', background: 'var(--blue)', borderRadius: 10 }} />
-                            </div>
-                          </td>
-                          <td style={{ textAlign: 'right' }}>
-                            <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', alignItems: 'flex-start' }}>
-                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                                <button className="btn-icon" onClick={() => handleExport('cliente', 'pdf', c)}>
-                                  <i className="ti ti-file-type-pdf" style={{ color: '#e11d48' }} />
-                                </button>
-                                <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-muted)' }}>PDF</span>
-                              </div>
-                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                                <button className="btn-icon" onClick={() => handleExport('cliente', 'csv', c)}>
-                                  <i className="ti ti-file-spreadsheet" style={{ color: '#16a34a' }} />
-                                </button>
-                                <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-muted)' }}>Excel</span>
-                              </div>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Mobile Cards */}
-                <div className="mobile-list">
-                  {clientes.filter(c => c._count?.tubos > 0).map(c => (
-                    <div key={c.id} className="list-card" style={{ background: 'var(--surface-2)', border: 'none' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                        <span style={{ fontWeight: 600, fontSize: 13 }}>{c.nombre}</span>
-                        <span className={`badge badge-${c.tipo}`}>{c.tipo}</span>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-                        <div style={{ flex: 1, background: 'rgba(0,0,0,0.05)', borderRadius: 10, height: 8 }}>
-                          <div style={{ width: `${((c._count?.tubos||0)/maxC*100).toFixed(0)}%`, height: '100%', background: 'var(--blue)', borderRadius: 10 }} />
-                        </div>
-                        <span style={{ fontWeight: 700, fontSize: 12 }}>{c._count?.tubos} tubos</span>
-                      </div>
-
-                      <div className="list-card-actions" style={{ justifyContent: 'flex-end', gap: 16 }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-                          <button className="btn-icon" onClick={() => handleExport('cliente', 'pdf', c)}
-                            style={{ width: 44, height: 44, fontSize: 20 }}>
-                            <i className="ti ti-file-type-pdf" style={{ color: '#e11d48' }} />
-                          </button>
-                          <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)' }}>PDF</span>
-                        </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-                          <button className="btn-icon" onClick={() => handleExport('cliente', 'csv', c)}
-                            style={{ width: 44, height: 44, fontSize: 20 }}>
-                            <i className="ti ti-file-spreadsheet" style={{ color: '#16a34a' }} />
-                          </button>
-                          <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)' }}>Excel</span>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Hasta:</span>
+                <input
+                  type="date"
+                  value={hasta}
+                  onChange={e => setHasta(e.target.value)}
+                  style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', fontSize: 12 }}
+                />
               </div>
             </div>
+          )}
+        </div>
+
+        {loading ? <Spinner /> : !resumen ? (
+          <EmptyState
+            icon="ti-alert-circle"
+            title="No se pudieron cargar los datos"
+            subtitle="Ocurrió un inconveniente al consultar el resumen del negocio."
+            action={<button className="btn btn-primary" onClick={fetchResumen}>Reintentar</button>}
+          />
+        ) : (
+          <>
+            {/* TARJETAS KPI DE RESUMEN PRINCIPAL (4 TARJETAS SIMPLIFICADAS) */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14, marginBottom: 24 }}>
+              
+              {/* Total Facturado */}
+              <div className="stat-card" style={{ borderLeft: '4px solid #10b981' }}>
+                <div className="stat-label">
+                  <i className="ti ti-cash" style={{ color: '#10b981' }} /> Total Facturado
+                </div>
+                <div className="stat-value" style={{ color: '#047857', fontSize: 22 }}>
+                  {formatGs(kpis.totalFacturado)}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                  Productos + Delivery
+                </div>
+              </div>
+
+              {/* Entregas Concretadas */}
+              <div className="stat-card" style={{ borderLeft: '4px solid #3b82f6' }}>
+                <div className="stat-label">
+                  <i className="ti ti-truck-delivery" style={{ color: '#3b82f6' }} /> Entregas Concretadas
+                </div>
+                <div className="stat-value" style={{ color: '#1d4ed8', fontSize: 22 }}>
+                  {kpis.entregasConcretadas || 0}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                  Pedidos entregados con éxito
+                </div>
+              </div>
+
+              {/* Entregas Canceladas */}
+              <div className="stat-card" style={{ borderLeft: `4px solid ${kpis.entregasCanceladas > 0 ? '#ef4444' : '#6b7280'}` }}>
+                <div className="stat-label">
+                  <i className="ti ti-truck-off" style={{ color: kpis.entregasCanceladas > 0 ? '#ef4444' : '#6b7280' }} /> Entregas Canceladas
+                </div>
+                <div className="stat-value" style={{ color: kpis.entregasCanceladas > 0 ? '#b91c1c' : 'var(--text-primary)', fontSize: 22 }}>
+                  {kpis.entregasCanceladas || 0}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                  Pedidos no concretados
+                </div>
+              </div>
+
+              {/* Cargas de Gas */}
+              <div className="stat-card" style={{ borderLeft: '4px solid #f59e0b' }}>
+                <div className="stat-label">
+                  <i className="ti ti-flame" style={{ color: '#f59e0b' }} /> Cargas Realizadas
+                </div>
+                <div className="stat-value" style={{ color: '#b45309', fontSize: 22 }}>
+                  {kpis.cargasRealizadas || 0}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                  Operaciones de recarga
+                </div>
+              </div>
+
+            </div>
+
+            {/* SECCIÓN 1: DETALLE DE VENTAS Y ENTREGAS */}
+            <div className="card" style={{ marginBottom: 24 }}>
+              <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <i className="ti ti-file-invoice" style={{ color: 'var(--blue)' }} /> Detalle de Ventas y Entregas
+                </div>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
+                  {ventasYCobros.length} registros
+                </span>
+              </div>
+
+              <div className="table-wrap hide-mobile">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Fecha</th>
+                      <th>N° Remisión</th>
+                      <th>Cliente</th>
+                      <th>Repartidor</th>
+                      <th>Tipo Operación</th>
+                      <th style={{ textAlign: 'right' }}>Total Facturado</th>
+                      <th style={{ textAlign: 'center' }}>Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ventasYCobros.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                          No hay entregas ni ventas registradas en el periodo seleccionado.
+                        </td>
+                      </tr>
+                    ) : (
+                      ventasYCobros.map(v => (
+                        <tr key={v.id}>
+                          <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                            {new Date(v.fechaEntrega).toLocaleDateString('es-PY')}
+                          </td>
+                          <td style={{ fontWeight: 700, fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--blue)' }}>
+                            {v.numero}
+                          </td>
+                          <td style={{ fontWeight: 600 }}>{v.clienteNombre}</td>
+                          <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{v.repartidorNombre}</td>
+                          <td>
+                            <span className={`badge badge-${v.tipoOperacion}`}>
+                              {v.tipoOperacion}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'right', fontWeight: 700, fontSize: 13, color: 'var(--text-primary)' }}>
+                            {formatGs(v.totalOperacion)}
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            {v.cancelada ? (
+                              <span className="badge" style={{ background: '#fef2f2', color: '#b91c1c', border: '1px solid #ef4444' }}>
+                                <i className="ti ti-x" /> Cancelada
+                              </span>
+                            ) : v.confirmada ? (
+                              <span className="badge" style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #10b981' }}>
+                                <i className="ti ti-check" /> Concretada
+                              </span>
+                            ) : (
+                              <span className="badge" style={{ background: 'var(--surface-2)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
+                                <i className="ti ti-clock" /> Pendiente
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Mobile version for Ventas y Entregas */}
+              <div className="mobile-list">
+                {ventasYCobros.map(v => (
+                  <div key={v.id} className="list-card">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <span style={{ fontWeight: 700, color: 'var(--blue)', fontFamily: 'var(--font-mono)' }}>{v.numero}</span>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{new Date(v.fechaEntrega).toLocaleDateString('es-PY')}</span>
+                    </div>
+                    <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>{v.clienteNombre}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>Repartidor: {v.repartidorNombre}</div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface-2)', padding: '8px 10px', borderRadius: 6 }}>
+                      <div>
+                        <div style={{ fontSize: 12, color: 'var(--text-primary)' }}>Total: <strong>{formatGs(v.totalOperacion)}</strong></div>
+                      </div>
+                      <div>
+                        {v.cancelada ? (
+                          <span className="badge" style={{ background: '#fef2f2', color: '#b91c1c' }}>Cancelada</span>
+                        ) : v.confirmada ? (
+                          <span className="badge" style={{ background: '#ecfdf5', color: '#047857' }}>Concretada</span>
+                        ) : (
+                          <span className="badge" style={{ background: 'var(--surface-2)', color: 'var(--text-muted)' }}>Pendiente</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* SECCIÓN 2: RESUMEN DE CARGAS DE GAS POR UNIDAD */}
+            <div className="card" style={{ marginBottom: 24 }}>
+              <div className="card-header">
+                <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <i className="ti ti-flame" style={{ color: '#f59e0b' }} /> Resumen de Cargas de Gas (Unidades M³ y KG)
+                </div>
+              </div>
+
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Tipo de Gas</th>
+                      <th>Unidad</th>
+                      <th style={{ textAlign: 'center' }}>Cargas Realizadas</th>
+                      <th style={{ textAlign: 'right' }}>Cantidad Total Cargada</th>
+                      <th style={{ textAlign: 'right' }}>Valor Total Registrado</th>
+                      <th style={{ textAlign: 'right' }}>Promedio por Carga</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cargasPorGas.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                          No hay operaciones de carga registradas en este periodo.
+                        </td>
+                      </tr>
+                    ) : (
+                      cargasPorGas.map((c, idx) => (
+                        <tr key={idx}>
+                          <td style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <GasDot gas={c.tipoGas} /> {c.tipoGas}
+                          </td>
+                          <td>
+                            <span className="badge" style={{
+                              background: c.unidad === 'KG' ? '#eff6ff' : '#ecfdf5',
+                              color: c.unidad === 'KG' ? '#1d4ed8' : '#047857',
+                              border: `1px solid ${c.unidad === 'KG' ? '#93c5fd' : '#6ee7b7'}`
+                            }}>
+                              {c.unidad}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'center', fontWeight: 700 }}>
+                            {c.conteo}
+                          </td>
+                          <td style={{ textAlign: 'right', fontWeight: 700, fontSize: 13, color: 'var(--blue)' }}>
+                            {formatNum(c.cantidadTotal)} {c.unidad}
+                          </td>
+                          <td style={{ textAlign: 'right', fontWeight: 700, fontSize: 13 }}>
+                            {formatGs(c.valorTotal)}
+                          </td>
+                          <td style={{ textAlign: 'right', fontSize: 12, color: 'var(--text-secondary)' }}>
+                            {formatNum(c.promedioCarga)} {c.unidad} / carga
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* SECCIÓN 3: INVENTARIO DE CILINDROS (SECUNDARIO) */}
+            <div className="card" style={{ marginBottom: 24 }}>
+              <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <i className="ti ti-cylinder" style={{ color: 'var(--blue)' }} /> Estado de Cilindros (Stock en Sistema)
+                </div>
+                {inventario.alquileresVencidos > 0 && (
+                  <span className="badge" style={{ background: '#fef2f2', color: '#b91c1c', border: '1px solid #ef4444' }}>
+                    <i className="ti ti-alert-circle" /> {inventario.alquileresVencidos} Alquileres Vencidos
+                  </span>
+                )}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14, marginTop: 8 }}>
+                {estadosArr.map(([estado, count]) => (
+                  <div key={estado} style={{ background: 'var(--surface-2)', padding: '12px 14px', borderRadius: 8, border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>
+                      {estado.replace('_', ' ')}
+                    </div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: ESTADO_COLORS[estado] || 'var(--text-primary)' }}>
+                      {count}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
           </>
         )}
       </div>
