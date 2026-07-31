@@ -71,7 +71,7 @@ router.get('/:id', async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
-router.post('/', requireRol('ADMIN','OPERADOR'), async (req, res, next) => {
+router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
   try {
     const { sucursales, ...data } = clienteSchema.parse(req.body)
 
@@ -108,7 +108,7 @@ router.post('/', requireRol('ADMIN','OPERADOR'), async (req, res, next) => {
   }
 })
 
-router.patch('/:id', requireRol('ADMIN','OPERADOR'), async (req, res, next) => {
+router.patch('/:id', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
   try {
     const { sucursales: _sucursales, ...data } = clienteSchema.partial().parse(req.body)
     const cliente = await prisma.cliente.update({
@@ -124,7 +124,7 @@ router.patch('/:id', requireRol('ADMIN','OPERADOR'), async (req, res, next) => {
 
 // ─── CRUD SUCURSALES ──────────────────────────────────────────────────────────
 
-router.post('/:id/sucursales', requireRol('ADMIN','OPERADOR'), async (req, res, next) => {
+router.post('/:id/sucursales', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
   try {
     const data = sucursalSchema.parse(req.body)
     const clienteId = req.params.id
@@ -151,7 +151,7 @@ router.post('/:id/sucursales', requireRol('ADMIN','OPERADOR'), async (req, res, 
   }
 })
 
-router.patch('/:id/sucursales/:sucursalId', requireRol('ADMIN','OPERADOR'), async (req, res, next) => {
+router.patch('/:id/sucursales/:sucursalId', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
   try {
     const data = sucursalSchema.partial().parse(req.body)
     const { id: clienteId, sucursalId } = req.params
@@ -172,7 +172,7 @@ router.patch('/:id/sucursales/:sucursalId', requireRol('ADMIN','OPERADOR'), asyn
   } catch (err) { next(err) }
 })
 
-router.delete('/:id/sucursales/:sucursalId', requireRol('ADMIN','OPERADOR'), async (req, res, next) => {
+router.delete('/:id/sucursales/:sucursalId', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
   try {
     const { sucursalId } = req.params
     const sucursal = await prisma.sucursalCliente.update({

@@ -57,7 +57,7 @@ router.get('/:id/stock', async (req, res, next) => {
 })
 
 // ─── POST /api/camiones ───────────────────────────────────────────────────────
-router.post('/', requireRol('ADMIN', 'OPERADOR'), async (req, res, next) => {
+router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
   try {
     const data = camionSchema.parse(req.body)
     
@@ -76,7 +76,7 @@ router.post('/', requireRol('ADMIN', 'OPERADOR'), async (req, res, next) => {
 })
 
 // ─── PATCH /api/camiones/:id ──────────────────────────────────────────────────
-router.patch('/:id', requireRol('ADMIN', 'OPERADOR'), async (req, res, next) => {
+router.patch('/:id', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
   try {
     const data = camionSchema.partial().parse(req.body)
 
@@ -105,7 +105,7 @@ const asignarSchema = z.object({
   tubosIds: z.array(z.string()).min(1, 'Debe incluir al menos un tubo'),
 })
 
-router.post('/:id/asignar', requireRol('ADMIN', 'OPERADOR'), async (req, res, next) => {
+router.post('/:id/asignar', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
   try {
     const { id } = req.params
     const { tubosIds } = asignarSchema.parse(req.body)
@@ -185,7 +185,7 @@ const liberarSchema = z.object({
   tubosIds: z.array(z.string()).min(1, 'Debe incluir al menos un tubo'),
 })
 
-router.post('/:id/liberar', requireRol('ADMIN', 'OPERADOR'), async (req, res, next) => {
+router.post('/:id/liberar', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
   try {
     const { id } = req.params
     const { tubosIds } = liberarSchema.parse(req.body)

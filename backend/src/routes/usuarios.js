@@ -19,7 +19,7 @@ router.get('/repartidores', requireAuth, requireRol('ADMIN', 'SUPERVISOR', 'OPER
   } catch (err) { next(err) }
 })
 
-router.use(requireAuth, requireRol('ADMIN'))
+router.use(requireAuth, requireRol('ADMIN', 'SUPERVISOR'))
 
 const usuarioSchema = z.object({
   username: z.string().min(3),

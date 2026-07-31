@@ -261,7 +261,7 @@ export default function CargasPage() {
               <i className={`ti ti-refresh ${loading ? 'ti-spin' : ''}`} />
               Actualizar
             </button>
-            {(user?.rol === 'ADMIN' || user?.rol === 'OPERADOR') && (
+            {(user?.rol === 'ADMIN' || user?.rol === 'SUPERVISOR' || user?.rol === 'OPERADOR') && (
               <button className="btn btn-primary btn-sm" onClick={abrirModalSalon}>
                 <i className="ti ti-plus" /> Carga en salón
               </button>
@@ -335,7 +335,7 @@ export default function CargasPage() {
                           <td><StateBadge estado={t.estado} /></td>
                           <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{t.ubicacion || '—'}</td>
                           <td style={{ textAlign: 'right' }}>
-                            {(user?.rol === 'ADMIN' || user?.rol === 'OPERADOR') && (
+                            {(user?.rol === 'ADMIN' || user?.rol === 'SUPERVISOR' || user?.rol === 'OPERADOR') && (
                               <button className="btn btn-primary btn-sm" onClick={() => abrirModalConTubo(t)}>
                                 <i className="ti ti-bolt" /> Cargar
                               </button>
@@ -375,7 +375,7 @@ export default function CargasPage() {
                           <span className="list-card-value">{t.ubicacion || '—'}</span>
                         </div>
                       </div>
-                      {(user?.rol === 'ADMIN' || user?.rol === 'OPERADOR') && (
+                      {(user?.rol === 'ADMIN' || user?.rol === 'SUPERVISOR' || user?.rol === 'OPERADOR') && (
                         <div className="list-card-actions" style={{ justifyContent: 'flex-end', paddingTop: 12 }}>
                           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
                             <button className="btn-icon btn-primary" onClick={() => abrirModalConTubo(t)}

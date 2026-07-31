@@ -171,7 +171,7 @@ router.get('/numero/:numero', async (req, res, next) => {
 })
 
 // ─── POST /api/entregas ───────────────────────────────────────────────────────
-router.post('/', requireRol('ADMIN', 'OPERADOR'), async (req, res, next) => {
+router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
   try {
     const data = entregaSchema.parse(req.body)
 
@@ -365,7 +365,7 @@ const confirmacionSchema = z.object({
   montoRecibido: z.coerce.number().optional(),
 })
 
-router.put('/:id/confirmar', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), async (req, res, next) => {
+router.put('/:id/confirmar', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR', 'REPARTIDOR'), async (req, res, next) => {
   try {
     const { id } = req.params
     const { recambios, confirmados, metodoPago, montoRecibido } = confirmacionSchema.parse(req.body || {})
@@ -627,7 +627,7 @@ router.put('/:id/confirmar', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), asyn
 })
 
 // ─── PUT /api/entregas/:id/cancelar ──────────────────────────────────────────
-router.put('/:id/cancelar', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), async (req, res, next) => {
+router.put('/:id/cancelar', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR', 'REPARTIDOR'), async (req, res, next) => {
   try {
     const { id } = req.params
     const { motivo } = req.body
@@ -755,7 +755,7 @@ router.put('/:id/cancelar', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), async
 
 // ─── POST /api/entregas/:id/agregar-tubo ─────────────────────────────────────
 // Permite al repartidor (u operador) añadir un tubo extra a una entrega en tránsito (no confirmada)
-router.post('/:id/agregar-tubo', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), async (req, res, next) => {
+router.post('/:id/agregar-tubo', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR', 'REPARTIDOR'), async (req, res, next) => {
   try {
     const { id } = req.params
     const { tuboId, cantidadGas, unidadGas, precioUnitario: reqPrecioUnitario } = req.body
@@ -930,7 +930,7 @@ router.post('/:id/agregar-tubo', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), 
 
 // ─── DELETE /api/entregas/:id/quitar-tubo-adicional/:tuboId ───────────────────
 // Permite al repartidor (u operador) quitar un tubo adicional previamente añadido
-router.delete('/:id/quitar-tubo-adicional/:tuboId', requireRol('ADMIN', 'OPERADOR', 'REPARTIDOR'), async (req, res, next) => {
+router.delete('/:id/quitar-tubo-adicional/:tuboId', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR', 'REPARTIDOR'), async (req, res, next) => {
   try {
     const { id, tuboId } = req.params
 

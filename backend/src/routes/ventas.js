@@ -20,7 +20,7 @@ router.get('/', async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
-router.post('/', requireRol('ADMIN','OPERADOR'), async (req, res, next) => {
+router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
   try {
     const { tuboId, clienteId, referencia, observaciones } = req.body
     const tubo = await prisma.tubo.findUnique({ where: { id: tuboId } })

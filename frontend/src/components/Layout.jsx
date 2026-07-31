@@ -49,9 +49,9 @@ const NAV = [
   {
     group: 'ADMINISTRACIÓN',
     items: [
-      { to: '/reportes',      icon: 'ti-chart-bar', label: 'Reportes',      restrictedTo: OFICINA },
-      { to: '/auditoria',     icon: 'ti-file-text', label: 'Auditoría',     restrictedTo: ['ADMIN'] },
-      { to: '/usuarios',      icon: 'ti-user-cog',  label: 'Usuarios',      restrictedTo: ['ADMIN'] },
+      { to: '/reportes',      icon: 'ti-chart-bar', label: 'Reportes',      restrictedTo: ['ADMIN', 'SUPERVISOR'] },
+      { to: '/auditoria',     icon: 'ti-file-text', label: 'Auditoría',     restrictedTo: ['ADMIN', 'SUPERVISOR'] },
+      { to: '/usuarios',      icon: 'ti-user-cog',  label: 'Usuarios',      restrictedTo: ['ADMIN', 'SUPERVISOR'] },
       { to: '/configuracion', icon: 'ti-settings',  label: 'Configuración', restrictedTo: ['ADMIN'] },
     ],
   },

@@ -8,13 +8,13 @@ const EMPTY = { username: '', email: '', nombre: '', rol: 'OPERADOR', password: 
 
 // Columnas: [acción, Admin, Supervisor, Operador, Repartidor]
 const PERMISOS = [
-  ['Crear/editar usuarios',                 true, false, false, false],
-  ['Crear/editar tubos',                    true, false, true,  false],
+  ['Crear/editar usuarios',                 true, true,  false, false],
+  ['Crear/editar tubos',                    true, true,  true,  false],
   ['Cambiar estado de tubos',               true, true,  true,  false],
   ['Registrar entregas',                    true, true,  true,  false],
   ['Confirmar/cancelar entregas asignadas', true, true,  true,  true],
-  ['Registrar devoluciones',                true, true,  true,  false],
-  ['Ver reportes',                          true, true,  true,  false],
+  ['Registrar devoluciones',                true, true,  true,  true],
+  ['Ver reportes',                          true, true,  false, false],
   ['Exportar datos',                        true, true,  false, false],
   ['Configurar sistema',                    true, false, false, false],
 ]
