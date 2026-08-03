@@ -50,6 +50,7 @@ export default function CargasPage() {
   const { user } = useAuthStore()
   const { toast } = useToast()
 
+  const [q,        setQ]        = useState('')
   const [tab,      setTab]      = useState('pendientes') // 'pendientes' | 'historial'
   const [tubos,    setTubos]    = useState([])
   const [cargas,   setCargas]   = useState([])
@@ -66,9 +67,20 @@ export default function CargasPage() {
   const [filtroHasta, setFiltroHasta] = useState('')
   const [calcPrecio, setCalcPrecio] = useState('')       // SIEMPRE manual, nunca se recalcula
   const [calcMonto, setCalcMonto] = useState('')
-  const [lastEditedField, setLastEditedField] = useState('cantidad') // 'cantidad' | 'monto'
 
   const limit = 50
+
+  const tubosFiltrados = tubos.filter(t => {
+    if (!q.trim()) return true
+    const query = q.toLowerCase().trim()
+    return (
+      t.id?.toLowerCase().includes(query) ||
+      t.serie?.toLowerCase().includes(query) ||
+      t.gas?.toLowerCase().includes(query) ||
+      t.ubicacion?.toLowerCase().includes(query) ||
+      t.estado?.toLowerCase().includes(query)
+    )
+  })
 
   // Carga tubos pendientes de carga
   const loadTubos = useCallback(async () => {
@@ -131,7 +143,6 @@ export default function CargasPage() {
 
     setCalcPrecio('')
     setCalcMonto('')
-    setLastEditedField('cantidad')
 
     setModal(true)
   }
@@ -140,7 +151,6 @@ export default function CargasPage() {
     setForm(prev => ({ ...prev, tipoGas, unidad: TIPO_GAS_UNIDAD[tipoGas] || '' }))
     setCalcPrecio('')
     setCalcMonto('')
-    setLastEditedField('cantidad')
   }
 
   function abrirModalSalon() {
@@ -155,54 +165,33 @@ export default function CargasPage() {
 
     setCalcPrecio('')
     setCalcMonto('')
-    setLastEditedField('cantidad')
 
     setModal(true)
   }
 
-  // 1. Cambia Cantidad -> recalcula Monto (T = Q × U). El precio no se toca.
+  // 1. Cambia Cantidad -> recalcula Monto (T = Q × U).
   const handleCantidadChange = (cantidad) => {
     setForm(prev => ({ ...prev, cantidad }))
-    setLastEditedField('cantidad')
     const q = Number(cantidad)
     const u = Number(calcPrecio)
 
-    if (u > 0 && !isNaN(q) && cantidad !== '' && q >= 0) {
+    if (!isNaN(q) && cantidad !== '' && q >= 0 && u > 0) {
       setCalcMonto(Math.round(q * u).toString())
-    } else if (cantidad === '') {
+    } else {
       setCalcMonto('')
     }
   }
 
-  // 2. Cambia Monto (el cliente trae plata fija) -> recalcula Cantidad (Q = T / U). El precio no se toca.
-  const handleCalcMontoChange = (monto) => {
-    setCalcMonto(monto)
-    setLastEditedField('monto')
-    const m = Number(monto)
-    const u = Number(calcPrecio)
-
-    if (u > 0 && !isNaN(m) && monto !== '' && m >= 0) {
-      const q = m / u
-      setForm(prev => ({ ...prev, cantidad: q.toFixed(3) }))
-    } else if (monto === '') {
-      setForm(prev => ({ ...prev, cantidad: '' }))
-    }
-  }
-
-  // 3. Cambia Precio -> recalcula SOLO el campo (Cantidad o Monto) que no fue el último editado por el usuario.
-  //    El precio nunca se recalcula a sí mismo.
+  // 2. Cambia Precio -> recalcula Monto (T = Q × U).
   const handleCalcPrecioChange = (precio) => {
     setCalcPrecio(precio)
     const u = Number(precio)
+    const q = Number(form.cantidad)
 
-    if (isNaN(u) || precio === '' || u < 0) return
-
-    if (lastEditedField === 'monto' && calcMonto !== '') {
-      const m = Number(calcMonto)
-      if (u > 0) setForm(prev => ({ ...prev, cantidad: (m / u).toFixed(3) }))
-    } else if (form.cantidad !== '') {
-      const q = Number(form.cantidad)
+    if (!isNaN(u) && precio !== '' && u >= 0 && q > 0) {
       setCalcMonto(Math.round(q * u).toString())
+    } else {
+      setCalcMonto('')
     }
   }
 
@@ -302,8 +291,23 @@ export default function CargasPage() {
         {/* TAB: Tubos para cargar */}
         {tab === 'pendientes' && (
           <>
+            {/* Buscador */}
+            <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+              <div className="search-bar" style={{ flex: 1, minWidth: 200, marginBottom: 0 }}>
+                <i className="ti ti-search" />
+                <input
+                  placeholder="Buscar por código, serie, gas, ubicación..."
+                  value={q}
+                  onChange={e => setQ(e.target.value)}
+                />
+                {q && <button className="btn-icon" onClick={() => setQ('')}><i className="ti ti-x" /></button>}
+              </div>
+            </div>
+
             {loading ? <Spinner /> : tubos.length === 0 ? (
               <EmptyState icon="ti-circle-check" message="No hay tubos pendientes de carga" />
+            ) : tubosFiltrados.length === 0 ? (
+              <EmptyState icon="ti-cylinder" message="No se encontraron tubos con esos criterios de búsqueda" />
             ) : (
               <>
                 {/* VISTA TABLE (Desktop) */}
@@ -321,7 +325,7 @@ export default function CargasPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {tubos.map(t => (
+                      {tubosFiltrados.map(t => (
                         <tr key={t.id}>
                           <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{t.id}</td>
                           <td style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)' }}>{t.serie}</td>
@@ -349,7 +353,7 @@ export default function CargasPage() {
 
                 {/* VISTA CARDS (Mobile) */}
                 <div className="mobile-list">
-                  {tubos.map(t => (
+                  {tubosFiltrados.map(t => (
                     <div key={t.id} className="list-card">
                       <div className="list-card-header">
                         <div className="list-card-title">{t.id}</div>
@@ -647,15 +651,6 @@ export default function CargasPage() {
             <i className="ti ti-calculator" /> Asistente de cobro (Opcional)
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <FormGroup label="Monto total (Gs.)">
-              <input
-                type="number"
-                min="0"
-                placeholder="ej: 100000"
-                value={calcMonto}
-                onChange={e => handleCalcMontoChange(e.target.value)}
-              />
-            </FormGroup>
             <FormGroup label="Precio unitario (Gs.)">
               <input
                 type="number"
@@ -665,18 +660,39 @@ export default function CargasPage() {
                 onChange={e => handleCalcPrecioChange(e.target.value)}
               />
             </FormGroup>
+            <FormGroup label="Monto total (Gs.)">
+              <div style={{ position: 'relative' }}>
+                <input
+                  type="text"
+                  readOnly
+                  placeholder="Cálculo automático"
+                  value={calcMonto ? `${Number(calcMonto).toLocaleString('es-PY')} Gs.` : ''}
+                  style={{
+                    background: 'var(--bg-subtle, #f1f5f9)',
+                    cursor: 'not-allowed',
+                    color: 'var(--text-secondary)',
+                    fontWeight: 600,
+                    paddingRight: 32
+                  }}
+                />
+                <i className="ti ti-lock" style={{
+                  position: 'absolute',
+                  right: 10,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: 'var(--text-muted)',
+                  fontSize: 14
+                }} />
+              </div>
+            </FormGroup>
           </div>
           {!calcPrecio || Number(calcPrecio) <= 0 ? (
             <div style={{ fontSize: 11, color: 'var(--amber, #d97706)', marginTop: 6, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
-              <i className="ti ti-info-circle" /> Ingresá el precio unitario para calcular
+              <i className="ti ti-info-circle" /> Ingresá el precio unitario para calcular el monto total
             </div>
           ) : Number(form.cantidad) > 0 && calcMonto !== '' ? (
             <div style={{ fontSize: 11, color: 'var(--blue)', marginTop: 6, fontWeight: 600 }}>
-              {lastEditedField === 'monto' ? (
-                <>Cálculo: {Number(calcMonto).toLocaleString('es-PY')} Gs. ÷ {Number(calcPrecio).toLocaleString('es-PY')} Gs./{form.unidad || 'unidad'} = {formatNumberSpanish(Number(form.cantidad))} {form.unidad || 'unidad'}</>
-              ) : (
-                <>Cálculo: {formatNumberSpanish(Number(form.cantidad))} {form.unidad || 'unidad'} × {Number(calcPrecio).toLocaleString('es-PY')} Gs./{form.unidad || 'unidad'} = {Number(calcMonto).toLocaleString('es-PY')} Gs.</>
-              )}
+              Cálculo: {formatNumberSpanish(Number(form.cantidad))} {form.unidad || 'unidad'} × {Number(calcPrecio).toLocaleString('es-PY')} Gs./{form.unidad || 'unidad'} = {Number(calcMonto).toLocaleString('es-PY')} Gs.
             </div>
           ) : null}
         </div>
