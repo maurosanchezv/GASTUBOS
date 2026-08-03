@@ -70,7 +70,7 @@ const entregaSchema = z.object({
   latitud:          z.number().optional(),
   longitud:         z.number().optional(),
   tipoOperacion:    z.enum(['ENTREGA_SIMPLE', 'ALQUILER', 'VENTA']),
-  repartidorId:     z.string().optional(),
+  repartidorId:     z.string().min(1, 'repartidorId es requerido'),
   observaciones:    z.string().optional(),
   tubosIds:         z.array(z.string()).min(1, 'Debe incluir al menos un tubo'),
   costoDelivery:    z.coerce.number().optional().default(0),

@@ -577,6 +577,7 @@ export default function EntregasPage() {
   async function handleSubmit(e) {
     e.preventDefault()
     if (!form.clienteId) return toast('Seleccioná un cliente', 'error')
+    if (!form.repartidorId) return toast('Seleccioná un repartidor', 'error')
     if (form.tubosIds.length === 0) return toast('Agregá al menos un tubo', 'error')
     if (form.tipoOperacion === 'ALQUILER' && !form.fechaVencimiento) {
       return toast('Ingresá la fecha de vencimiento del alquiler', 'error')
@@ -850,8 +851,8 @@ export default function EntregasPage() {
 
                     <div className="form-group">
                       <label className="form-label">Repartidor</label>
-                      <select value={form.repartidorId} onChange={f('repartidorId')}>
-                        <option value="">Sin asignar</option>
+                      <select value={form.repartidorId} onChange={f('repartidorId')} required>
+                        <option value="">Seleccioná un repartidor...</option>
                         {usuarios.map(u => <option key={u.id} value={u.id}>{u.nombre}</option>)}
                       </select>
                     </div>

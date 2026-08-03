@@ -349,7 +349,7 @@ export default function RepartoPage() {
 
           // Espaciado generoso al final para evitar superposiciones con la siguiente impresión
           builder.addTextLine('').addTextLine('').addTextLine('').addTextLine('').addTextLine('').addTextLine('')
-          builder.feed(4)
+          builder.feedLines(4)
           const binaryBuffer = builder.getBuffer()
            
            // Escribir en trozos para evitar el desbordamiento de búfer en impresoras de 58mm
