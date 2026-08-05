@@ -171,6 +171,7 @@ export default function EntregasPage() {
 
   // Detalle de entrega y control de ticket
   const [modalDetalle, setModalDetalle] = useState(false)
+  const [modalSinRepartidor, setModalSinRepartidor] = useState(false)
   const [entregaSeleccionada, setEntregaSeleccionada] = useState(null)
   const [ticketTab, setTicketTab] = useState('remision') // 'remision' | 'comprobante'
 
@@ -577,7 +578,7 @@ export default function EntregasPage() {
   async function handleSubmit(e) {
     e.preventDefault()
     if (!form.clienteId) return toast('Seleccioná un cliente', 'error')
-    if (!form.repartidorId) return toast('Seleccioná un repartidor', 'error')
+    if (!form.repartidorId) return setModalSinRepartidor(true)
     if (form.tubosIds.length === 0) return toast('Agregá al menos un tubo', 'error')
     if (form.tipoOperacion === 'ALQUILER' && !form.fechaVencimiento) {
       return toast('Ingresá la fecha de vencimiento del alquiler', 'error')
@@ -1552,6 +1553,29 @@ export default function EntregasPage() {
             )}
           </div>
         )}
+      </Modal>
+
+      {/* Modal de aviso: falta seleccionar repartidor */}
+      <Modal
+        open={modalSinRepartidor}
+        title="Falta seleccionar repartidor"
+        onClose={() => setModalSinRepartidor(false)}
+        width={400}
+        footer={
+          <button className="btn btn-primary" onClick={() => setModalSinRepartidor(false)}>
+            Entendido
+          </button>
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}>
+            No se puede registrar la entrega sin asignar un repartidor. Si no se asigna,
+            el tubo queda sin nadie a cargo y la entrega no podrá completarse correctamente.
+          </p>
+          <p style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>
+            Seleccioná un repartidor en el formulario antes de guardar.
+          </p>
+        </div>
       </Modal>
 
       {/* Elemento que solo se muestra para la impresión física (80mm) */}
