@@ -400,11 +400,13 @@ export default function RepartoPage() {
   const handlePrintClick = (entrega) => {
     setEntregaParaImprimir(entrega)
     setModalDetalle(false) // Close the detail modal first to avoid overlay conflict
-    if (window.bluetoothSerial) {
-      buscarImpresoras()
-    } else {
-      window.print()
-    }
+    setTimeout(() => {
+      if (window.bluetoothSerial) {
+        buscarImpresoras()
+      } else {
+        window.print()
+      }
+    }, 150)
   }
   
   // Entrega seleccionada para entrega activa en calle
@@ -421,6 +423,7 @@ export default function RepartoPage() {
   const [recambios, setRecambios] = useState([])
   const [nuevoRecambioId, setNuevoRecambioId] = useState('')
   const [escaneandoRecambio, setEscaneandoRecambio] = useState(false)
+  const [tieneRetorno, setTieneRetorno] = useState(null) // null = sin responder, true = SÍ, false = NO
 
   const [seccion, setSeccion] = useState('ruta') // 'ruta', 'historial' o 'camion'
   const [historialHoy, setHistorialHoy] = useState([])
@@ -428,6 +431,7 @@ export default function RepartoPage() {
   const [metodoPago, setMetodoPago] = useState('EFECTIVO')
   const [montoRecibido, setMontoRecibido] = useState('')
   const [modalWarningParcial, setModalWarningParcial] = useState(false)
+  const [modalConfirmarCompleta, setModalConfirmarCompleta] = useState(false)
 
   // Estado para gestión de camión asignado al chofer
   const [camiones, setCamiones] = useState([])
@@ -863,6 +867,7 @@ export default function RepartoPage() {
   const iniciarEntrega = (entrega) => {
     setActiveEntrega(entrega)
     setEntregaStep(1)
+    setTieneRetorno(null)
     setScannedIds([])
     setRecambios([])
     setNuevoRecambioId('')
@@ -881,6 +886,7 @@ export default function RepartoPage() {
     stopScannerRecambio()
     setActiveEntrega(null)
     setEntregaStep(1)
+    setTieneRetorno(null)
     setScannedIds([])
     setRecambios([])
     setNuevoRecambioId('')
@@ -896,7 +902,7 @@ export default function RepartoPage() {
       setModalWarningParcial(true)
       return
     }
-    ejecutarConfirmarEntrega(entregaId)
+    setModalConfirmarCompleta(true)
   }
 
   // Confirmar entrega físicamente
@@ -931,6 +937,7 @@ export default function RepartoPage() {
       }
       
       setModalWarningParcial(false)
+      setModalConfirmarCompleta(false)
       cancelarEntregaActiva()
       fetchRuta()
       fetchHistorialHoy()
@@ -1605,199 +1612,260 @@ export default function RepartoPage() {
                   {entregaStep === 2 && (
                     // PASO 2: RETORNO DE CILINDROS (RECAMBIO)
                     <>
-                      <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, color: 'var(--text-primary)' }}>
-                        2. SELECCIONAR RETORNO DE CILINDROS
-                      </div>
+                      {tieneRetorno !== true ? (
+                        /* PREGUNTA DE DECISIÓN: ¿RETORNA CILINDROS? */
+                        <div style={{ background: 'var(--surface-2)', padding: '24px 18px', borderRadius: 12, border: '1px solid var(--border)', textAlign: 'center', marginBottom: 16 }}>
+                          <div style={{ width: 52, height: 52, borderRadius: '50%', background: 'var(--blue-light)', color: 'var(--blue)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
+                            <i className="ti ti-replace" style={{ fontSize: 26 }} />
+                          </div>
+                          <h4 style={{ margin: '0 0 6px', fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>
+                            ¿El cliente va a retornar algún cilindro?
+                          </h4>
+                          <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                            Indicá si recibís envases vacíos o tubos en recambio para registrar su ingreso.
+                          </p>
 
-                      {/* CALCULADORA / SELECTOR RÁPIDO */}
-                      <div style={{ background: 'var(--surface-2)', padding: 14, borderRadius: 10, border: '1px solid var(--border)', marginBottom: 12 }}>
-                        {/* Display de selección actual */}
-                        <div style={{ 
-                          background: 'var(--blue-light)', 
-                          border: '1px solid rgba(26, 95, 168, 0.2)', 
-                          borderRadius: 6, 
-                          padding: '10px 12px', 
-                          marginBottom: 12, 
-                          display: 'flex', 
-                          justifyContent: 'space-between', 
-                          alignItems: 'center' 
-                        }}>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--blue-dark)' }}>SELECCIÓN:</span>
-                          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--blue-dark)' }}>
-                            {calcGas} {calcCapacidad}
-                          </span>
-                        </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                            <button
+                              type="button"
+                              className="btn btn-primary"
+                              onClick={() => setTieneRetorno(true)}
+                              style={{ width: '100%', height: 48, fontSize: 14, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+                            >
+                              <i className="ti ti-check" style={{ fontSize: 20 }} /> SÍ, RETORNA CILINDROS
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-outline"
+                              onClick={() => {
+                                setRecambios([])
+                                setTieneRetorno(false)
+                                setEntregaStep(3)
+                              }}
+                              style={{ width: '100%', height: 48, fontSize: 14, fontWeight: 600, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, borderColor: 'var(--border)' }}
+                            >
+                              <i className="ti ti-x" style={{ fontSize: 18, color: 'var(--red)' }} /> NO RETORNA NINGUNO (Ir a Imprimir) ➔
+                            </button>
+                          </div>
 
-                        {/* Teclado - Fila 1: Gases */}
-                        <div style={{ marginBottom: 10 }}>
-                          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>1. Seleccionar Gas</div>
-                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
-                            {['CO2', 'Oxígeno', 'Argón', 'Nitrógeno', 'Aire comprimido', 'Acetileno', 'Mezcla Ar+CO2', 'Mezcla especial'].map(g => (
-                              <button
-                                key={g}
-                                type="button"
-                                onClick={() => {
-                                  setCalcGas(g)
-                                  const gLower = g.toLowerCase()
-                                  if (gLower === 'acetileno') {
-                                    setCalcCapacidad('6 kg')
-                                  } else if (gLower === 'co2') {
-                                    setCalcCapacidad('25 kg')
-                                  } else {
-                                    setCalcCapacidad('6 m³')
-                                  }
-                                }}
-                                style={{
-                                  padding: '8px 4px',
-                                  fontSize: 11,
-                                  fontWeight: calcGas === g ? 700 : 500,
-                                  background: calcGas === g ? 'var(--blue)' : 'var(--surface-1)',
-                                  color: calcGas === g ? '#fff' : 'var(--text-secondary)',
-                                  border: `1px solid ${calcGas === g ? 'var(--blue)' : 'var(--border)'}`,
-                                  borderRadius: 6,
-                                  cursor: 'pointer',
-                                  transition: 'all 0.15s ease',
-                                  boxShadow: calcGas === g ? '0 2px 4px rgba(26, 95, 168, 0.2)' : 'none'
-                                }}
-                              >
-                                {g}
-                              </button>
-                            ))}
+                          <div style={{ marginTop: 16 }}>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-ghost"
+                              onClick={() => setEntregaStep(1)}
+                              style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                            >
+                              <i className="ti ti-arrow-left" /> Volver a Escaneo
+                            </button>
                           </div>
                         </div>
-
-                        {/* Teclado - Fila 2: Capacidad */}
-                        <div style={{ marginBottom: 14 }}>
-                          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>2. Seleccionar Capacidad</div>
-                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
-                            {(calcGas === 'Acetileno'
-                              ? ['1 kg', '1.2 kg', '1.5 kg', '2 kg', '2.5 kg', '3 kg', '3.5 kg', '4 kg', '4.5 kg', '5 kg', '5.5 kg', '6 kg', '7 kg', '8 kg']
-                              : calcGas === 'CO2'
-                                ? ['1 kg', '2 kg', '3 kg', '4 kg', '5 kg', '6 kg', '7 kg', '8 kg', '10 kg', '13 kg', '15 kg', '20 kg', '25 kg', '30 kg']
-                                : ['1 m³', '1.5 m³', '2.5 m³', '3 m³', '4 m³', '5 m³', '6 m³', '6.5 m³', '7 m³', '7.15 m³', '7.5 m³', '8.5 m³']
-                            ).map(cap => (
-                              <button
-                                key={cap}
-                                type="button"
-                                onClick={() => setCalcCapacidad(cap)}
-                                style={{
-                                  padding: '8px 4px',
-                                  fontSize: 11,
-                                  fontWeight: calcCapacidad === cap ? 700 : 500,
-                                  background: calcCapacidad === cap ? 'var(--blue-mid)' : 'var(--surface-1)',
-                                  color: calcCapacidad === cap ? '#fff' : 'var(--text-secondary)',
-                                  border: `1px solid ${calcCapacidad === cap ? 'var(--blue-mid)' : 'var(--border)'}`,
-                                  borderRadius: 6,
-                                  cursor: 'pointer',
-                                  transition: 'all 0.15s ease',
-                                  boxShadow: calcCapacidad === cap ? '0 2px 4px rgba(59, 125, 216, 0.2)' : 'none'
-                                }}
-                              >
-                                {cap}
-                              </button>
-                            ))}
+                      ) : (
+                        /* FORMULARIO COMPLETO DE SELECCIÓN / ESCANEO DE RETORNO */
+                        <>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                            <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-primary)' }}>
+                              2. SELECCIONAR RETORNO DE CILINDROS
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setTieneRetorno(null)}
+                              style={{ background: 'transparent', border: 'none', color: 'var(--blue)', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                            >
+                              <i className="ti ti-rotate-clockwise" /> Cambiar respuesta
+                            </button>
                           </div>
-                        </div>
 
-                        {/* Botón de Acción Principal */}
-                        <button
-                          type="button"
-                          className="btn btn-primary"
-                          onClick={() => {
-                            const baseDesc = `${calcGas} ${calcCapacidad}`
-                            let desc = baseDesc
-                            let suffix = 2
-                            while (recambios.includes(desc)) {
-                              desc = `${baseDesc} #${suffix}`
-                              suffix++
-                            }
-                            setRecambios(prev => [...prev, desc])
-                            toast(`Agregado retorno: ${desc}`, 'success')
-                          }}
-                          style={{ width: '100%', height: 44, fontSize: 13, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
-                        >
-                          <i className="ti ti-plus" /> Agregar Retorno
-                        </button>
-                      </div>
+                          {/* CALCULADORA / SELECTOR RÁPIDO */}
+                          <div style={{ background: 'var(--surface-2)', padding: 14, borderRadius: 10, border: '1px solid var(--border)', marginBottom: 12 }}>
+                            {/* Display de selección actual */}
+                            <div style={{ 
+                              background: 'var(--blue-light)', 
+                              border: '1px solid rgba(26, 95, 168, 0.2)', 
+                              borderRadius: 6, 
+                              padding: '10px 12px', 
+                              marginBottom: 12, 
+                              display: 'flex', 
+                              justifyContent: 'space-between', 
+                              alignItems: 'center' 
+                            }}>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--blue-dark)' }}>SELECCIÓN:</span>
+                              <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--blue-dark)' }}>
+                                {calcGas} {calcCapacidad}
+                              </span>
+                            </div>
 
-                      {/* Opción Alternativa: Cargar Código QR o Manual */}
-                      <div style={{ background: 'var(--surface-2)', padding: 12, borderRadius: 10, border: '1px solid var(--border)', marginBottom: 16 }}>
-                        <div style={{ fontWeight: 600, fontSize: 11, marginBottom: 8, color: 'var(--text-secondary)' }}>
-                          O ESCANEAR / ESCRIBIR CÓDIGO DEL RETORNO
-                        </div>
-                        <div style={{ display: 'flex', gap: 8 }}>
-                          <input
-                            placeholder="Ej: CLI-001 o código de tubo..."
-                            value={nuevoRecambioId}
-                            onChange={e => setNuevoRecambioId(e.target.value)}
-                            onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), agregarRecambioManual())}
-                            style={{ flex: 1, minHeight: 36, fontSize: 13 }}
-                          />
-                          <button className="btn btn-secondary btn-sm" onClick={agregarRecambioManual}>
-                            Agregar
-                          </button>
-                          <button className="btn btn-secondary btn-sm" onClick={startScannerRecambio} title="Escanear QR" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                            <i className="ti ti-qrcode" /> Escanear QR
-                          </button>
-                        </div>
+                            {/* Teclado - Fila 1: Gases */}
+                            <div style={{ marginBottom: 10 }}>
+                              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>1. Seleccionar Gas</div>
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+                                {['CO2', 'Oxígeno', 'Argón', 'Nitrógeno', 'Aire comprimido', 'Acetileno', 'Mezcla Ar+CO2', 'Mezcla especial'].map(g => (
+                                  <button
+                                    key={g}
+                                    type="button"
+                                    onClick={() => {
+                                      setCalcGas(g)
+                                      const gLower = g.toLowerCase()
+                                      if (gLower === 'acetileno') {
+                                        setCalcCapacidad('6 kg')
+                                      } else if (gLower === 'co2') {
+                                        setCalcCapacidad('25 kg')
+                                      } else {
+                                        setCalcCapacidad('6 m³')
+                                      }
+                                    }}
+                                    style={{
+                                      padding: '8px 4px',
+                                      fontSize: 11,
+                                      fontWeight: calcGas === g ? 700 : 500,
+                                      background: calcGas === g ? 'var(--blue)' : 'var(--surface-1)',
+                                      color: calcGas === g ? '#fff' : 'var(--text-secondary)',
+                                      border: `1px solid ${calcGas === g ? 'var(--blue)' : 'var(--border)'}`,
+                                      borderRadius: 6,
+                                      cursor: 'pointer',
+                                      transition: 'all 0.15s ease',
+                                      boxShadow: calcGas === g ? '0 2px 4px rgba(26, 95, 168, 0.2)' : 'none'
+                                    }}
+                                  >
+                                    {g}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
 
-                        {escaneandoRecambio && (
-                          <Modal
-                            open={escaneandoRecambio}
-                            title="Escanear Tubo Retornado"
-                            onClose={stopScannerRecambio}
-                            width={400}
-                          >
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 15, alignItems: 'center', background: '#000', padding: 12, borderRadius: 8 }}>
-                              <div id={SCANNER_ID} style={{ width: '100%', maxWidth: '320px', overflow: 'hidden' }} />
-                              <button className="btn btn-danger" onClick={stopScannerRecambio} style={{ width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, height: 42 }}>
-                                <i className="ti ti-player-stop" style={{ fontSize: 16 }} /> Apagar Cámara / Cancelar
+                            {/* Teclado - Fila 2: Capacidad */}
+                            <div style={{ marginBottom: 14 }}>
+                              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>2. Seleccionar Capacidad</div>
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+                                {(calcGas === 'Acetileno'
+                                  ? ['1 kg', '1.2 kg', '1.5 kg', '2 kg', '2.5 kg', '3 kg', '3.5 kg', '4 kg', '4.5 kg', '5 kg', '5.5 kg', '6 kg', '7 kg', '8 kg']
+                                  : calcGas === 'CO2'
+                                    ? ['1 kg', '2 kg', '3 kg', '4 kg', '5 kg', '6 kg', '7 kg', '8 kg', '10 kg', '13 kg', '15 kg', '20 kg', '25 kg', '30 kg']
+                                    : ['1 m³', '1.5 m³', '2.5 m³', '3 m³', '4 m³', '5 m³', '6 m³', '6.5 m³', '7 m³', '7.15 m³', '7.5 m³', '8.5 m³']
+                                ).map(cap => (
+                                  <button
+                                    key={cap}
+                                    type="button"
+                                    onClick={() => setCalcCapacidad(cap)}
+                                    style={{
+                                      padding: '8px 4px',
+                                      fontSize: 11,
+                                      fontWeight: calcCapacidad === cap ? 700 : 500,
+                                      background: calcCapacidad === cap ? 'var(--blue-mid)' : 'var(--surface-1)',
+                                      color: calcCapacidad === cap ? '#fff' : 'var(--text-secondary)',
+                                      border: `1px solid ${calcCapacidad === cap ? 'var(--blue-mid)' : 'var(--border)'}`,
+                                      borderRadius: 6,
+                                      cursor: 'pointer',
+                                      transition: 'all 0.15s ease',
+                                      boxShadow: calcCapacidad === cap ? '0 2px 4px rgba(59, 125, 216, 0.2)' : 'none'
+                                    }}
+                                  >
+                                    {cap}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* Botón de Acción Principal */}
+                            <button
+                              type="button"
+                              className="btn btn-primary"
+                              onClick={() => {
+                                const baseDesc = `${calcGas} ${calcCapacidad}`
+                                let desc = baseDesc
+                                let suffix = 2
+                                while (recambios.includes(desc)) {
+                                  desc = `${baseDesc} #${suffix}`
+                                  suffix++
+                                }
+                                setRecambios(prev => [...prev, desc])
+                                toast(`Agregado retorno: ${desc}`, 'success')
+                              }}
+                              style={{ width: '100%', height: 44, fontSize: 13, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                            >
+                              <i className="ti ti-plus" /> Agregar Retorno
+                            </button>
+                          </div>
+
+                          {/* Opción Alternativa: Cargar Código QR o Manual */}
+                          <div style={{ background: 'var(--surface-2)', padding: 12, borderRadius: 10, border: '1px solid var(--border)', marginBottom: 16 }}>
+                            <div style={{ fontWeight: 600, fontSize: 11, marginBottom: 8, color: 'var(--text-secondary)' }}>
+                              O ESCANEAR / ESCRIBIR CÓDIGO DEL RETORNO
+                            </div>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                              <input
+                                placeholder="Ej: CLI-001 o código de tubo..."
+                                value={nuevoRecambioId}
+                                onChange={e => setNuevoRecambioId(e.target.value)}
+                                onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), agregarRecambioManual())}
+                                style={{ flex: 1, minHeight: 36, fontSize: 13 }}
+                              />
+                              <button className="btn btn-secondary btn-sm" onClick={agregarRecambioManual}>
+                                Agregar
+                              </button>
+                              <button className="btn btn-secondary btn-sm" onClick={startScannerRecambio} title="Escanear QR" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                <i className="ti ti-qrcode" /> Escanear QR
                               </button>
                             </div>
-                          </Modal>
-                        )}
-                      </div>
 
-                      {/* Lista de Recambios Agregados */}
-                      <div style={{ marginBottom: 20 }}>
-                        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8 }}>
-                          CILINDROS RETORNADOS:
-                        </div>
-                        {recambios.length > 0 ? (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                            {recambios.map(rId => (
-                              <div key={rId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface-2)', border: '1px solid var(--border)', padding: '8px 12px', borderRadius: 8, fontSize: 13 }}>
-                                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{rId}</span>
-                                <button className="btn-icon btn-sm" onClick={() => setRecambios(prev => prev.filter(x => x !== rId))} style={{ background: 'rgba(239, 68, 68, 0.1)', border: 'none', cursor: 'pointer', borderRadius: 4, width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                  <i className="ti ti-trash" style={{ color: 'var(--red)' }} />
-                                </button>
+                            {escaneandoRecambio && (
+                              <Modal
+                                open={escaneandoRecambio}
+                                title="Escanear Tubo Retornado"
+                                onClose={stopScannerRecambio}
+                                width={400}
+                              >
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 15, alignItems: 'center', background: '#000', padding: 12, borderRadius: 8 }}>
+                                  <div id={SCANNER_ID} style={{ width: '100%', maxWidth: '320px', overflow: 'hidden' }} />
+                                  <button className="btn btn-danger" onClick={stopScannerRecambio} style={{ width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, height: 42 }}>
+                                    <i className="ti ti-player-stop" style={{ fontSize: 16 }} /> Apagar Cámara / Cancelar
+                                  </button>
+                                </div>
+                              </Modal>
+                            )}
+                          </div>
+
+                          {/* Lista de Recambios Agregados */}
+                          <div style={{ marginBottom: 20 }}>
+                            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8 }}>
+                              CILINDROS RETORNADOS:
+                            </div>
+                            {recambios.length > 0 ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                {recambios.map(rId => (
+                                  <div key={rId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface-2)', border: '1px solid var(--border)', padding: '8px 12px', borderRadius: 8, fontSize: 13 }}>
+                                    <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{rId}</span>
+                                    <button className="btn-icon btn-sm" onClick={() => setRecambios(prev => prev.filter(x => x !== rId))} style={{ background: 'rgba(239, 68, 68, 0.1)', border: 'none', cursor: 'pointer', borderRadius: 4, width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                      <i className="ti ti-trash" style={{ color: 'var(--red)' }} />
+                                    </button>
+                                  </div>
+                                ))}
                               </div>
-                            ))}
+                            ) : (
+                              <div style={{ fontSize: 11, fontStyle: 'italic', color: 'var(--text-muted)', background: 'var(--surface-2)', padding: '10px 12px', border: '1px dashed var(--border)', borderRadius: 8, textAlign: 'center' }}>
+                                Ningún cilindro agregado para recambio (presiona continuar si no retorna)
+                              </div>
+                            )}
                           </div>
-                        ) : (
-                          <div style={{ fontSize: 11, fontStyle: 'italic', color: 'var(--text-muted)', background: 'var(--surface-2)', padding: '10px 12px', border: '1px dashed var(--border)', borderRadius: 8, textAlign: 'center' }}>
-                            Ningún cilindro agregado para recambio (presiona continuar si no retorna)
-                          </div>
-                        )}
-                      </div>
 
-                      {/* Botones de Navegación */}
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                        <button
-                          className="btn btn-primary"
-                          onClick={() => setEntregaStep(3)}
-                          style={{ width: '100%', height: 48, fontSize: 14, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
-                        >
-                          Siguiente: Imprimir Remisión <i className="ti ti-arrow-right" />
-                        </button>
-                        <button
-                          className="btn btn-outline"
-                          onClick={() => setEntregaStep(1)}
-                          style={{ width: '100%', height: 44, fontSize: 13, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
-                        >
-                          <i className="ti ti-arrow-left" /> Volver a Escaneo
-                        </button>
-                      </div>
+                          {/* Botones de Navegación */}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <button
+                              className="btn btn-primary"
+                              onClick={() => setEntregaStep(3)}
+                              style={{ width: '100%', height: 48, fontSize: 14, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                            >
+                              Siguiente: Imprimir Remisión <i className="ti ti-arrow-right" />
+                            </button>
+                            <button
+                              className="btn btn-outline"
+                              onClick={() => setEntregaStep(1)}
+                              style={{ width: '100%', height: 44, fontSize: 13, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                            >
+                              <i className="ti ti-arrow-left" /> Volver a Escaneo
+                            </button>
+                          </div>
+                        </>
+                      )}
                     </>
                   )}
 
@@ -1829,9 +1897,9 @@ export default function RepartoPage() {
                         </button>
                         
                         <button
-                          className="btn btn-primary"
+                          className="btn btn-outline"
                           onClick={() => handlePrintClick(activeEntrega)}
-                          style={{ width: '100%', height: 44, fontSize: 13, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+                          style={{ width: '100%', height: 44, fontSize: 13, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, borderColor: 'var(--blue)', color: 'var(--blue)' }}
                         >
                           <i className="ti ti-printer" /> Imprimir Directamente
                         </button>
@@ -1848,7 +1916,10 @@ export default function RepartoPage() {
                         </button>
                         <button
                           className="btn btn-outline"
-                          onClick={() => setEntregaStep(2)}
+                          onClick={() => {
+                            setTieneRetorno(null)
+                            setEntregaStep(2)
+                          }}
                           style={{ width: '100%', height: 44, fontSize: 13, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
                         >
                           <i className="ti ti-arrow-left" /> Volver a Retorno
@@ -1904,7 +1975,7 @@ export default function RepartoPage() {
                         {/* Botones de Confirmación */}
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 14 }}>
                           <button
-                            className={`btn ${todosListos ? 'btn-success' : 'btn-warning'}`}
+                            className={`btn ${todosListos ? 'btn-primary' : 'btn-warning'}`}
                             disabled={scannedIds.length === 0}
                             onClick={() => solicitarConfirmarEntrega(activeEntrega.id)}
                             style={{ width: '100%', height: 50, fontSize: 14, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
@@ -2393,6 +2464,60 @@ export default function RepartoPage() {
                     ⚠ {d.tuboId} ({d.tubo?.gas})
                   </span>
                 ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Modal de Confirmación de Entrega Completa */}
+      <Modal
+        open={modalConfirmarCompleta}
+        title="Confirmar Entrega"
+        onClose={() => setModalConfirmarCompleta(false)}
+        width={440}
+        footer={
+          <div style={{ display: 'flex', gap: 10, width: '100%' }}>
+            <button 
+              className="btn btn-outline" 
+              onClick={() => setModalConfirmarCompleta(false)}
+              style={{ flex: 1, height: 42 }}
+            >
+              Cancelar
+            </button>
+            <button 
+              className="btn btn-primary" 
+              onClick={() => ejecutarConfirmarEntrega(activeEntrega?.id)}
+              style={{ flex: 1, height: 42, fontWeight: 700 }}
+            >
+              <i className="ti ti-check" /> Sí, Confirmar
+            </button>
+          </div>
+        }
+      >
+        {activeEntrega && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, textAlign: 'center', padding: '10px 0' }}>
+            <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'var(--blue-light)', color: 'var(--blue)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto' }}>
+              <i className="ti ti-help-circle" style={{ fontSize: 32 }} />
+            </div>
+
+            <div>
+              <h4 style={{ margin: '0 0 6px', fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>
+                ¿Estás seguro de que deseas confirmar la entrega?
+              </h4>
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}>
+                Se registrará la entrega para <strong>{activeEntrega.cliente?.nombre}</strong>.
+              </p>
+            </div>
+
+            <div style={{ background: 'var(--surface-2)', padding: 12, borderRadius: 8, border: '1px solid var(--border)', display: 'flex', justifyContent: 'space-around', fontSize: 12 }}>
+              <div>
+                <span style={{ color: 'var(--text-secondary)' }}>Entregados: </span>
+                <strong style={{ color: 'var(--green)' }}>{scannedIds.length} tubo(s)</strong>
+              </div>
+              <div>
+                <span style={{ color: 'var(--text-secondary)' }}>Retornados: </span>
+                <strong style={{ color: 'var(--blue)' }}>{recambios.length} tubo(s)</strong>
               </div>
             </div>
           </div>
