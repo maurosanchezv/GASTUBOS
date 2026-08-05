@@ -419,6 +419,7 @@ export default function RepartoPage() {
   const [escaneando, setEscaneando] = useState(false)
   const [scannedIds, setScannedIds] = useState([]) // IDs de tubos validados de la entrega activa
   const scannerRef = useRef(null)
+  const lastScanRef = useRef({ id: '', time: 0 })
 
   const [recambios, setRecambios] = useState([])
   const [nuevoRecambioId, setNuevoRecambioId] = useState('')
@@ -810,8 +811,14 @@ export default function RepartoPage() {
             id = text.split('/tubos/')[1].split('?')[0].split('/')[0].trim().toUpperCase()
           }
           
+          // Debounce: Evitar notificaciones repetidas del mismo tubo durante 3 segundos
+          const now = Date.now()
+          if (lastScanRef.current.id === id && (now - lastScanRef.current.time) < 3000) {
+            return
+          }
+          lastScanRef.current = { id, time: now }
+
           const pertenece = entrega.detalles?.some(d => d.tuboId === id)
-          
           if (pertenece) {
             if (scannedIds.includes(id)) {
               toast('Tubo ya verificado anteriormente', 'info')
@@ -1612,7 +1619,7 @@ export default function RepartoPage() {
                   {entregaStep === 2 && (
                     // PASO 2: RETORNO DE CILINDROS (RECAMBIO)
                     <>
-                      {tieneRetorno !== true ? (
+                      {tieneRetorno !== true && recambios.length === 0 ? (
                         /* PREGUNTA DE DECISIÓN: ¿RETORNA CILINDROS? */
                         <div style={{ background: 'var(--surface-2)', padding: '24px 18px', borderRadius: 12, border: '1px solid var(--border)', textAlign: 'center', marginBottom: 16 }}>
                           <div style={{ width: 52, height: 52, borderRadius: '50%', background: 'var(--blue-light)', color: 'var(--blue)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
@@ -1668,7 +1675,10 @@ export default function RepartoPage() {
                             </div>
                             <button
                               type="button"
-                              onClick={() => setTieneRetorno(null)}
+                              onClick={() => {
+                                setRecambios([])
+                                setTieneRetorno(null)
+                              }}
                               style={{ background: 'transparent', border: 'none', color: 'var(--blue)', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}
                             >
                               <i className="ti ti-rotate-clockwise" /> Cambiar respuesta
@@ -1885,24 +1895,26 @@ export default function RepartoPage() {
                           Antes de confirmar la entrega, podés imprimir el comprobante de remisión para el cliente.
                         </p>
                         
-                        <button
-                          className="btn btn-outline"
-                          onClick={() => {
-                            setEntregaSeleccionada(activeEntrega)
-                            setModalDetalle(true)
-                          }}
-                          style={{ width: '100%', height: 44, fontSize: 13, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 8, borderColor: 'var(--blue)', color: 'var(--blue)' }}
-                        >
-                          <i className="ti ti-eye" /> Previsualizar Ticket
-                        </button>
-                        
-                        <button
-                          className="btn btn-outline"
-                          onClick={() => handlePrintClick(activeEntrega)}
-                          style={{ width: '100%', height: 44, fontSize: 13, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, borderColor: 'var(--blue)', color: 'var(--blue)' }}
-                        >
-                          <i className="ti ti-printer" /> Imprimir Directamente
-                        </button>
+                        <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+                          <button
+                            className="btn btn-outline"
+                            onClick={() => {
+                              setEntregaSeleccionada(activeEntrega)
+                              setModalDetalle(true)
+                            }}
+                            style={{ flex: 1, height: 38, fontSize: 12, fontWeight: 600, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, borderColor: 'var(--blue)', color: 'var(--blue)' }}
+                          >
+                            <i className="ti ti-eye" /> Previsualizar
+                          </button>
+
+                          <button
+                            className="btn btn-outline"
+                            onClick={() => handlePrintClick(activeEntrega)}
+                            style={{ flex: 1, height: 38, fontSize: 12, fontWeight: 600, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, borderColor: 'var(--blue)', color: 'var(--blue)' }}
+                          >
+                            <i className="ti ti-printer" /> Imprimir
+                          </button>
+                        </div>
                       </div>
 
                       {/* Botones de Navegación */}
@@ -1916,10 +1928,7 @@ export default function RepartoPage() {
                         </button>
                         <button
                           className="btn btn-outline"
-                          onClick={() => {
-                            setTieneRetorno(null)
-                            setEntregaStep(2)
-                          }}
+                          onClick={() => setEntregaStep(2)}
                           style={{ width: '100%', height: 44, fontSize: 13, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
                         >
                           <i className="ti ti-arrow-left" /> Volver a Retorno

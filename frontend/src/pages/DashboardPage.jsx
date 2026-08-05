@@ -51,11 +51,10 @@ export default function DashboardPage() {
       <div className="app-content">
         {/* Alertas */}
         {alquileresVencidos > 0 && (
-          <div className="alert alert-warn" style={{ cursor: 'pointer' }} onClick={() => navigate('/alquileres')}>
+          <div className="alert alert-warn">
             <i className="ti ti-clock-exclamation" />
             <div>
               <strong>{alquileresVencidos} alquiler{alquileresVencidos > 1 ? 'es' : ''} vencido{alquileresVencidos > 1 ? 's' : ''}</strong>
-              {' '}— Hacer click para revisar
             </div>
           </div>
         )}

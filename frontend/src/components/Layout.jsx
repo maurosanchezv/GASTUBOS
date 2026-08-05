@@ -36,14 +36,12 @@ const NAV = [
       { to: '/entregas',           icon: 'ti-truck',          label: 'Entregas',              restrictedTo: OFICINA },
       { to: '/cargas',             icon: 'ti-flame',          label: 'Cargas',                restrictedTo: OFICINA },
       { to: '/devoluciones',       icon: 'ti-arrow-back',     label: 'Devoluciones',          restrictedTo: OFICINA },
-      { to: '/alquileres',         icon: 'ti-clock',          label: 'Alquileres',            restrictedTo: OFICINA },
     ],
   },
   {
     group: 'CLIENTES Y GESTIÓN',
     items: [
       { to: '/clientes',  icon: 'ti-users',     label: 'Clientes', restrictedTo: OFICINA },
-      { to: '/ventas',    icon: 'ti-receipt-2', label: 'Ventas',   restrictedTo: OFICINA },
     ],
   },
   {

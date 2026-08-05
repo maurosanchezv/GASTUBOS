@@ -90,12 +90,13 @@ export default function App() {
           <Route path="devoluciones" element={
             <PrivateRoute roles={['ADMIN', 'SUPERVISOR', 'OPERADOR', 'REPARTIDOR']}><DevolucionesPage /></PrivateRoute>
           } />
+          {/* Rutas temporalmente deshabilitadas
           <Route path="alquileres" element={
             <PrivateRoute roles={['ADMIN', 'SUPERVISOR', 'OPERADOR']}><AlquileresPage /></PrivateRoute>
           } />
           <Route path="ventas" element={
             <PrivateRoute roles={['ADMIN', 'SUPERVISOR', 'OPERADOR']}><VentasPage /></PrivateRoute>
-          } />
+          } /> */}
           <Route path="reportes" element={
             <PrivateRoute roles={['ADMIN', 'SUPERVISOR']}><ReportesPage /></PrivateRoute>
           } />

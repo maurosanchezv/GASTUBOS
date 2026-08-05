@@ -13,6 +13,12 @@ const ESTADO_COLORS = {
   DEVUELTO: '#9A3412', EN_REVISION: '#B45309'
 }
 
+const csvEscape = (val) => {
+  const str = String(val ?? '')
+  if (/[",\n]/.test(str)) return `"${str.replace(/"/g, '""')}"`
+  return str
+}
+
 const formatGs = (val) => 'Gs. ' + Number(val || 0).toLocaleString('es-PY')
 const formatNum = (val) => {
   const num = Number(val || 0)
@@ -185,13 +191,13 @@ export default function ReportesPage() {
         csv += `Fecha,Remisión,Cliente,Repartidor,Operación,Total Operación Gs,Estado\n`
         ventasYCobros.forEach(v => {
           const estadoStr = v.cancelada ? 'Cancelada' : v.confirmada ? 'Concretada' : 'Pendiente'
-          csv += `"${new Date(v.fechaEntrega).toLocaleDateString('es-PY')}","${v.numero}","${v.clienteNombre}","${v.repartidorNombre}","${v.tipoOperacion}",${v.totalOperacion},"${estadoStr}"\n`
+          csv += `"${new Date(v.fechaEntrega).toLocaleDateString('es-PY')}",${csvEscape(v.numero)},${csvEscape(v.clienteNombre)},${csvEscape(v.repartidorNombre)},${csvEscape(v.tipoOperacion)},${v.totalOperacion},${csvEscape(estadoStr)}\n`
         })
 
         csv += `\n3. CARGAS DE GAS\n`
         csv += `Gas,Unidad,Cargas Realizadas,Cantidad Total,Valor Total Gs,Promedio por Carga\n`
         cargasPorGas.forEach(c => {
-          csv += `"${c.tipoGas}","${c.unidad}",${c.conteo},${c.cantidadTotal},${c.valorTotal},${c.promedioCarga}\n`
+          csv += `${csvEscape(c.tipoGas)},${csvEscape(c.unidad)},${c.conteo},${c.cantidadTotal},${c.valorTotal},${c.promedioCarga}\n`
         })
 
         const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
