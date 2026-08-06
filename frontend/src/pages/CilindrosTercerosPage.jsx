@@ -8,6 +8,7 @@ import { useConfigStore } from '../store/configStore.js'
 
 const GASES = ['Oxígeno', 'CO2', 'Argón', 'Nitrógeno', 'Aire comprimido', 'Mezcla CO2/Argón', 'Acetileno']
 const ESTADOS = ['PENDIENTE', 'ADQUIRIDO', 'DE_BAJA']
+const ESTADO_LABELS = { PENDIENTE: 'Devuelto (Pendiente)', ADQUIRIDO: 'Adquirido', DE_BAJA: 'Dado de Baja' }
 
 export default function CilindrosTercerosPage() {
   const { nombre_empresa } = useConfigStore()
@@ -223,7 +224,7 @@ export default function CilindrosTercerosPage() {
                 onChange={e => setFilterEstado(e.target.value)}
               >
                 <option value="">Todos los estados</option>
-                {ESTADOS.map(e => <option key={e} value={e}>{e}</option>)}
+                {ESTADOS.map(e => <option key={e} value={e}>{ESTADO_LABELS[e]}</option>)}
               </select>
             </div>
 
@@ -304,7 +305,7 @@ export default function CilindrosTercerosPage() {
                             })}
                           </td>
                           <td>
-                            {item.estado === 'PENDIENTE' && <span className="badge badge-warning">PENDIENTE</span>}
+                            {item.estado === 'PENDIENTE' && <span className="badge badge-warning">DEVUELTO (PENDIENTE)</span>}
                             {item.estado === 'ADQUIRIDO' && <span className="badge badge-success">ADQUIRIDO</span>}
                             {item.estado === 'DE_BAJA' && <span className="badge badge-danger">DADO DE BAJA</span>}
                           </td>
@@ -358,7 +359,7 @@ export default function CilindrosTercerosPage() {
                       <div key={item.id} className="card" style={{ padding: 12 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, alignItems: 'center' }}>
                           <span style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '15px' }}>{item.gas}</span>
-                          {item.estado === 'PENDIENTE' && <span className="badge badge-warning">PENDIENTE</span>}
+                          {item.estado === 'PENDIENTE' && <span className="badge badge-warning">DEVUELTO (PEND.)</span>}
                           {item.estado === 'ADQUIRIDO' && <span className="badge badge-success">ADQUIRIDO</span>}
                           {item.estado === 'DE_BAJA' && <span className="badge badge-danger">BAJA</span>}
                         </div>
