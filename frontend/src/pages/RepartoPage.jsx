@@ -67,9 +67,10 @@ export default function RepartoPage() {
   const [pairedDevices, setPairedDevices] = useState([])
   const [connectingPrinter, setConnectingPrinter] = useState(false)
   const [selectedDeviceAddress, setSelectedDeviceAddress] = useState('')
-  const [paperWidth, setPaperWidth] = useState(() => {
-    const saved = localStorage.getItem('printer_paper_width')
-    return saved ? Number(saved) : 48
+  const [paperWidth] = useState(() => {
+    // 58 mm es el único formato soportado; migra preferencias antiguas de 80 mm.
+    localStorage.setItem('printer_paper_width', '32')
+    return 32
   })
   const [duplicarTicket, setDuplicarTicket] = useState(() => {
     return localStorage.getItem('printer_duplicar_ticket') !== 'false'
@@ -103,10 +104,6 @@ export default function RepartoPage() {
         })
         if (autoDevice) {
           setSelectedDeviceAddress(autoDevice.address || autoDevice.id)
-          const name = (autoDevice.name || '').toUpperCase()
-          const detectedWidth = (name.includes('58') || name.includes('TDR') || name.includes('FTX') || name.includes('BLUETOOTH') || name.includes('PRINTER')) ? 32 : 48
-          setPaperWidth(detectedWidth)
-          localStorage.setItem('printer_paper_width', String(detectedWidth))
         }
       },
       (err) => {
@@ -2268,7 +2265,7 @@ export default function RepartoPage() {
         )}
       </Modal>
 
-      {/* Modal para selección de Impresora Bluetooth (HM-A300E) */}
+      {/* Modal para selección de impresora Bluetooth de 58 mm */}
       <Modal
         open={printerModalOpen}
         title="Impresoras Bluetooth Vinculadas"
@@ -2296,36 +2293,9 @@ export default function RepartoPage() {
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>
-            Asegúrate de que tu impresora Bluetooth (ej. <strong>FTX TDR058BT</strong> o <strong>HM-A300E</strong>) esté encendida y vinculada (emparejada) en la configuración de tu celular.
+            Asegúrate de que tu impresora Bluetooth de 58 mm (ej. <strong>FTX TDR058BT</strong>) esté encendida y vinculada (emparejada) en la configuración de tu celular.
           </p>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <span style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--text-secondary)' }}>Ancho del papel / Formato:</span>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button
-                type="button"
-                className={`btn btn-sm ${paperWidth === 32 ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ flex: 1 }}
-                onClick={() => {
-                  setPaperWidth(32)
-                  localStorage.setItem('printer_paper_width', '32')
-                }}
-              >
-                58 mm (ftx TDR058BT)
-              </button>
-              <button
-                type="button"
-                className={`btn btn-sm ${paperWidth === 48 ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ flex: 1 }}
-                onClick={() => {
-                  setPaperWidth(48)
-                  localStorage.setItem('printer_paper_width', '48')
-                }}
-              >
-                80 mm (HM-A300E)
-              </button>
-            </div>
-          </div>
 
           {connectingPrinter && pairedDevices.length === 0 ? (
             <div style={{ padding: '20px 0', textAlign: 'center' }}>
@@ -2355,10 +2325,6 @@ export default function RepartoPage() {
                     key={device.address || device.id}
                     onClick={() => {
                       setSelectedDeviceAddress(device.address || device.id)
-                      const name = (device.name || '').toUpperCase()
-                      const detectedWidth = (name.includes('58') || name.includes('TDR') || name.includes('FTX') || name.includes('BLUETOOTH') || name.includes('PRINTER')) ? 32 : 48
-                      setPaperWidth(detectedWidth)
-                      localStorage.setItem('printer_paper_width', String(detectedWidth))
                     }}
                     style={{
                       display: 'flex',
