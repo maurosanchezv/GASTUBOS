@@ -2,6 +2,7 @@
 import { Router } from 'express'
 import { prisma } from '../utils/prisma.js'
 import { requireAuth, requireRol } from '../middleware/auth.js'
+import { obtenerRecepcionesActivasRepartidor } from '../utils/recepcionesRepartidor.js'
 
 const router = Router()
 
@@ -11,40 +12,106 @@ router.use(requireAuth)
 router.get('/', async (req, res, next) => {
   try {
     const { estado, gas, clienteId, q, page = 1, limit = 200 } = req.query
-    const where = {}
+    const incluirDesconocidos = estado !== 'DEVUELTO_REGISTRADO'
+    const incluirRegistrados = !['PENDIENTE', 'ADQUIRIDO', 'DE_BAJA'].includes(estado)
+    const whereDesconocidos = {}
 
-    if (estado) where.estado = estado
-    if (gas) where.gas = { contains: gas, mode: 'insensitive' }
-    if (clienteId) where.clienteId = clienteId
+    if (!estado || estado === 'PENDIENTE') {
+      whereDesconocidos.estado = 'PENDIENTE'
+    } else if (estado === 'DE_BAJA') {
+      whereDesconocidos.estado = 'DE_BAJA'
+    }
 
+    if (gas) whereDesconocidos.gas = { contains: gas, mode: 'insensitive' }
+    if (clienteId) whereDesconocidos.clienteId = clienteId
     if (q) {
-      where.OR = [
+      whereDesconocidos.OR = [
         { gas: { contains: q, mode: 'insensitive' } },
         { observaciones: { contains: q, mode: 'insensitive' } },
         { cliente: { nombre: { contains: q, mode: 'insensitive' } } }
       ]
     }
 
-    const take = Number(limit)
-    const skip = (Number(page) - 1) * take
-
-    const [items, total] = await Promise.all([
-      prisma.cilindroTerceroInfo.findMany({
-        where,
-        include: {
-          cliente: { select: { id: true, nombre: true, ruc: true } },
-          entrega: { select: { id: true, numero: true, fechaEntrega: true } },
-          repartidor: { select: { id: true, nombre: true } },
-          tuboAdquirido: { select: { id: true, serie: true, estado: true } }
-        },
-        orderBy: { createdAt: 'desc' },
-        skip,
-        take
-      }),
-      prisma.cilindroTerceroInfo.count({ where })
+    const [desconocidos, registrados] = await Promise.all([
+      incluirDesconocidos
+        ? prisma.cilindroTerceroInfo.findMany({
+            where: whereDesconocidos,
+            include: {
+              cliente: { select: { id: true, nombre: true, ruc: true } },
+              entrega: { select: { id: true, numero: true, fechaEntrega: true } },
+              repartidor: { select: { id: true, nombre: true } },
+              tuboAdquirido: { select: { id: true, serie: true, estado: true } }
+            },
+          })
+        : [],
+      incluirRegistrados ? obtenerRecepcionesActivasRepartidor(prisma) : [],
     ])
 
-    res.json({ items, total })
+    const propietariosIds = [...new Set(
+      registrados
+        .filter(tubo => tubo.propietario === 'CLIENTE' && tubo.propietarioClienteId)
+        .map(tubo => tubo.propietarioClienteId)
+    )]
+    const propietarios = propietariosIds.length > 0
+      ? await prisma.cliente.findMany({
+          where: { id: { in: propietariosIds } },
+          select: { id: true, nombre: true, ruc: true },
+        })
+      : []
+    const propietariosPorId = new Map(propietarios.map(cliente => [cliente.id, cliente]))
+
+    const recepcionesRegistradas = registrados.map(tubo => {
+      const recambio = tubo.recambiosComoEntregado[0]
+      const auditoria = tubo.auditoria[0]
+      return {
+        id: `registrado:${tubo.id}`,
+        esRegistrado: true,
+        estado: 'DEVUELTO_REGISTRADO',
+        gas: tubo.gas,
+        capacidadLitros: tubo.capacidadLitros,
+        capacidadKg: tubo.capacidadKg,
+        clienteId: recambio.clienteId,
+        cliente: recambio.cliente,
+        entregaId: recambio.entregaId,
+        entrega: recambio.entrega,
+        repartidorId: recambio.entrega?.repartidor?.id || null,
+        repartidor: recambio.entrega?.repartidor || null,
+        tuboAdquiridoId: tubo.id,
+        tuboAdquirido: { id: tubo.id, serie: tubo.serie, estado: tubo.estado },
+        propietario: tubo.propietario,
+        propietarioCliente: tubo.propietario === 'CLIENTE'
+          ? propietariosPorId.get(tubo.propietarioClienteId) || null
+          : null,
+        ubicacion: tubo.ubicacion,
+        observaciones: `Cilindro registrado recibido como recambio en la entrega ${recambio.entrega?.numero || ''}`,
+        createdAt: auditoria?.createdAt || recambio.createdAt,
+        updatedAt: auditoria?.createdAt || recambio.createdAt,
+      }
+    }).filter(item => {
+      if (gas && !item.gas?.toLowerCase().includes(String(gas).toLowerCase())) return false
+      if (clienteId && item.clienteId !== clienteId) return false
+      if (!q) return true
+      const term = String(q).toLowerCase()
+      return [
+        item.gas,
+        item.tuboAdquirido?.id,
+        item.tuboAdquirido?.serie,
+        item.cliente?.nombre,
+        item.propietarioCliente?.nombre,
+      ].some(value => value?.toLowerCase().includes(term))
+    })
+
+    const itemsCombinados = [
+      ...desconocidos.map(item => ({ ...item, esRegistrado: false })),
+      ...recepcionesRegistradas,
+    ].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+
+    const take = Math.max(1, Number(limit) || 200)
+    const currentPage = Math.max(1, Number(page) || 1)
+    const skip = (currentPage - 1) * take
+    const items = itemsCombinados.slice(skip, skip + take)
+
+    res.json({ items, total: itemsCombinados.length })
   } catch (error) {
     next(error)
   }

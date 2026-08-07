@@ -88,7 +88,9 @@ export default function CargasPage() {
     try {
       // Buscar tubos en estados cargables (varias llamadas por limitación del filtro)
       const resultados = await Promise.all(
-        ESTADOS_CARGABLES.map(estado => api.get(`/tubos?estado=${estado}&limit=200`))
+        ESTADOS_CARGABLES.map(estado => api.get('/tubos', {
+          params: { estado, limit: 200, incluirRecepciones: true },
+        }))
       )
       const todos = resultados.flatMap(r => r.data.tubos).filter(t => !t.id.startsWith('CLI_') && !t.id.startsWith('CLI-'))
       // Ordenar: VACIO primero, luego resto

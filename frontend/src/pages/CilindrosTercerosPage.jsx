@@ -7,8 +7,11 @@ import { useToast } from '../components/ui.jsx'
 import { useConfigStore } from '../store/configStore.js'
 
 const GASES = ['Oxígeno', 'CO2', 'Argón', 'Nitrógeno', 'Aire comprimido', 'Mezcla CO2/Argón', 'Acetileno']
-const ESTADOS = ['PENDIENTE', 'ADQUIRIDO', 'DE_BAJA']
-const ESTADO_LABELS = { PENDIENTE: 'Devuelto (Pendiente)', ADQUIRIDO: 'Adquirido', DE_BAJA: 'Dado de Baja' }
+const ESTADOS = ['PENDIENTE', 'DE_BAJA']
+const ESTADO_LABELS = {
+  PENDIENTE: 'Devuelto',
+  DE_BAJA: 'Dado de Baja',
+}
 
 export default function CilindrosTercerosPage() {
   const { nombre_empresa } = useConfigStore()
@@ -20,7 +23,7 @@ export default function CilindrosTercerosPage() {
   // Filtros
   const [q, setQ] = useState('')
   const [filterGas, setFilterGas] = useState('')
-  const [filterEstado, setFilterEstado] = useState('PENDIENTE')
+  const [filterEstado, setFilterEstado] = useState('')
   const [filterCliente, setFilterCliente] = useState('')
   
   // Modales
@@ -246,7 +249,7 @@ export default function CilindrosTercerosPage() {
               <button 
                 className="btn" 
                 style={{ height: 38, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
-                onClick={() => { setFilterGas(''); setFilterEstado('PENDIENTE'); setFilterCliente(''); setQ('') }}
+                onClick={() => { setFilterGas(''); setFilterEstado(''); setFilterCliente(''); setQ('') }}
               >
                 Limpiar
               </button>
@@ -305,14 +308,16 @@ export default function CilindrosTercerosPage() {
                             })}
                           </td>
                           <td>
-                            {item.estado === 'PENDIENTE' && <span className="badge badge-warning">DEVUELTO (PENDIENTE)</span>}
-                            {item.estado === 'ADQUIRIDO' && <span className="badge badge-success">ADQUIRIDO</span>}
+                            {item.estado === 'PENDIENTE' && <span className="badge badge-warning">DEVUELTO</span>}
+                            {item.estado === 'DEVUELTO_REGISTRADO' && <span className="badge badge-info">DEVUELTO</span>}
                             {item.estado === 'DE_BAJA' && <span className="badge badge-danger">DADO DE BAJA</span>}
                           </td>
                           <td>
                             {item.tuboAdquirido ? (
                               <Link to={`/tubos/${item.tuboAdquirido.id}/detalle`} className="badge badge-info" style={{ textDecoration: 'none' }}>
-                                {item.tuboAdquirido.id} ({item.tuboAdquirido.serie})
+                                {item.esRegistrado
+                                  ? `${item.tuboAdquirido.id} — Ver detalle`
+                                  : `${item.tuboAdquirido.id} (${item.tuboAdquirido.serie})`}
                               </Link>
                             ) : (
                               <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>-</span>
@@ -320,7 +325,7 @@ export default function CilindrosTercerosPage() {
                           </td>
                           <td style={{ textAlign: 'right' }}>
                             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                              {item.estado === 'PENDIENTE' && (
+                              {!item.esRegistrado && item.estado === 'PENDIENTE' && (
                                 <button 
                                   className="btn btn-sm btn-primary" 
                                   title={`Adquirir cilindro (ingresar número de serie e integrar como propio)`}
@@ -329,7 +334,7 @@ export default function CilindrosTercerosPage() {
                                   <i className="ti ti-circle-plus" /> Adquirir
                                 </button>
                               )}
-                              {item.estado === 'PENDIENTE' && (
+                              {!item.esRegistrado && item.estado === 'PENDIENTE' && (
                                 <button 
                                   className="btn btn-sm btn-danger" 
                                   title="Descartar / Dar de baja"
@@ -337,6 +342,11 @@ export default function CilindrosTercerosPage() {
                                 >
                                   <i className="ti ti-trash" />
                                 </button>
+                              )}
+                              {item.tuboAdquirido && (
+                                <Link to={`/tubos/${item.tuboAdquirido.id}/detalle`} className="btn btn-sm">
+                                  <i className="ti ti-eye" /> Ver detalle
+                                </Link>
                               )}
                             </div>
                           </td>
@@ -359,15 +369,15 @@ export default function CilindrosTercerosPage() {
                       <div key={item.id} className="card" style={{ padding: 12 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, alignItems: 'center' }}>
                           <span style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '15px' }}>{item.gas}</span>
-                          {item.estado === 'PENDIENTE' && <span className="badge badge-warning">DEVUELTO (PEND.)</span>}
-                          {item.estado === 'ADQUIRIDO' && <span className="badge badge-success">ADQUIRIDO</span>}
+                          {item.estado === 'PENDIENTE' && <span className="badge badge-warning">DEVUELTO</span>}
+                          {item.estado === 'DEVUELTO_REGISTRADO' && <span className="badge badge-info">DEVUELTO</span>}
                           {item.estado === 'DE_BAJA' && <span className="badge badge-danger">BAJA</span>}
                         </div>
                         <div style={{ fontSize: 13, marginBottom: 4 }}>
                           <strong>Capacidad:</strong> {formatCapacidad(item)}
                         </div>
                         <div style={{ fontSize: 13, marginBottom: 4, color: 'var(--blue)' }}>
-                          <strong>Cliente:</strong> {item.cliente?.nombre || 'Desconocido'}
+                          <strong>Cliente de origen:</strong> {item.cliente?.nombre || 'Desconocido'}
                         </div>
                         <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>
                           <strong>Recibido:</strong> {new Date(item.createdAt).toLocaleString('es-AR')} {item.repartidor ? `(${item.repartidor.nombre})` : ''}
@@ -376,20 +386,27 @@ export default function CilindrosTercerosPage() {
                           <div style={{ fontSize: 12, marginBottom: 8 }}>
                             <strong>Tubo Integrado:</strong>{' '}
                             <Link to={`/tubos/${item.tuboAdquirido.id}/detalle`} style={{ fontWeight: 600 }}>
-                              {item.tuboAdquirido.id} ({item.tuboAdquirido.serie})
+                              {item.esRegistrado
+                                ? `${item.tuboAdquirido.id} — Ver detalle`
+                                : `${item.tuboAdquirido.id} (${item.tuboAdquirido.serie})`}
                             </Link>
                           </div>
                         )}
                         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                          {item.estado === 'PENDIENTE' && (
+                          {!item.esRegistrado && item.estado === 'PENDIENTE' && (
                             <button className="btn btn-sm btn-primary" style={{ flex: '1 1 auto' }} onClick={() => openAdquirirModal(item)}>
                               <i className="ti ti-circle-plus" /> Adquirir (Registrar Serie)
                             </button>
                           )}
-                          {item.estado === 'PENDIENTE' && (
+                          {!item.esRegistrado && item.estado === 'PENDIENTE' && (
                             <button className="btn btn-sm btn-danger" style={{ padding: '4px 8px' }} onClick={() => { setSelectedItem(item); setMotivoBaja(''); setBajaModal(true) }}>
                               <i className="ti ti-trash" /> Descartar
                             </button>
+                          )}
+                          {item.tuboAdquirido && (
+                            <Link to={`/tubos/${item.tuboAdquirido.id}/detalle`} className="btn btn-sm" style={{ flex: '1 1 auto' }}>
+                              <i className="ti ti-eye" /> Ver detalle
+                            </Link>
                           )}
                         </div>
                       </div>
