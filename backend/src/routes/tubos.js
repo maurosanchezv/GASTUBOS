@@ -7,7 +7,6 @@ import { prisma } from '../utils/prisma.js'
 import { requireAuth, requireRol } from '../middleware/auth.js'
 import { registrarAuditoria } from '../utils/auditoria.js'
 import { TRANSICIONES_VALIDAS } from '../utils/estadosTubo.js'
-import { obtenerIdsRecepcionesActivasRepartidor } from '../utils/recepcionesRepartidor.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -58,12 +57,8 @@ const tuboSchema = z.object({
 // ─── GET /api/tubos ───────────────────────────────────────────────────────────
 router.get('/', async (req, res, next) => {
   try {
-    const { estado, gas, propietario, clienteId, q, page = 1, limit = 50, disponibles, deTerceros, incluirRecepciones } = req.query
+    const { estado, gas, propietario, clienteId, q, page = 1, limit = 50, disponibles, deTerceros } = req.query
     const where = { activo: true }
-    const recepcionesActivasIds = await obtenerIdsRecepcionesActivasRepartidor(prisma)
-    if (incluirRecepciones !== 'true' && recepcionesActivasIds.length > 0) {
-      where.id = { notIn: recepcionesActivasIds }
-    }
     if (deTerceros === 'true') {
       where.recambiosComoEntregado = { some: {} }
     }
