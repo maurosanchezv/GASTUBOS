@@ -94,11 +94,36 @@ El proyecto corre en un VPS propio (Hostinger, Ubuntu 24.04), con tres instancia
 |---|---|---|---|---|
 | **Desarrollo** | https://devapp.pms.com.py | `develop` | 3001 | `gastubos_dev` |
 | **Producción PMS** | https://app.pms.com.py | `main` | 3002 | `gastubos_prod` |
-| **Producción Cryopar** | https://app.cryopar.com.py | `main` (por ahora) | 3003 | `gastubos_cryopar` |
+| **Producción Cryopar** | https://app.cryopar.com.py | `main` (por ahora) | 3003 | `gastubos_cryopar` (pendiente de desplegar) |
 
 Cada instancia usa PostgreSQL nativo (sin exposición a Internet, solo accesible en `localhost`), PM2 para mantener el backend corriendo como proceso, y Nginx como proxy inverso con certificado SSL propio (Let's Encrypt, renovación automática) sirviendo el build estático del frontend (`npm run build`).
 
 **Acceso al servidor:** por SSH con clave pública (sin contraseña), usuario `deploy`. Para incorporar un nuevo colaborador con acceso al servidor o al repositorio, ver la guía de despliegue interna del equipo.
+
+### Desplegar una instancia nueva (ej. Cryopar)
+
+```bash
+scripts/deploy-instance.sh <app_dir> <db_name> <db_user> <pm2_name> <port> <domain> [branch] [source_repo]
+
+# Ejemplo real (Cryopar, clonando desde el checkout de desarrollo ya presente en el VPS):
+scripts/deploy-instance.sh /var/www/gastubos-cryopar gastubos_cryopar \
+  gastubos_cryopar_user gastubos-cryopar-api 3003 app.cryopar.com.py main \
+  /var/www/gastubos-desarrollo
+```
+
+Crea el rol y la base de Postgres, clona el código, arma los `.env` con secretos nuevos
+(`openssl rand`), corre `prisma migrate deploy` (nunca `migrate dev`), compila el frontend
+y levanta el backend en PM2 — todo sin seed de datos de prueba. Requiere que el bloque de
+Nginx y el certificado SSL del dominio ya existan (no los crea). Al final imprime una sola
+vez la contraseña de base de datos y el `JWT_SECRET` generados: guardalos en el momento, no
+quedan en ningún archivo. El primer usuario ADMIN se crea aparte con
+`npm run db:create-admin` dentro del backend recién desplegado.
+
+> ⚠️ **`deploy.sh`, `update.sh`, `ecosystem.config.cjs` y `nginx.conf` en la raíz del repo
+> son de una versión anterior (un solo ambiente, un solo dominio) y quedaron obsoletos**
+> frente a esta arquitectura de 3 instancias. No usarlos — están ahí solo como referencia
+> histórica. Para actualizar código en una instancia ya desplegada: `git pull`, backup con
+> `pg_dump`, `prisma migrate deploy`, rebuild de frontend y `pm2 restart <nombre>`.
 
 ---
 
@@ -160,7 +185,7 @@ Para generar una versión de la app que use el servidor real (en vez de ngrok), 
 # frontend/.env — para apuntar a desarrollo
 VITE_API_URL=https://devapp.pms.com.py/api
 
-# o para apuntar a producción PMS, cuando exista
+# o para apuntar a producción PMS
 VITE_API_URL=https://app.pms.com.py/api
 ```
 ```bash
@@ -246,7 +271,7 @@ Un cambio en el schema sin su migración generada queda invisible para cualquier
 - [x] Escaneo QR nativo desde la cámara móvil (Implementado vía `html5-qrcode` adaptado a Android)
 - [x] Generación y descarga de comprobantes en PDF (Implementado vía `jspdf`)
 - [x] Impresión térmica de remisiones con logotipos de la empresa (móvil y web).
-- [x] Despliegue en VPS propio con 3 ambientes independientes (desarrollo, producción PMS, producción Cryopar), HTTPS y proceso administrado con PM2.
+- [x] Despliegue en VPS propio con arquitectura de 3 ambientes independientes, HTTPS y proceso administrado con PM2 — desarrollo y producción PMS ya desplegados; producción Cryopar pendiente.
 - [ ] Tareas cron automatizadas para la alerta y vencimiento de alquileres.
 - [ ] Envío automático de notificaciones por WhatsApp/Email al cliente ante vencimientos.
 - [ ] Módulo de facturación directa y registro de métodos de pago.
