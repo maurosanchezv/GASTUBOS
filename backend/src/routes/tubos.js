@@ -11,6 +11,25 @@ import { TRANSICIONES_VALIDAS } from '../utils/estadosTubo.js'
 const router = Router()
 router.use(requireAuth)
 
+// Compatibilidad entre tipo de gas y capacidad — usada tanto al crear como al editar
+function capacidadValidaParaGas(gas, capacidadLitros, capacidadKg) {
+  const gasLower = (gas || '').toLowerCase()
+  if (gasLower === 'acetileno') {
+    if (capacidadLitros) return false
+    const allowedSizes = [1, 1.2, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 7, 8]
+    return allowedSizes.includes(capacidadKg)
+  }
+  if (gasLower === 'co2') {
+    if (capacidadLitros) return false
+    const allowedSizes = [1, 2, 3, 4, 5, 6, 7, 8, 10, 13, 15, 20, 25, 30]
+    return allowedSizes.includes(capacidadKg)
+  }
+  // Para Oxígeno, Nitrógeno, Argón, Aire comprimido y Mezclas, se usa capacidadLitros (representa m3)
+  if (capacidadKg) return false
+  const allowedSizes = [1, 1.5, 2.5, 3, 4, 5, 6, 6.5, 7, 7.15, 7.5, 8.5]
+  return allowedSizes.includes(capacidadLitros)
+}
+
 // Validación de tubo nuevo
 const tuboSchema = z.object({
   serie:            z.string().min(1),
@@ -32,24 +51,7 @@ const tuboSchema = z.object({
 }, {
   message: "Debe seleccionar un cliente si el tubo es propiedad de un cliente",
   path: ["propietarioClienteId"]
-}).refine(data => {
-  const gasLower = data.gas.toLowerCase()
-  if (gasLower === 'acetileno') {
-    if (data.capacidadLitros) return false
-    const allowedSizes = [1, 1.2, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 7, 8]
-    if (!data.capacidadKg || !allowedSizes.includes(data.capacidadKg)) return false
-  } else if (gasLower === 'co2') {
-    if (data.capacidadLitros) return false
-    const allowedSizes = [1, 2, 3, 4, 5, 6, 7, 8, 10, 13, 15, 20, 25, 30]
-    if (!data.capacidadKg || !allowedSizes.includes(data.capacidadKg)) return false
-  } else {
-    // Para Oxígeno, Nitrógeno, Argón, Aire comprimido y Mezclas, se usa capacidadLitros (representa m3)
-    if (data.capacidadKg) return false
-    const allowedSizes = [1, 1.5, 2.5, 3, 4, 5, 6, 6.5, 7, 7.15, 7.5, 8.5]
-    if (!data.capacidadLitros || !allowedSizes.includes(data.capacidadLitros)) return false
-  }
-  return true
-}, {
+}).refine(data => capacidadValidaParaGas(data.gas, data.capacidadLitros, data.capacidadKg), {
   message: "Configuración de capacidad incorrecta para el tipo de gas",
   path: ["capacidadLitros"]
 })
@@ -201,8 +203,29 @@ router.patch('/:id', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, 
     const tubo = await prisma.tubo.findUnique({ where: { id: req.params.id } })
     if (!tubo) return res.status(404).json({ error: 'Tubo no encontrado' })
 
-    // No permitimos cambiar el estado por este endpoint (usar /cambiar-estado)
+    // No permitimos cambiar el estado ni el código por este endpoint
+    // (estado usa /cambiar-estado; el código es la clave que enlaza todo el historial)
     const { estado: _estado, id: _id, ...rest } = req.body
+
+    let metadataEdicion = null
+    if ('gas' in rest || 'capacidadLitros' in rest || 'capacidadKg' in rest) {
+      const gasNuevo = 'gas' in rest ? rest.gas : tubo.gas
+      const capacidadLitrosNueva = 'capacidadLitros' in rest ? rest.capacidadLitros : (tubo.capacidadLitros !== null ? Number(tubo.capacidadLitros) : null)
+      const capacidadKgNueva = 'capacidadKg' in rest ? rest.capacidadKg : (tubo.capacidadKg !== null ? Number(tubo.capacidadKg) : null)
+
+      if (!capacidadValidaParaGas(gasNuevo, capacidadLitrosNueva, capacidadKgNueva)) {
+        return res.status(400).json({ error: 'Configuración de capacidad incorrecta para el tipo de gas' })
+      }
+
+      metadataEdicion = {
+        gasAnterior: tubo.gas,
+        gasNuevo,
+        capacidadLitrosAnterior: tubo.capacidadLitros !== null ? Number(tubo.capacidadLitros) : null,
+        capacidadKgAnterior: tubo.capacidadKg !== null ? Number(tubo.capacidadKg) : null,
+        capacidadLitrosNueva,
+        capacidadKgNueva,
+      }
+    }
 
     const actualizado = await prisma.tubo.update({
       where: { id: req.params.id },
@@ -213,6 +236,7 @@ router.patch('/:id', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, 
       tuboId:    req.params.id,
       usuarioId: req.user.id,
       accion:    'Tubo editado',
+      metadata:  metadataEdicion,
     })
 
     res.json(actualizado)

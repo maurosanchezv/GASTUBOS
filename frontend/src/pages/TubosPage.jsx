@@ -44,6 +44,10 @@ export default function TubosPage() {
   const [selectedTubo, setSelectedTubo] = useState(null)
   const [hideBaja, setHideBaja] = useState(true)
 
+  const [reactivarModal, setReactivarModal] = useState(false)
+  const [reactivarSaving, setReactivarSaving] = useState(false)
+  const [motivoReactivar, setMotivoReactivar] = useState('')
+
   useEffect(() => {
     api.get('/clientes')
       .then(res => setClientes(res.data))
@@ -124,6 +128,23 @@ export default function TubosPage() {
       toast(err.response?.data?.error || 'Error al dar de baja el tubo', 'error')
     } finally {
       setBajaSaving(false)
+    }
+  }
+
+  const handleReactivarSubmit = async () => {
+    setReactivarSaving(true)
+    try {
+      await api.post(`/tubos/${selectedTubo.id}/cambiar-estado`, {
+        estadoNuevo: 'DISPONIBLE',
+        observaciones: motivoReactivar,
+      })
+      toast('Tubo reactivado correctamente', 'success')
+      setReactivarModal(false)
+      load()
+    } catch (err) {
+      toast(err.response?.data?.error || 'Error al reactivar el tubo', 'error')
+    } finally {
+      setReactivarSaving(false)
     }
   }
 
@@ -232,7 +253,11 @@ export default function TubosPage() {
                             <button className="btn btn-sm" onClick={() => navigate(`/tubos/${t.id}/detalle?qr=1`)}>
                               <i className="ti ti-qrcode" /> QR
                             </button>
-                            {t.estado !== 'DE_BAJA' && t.estado !== 'RESERVADO' && t.estado !== 'VENDIDO' && (
+                            {t.estado === 'DE_BAJA' ? (
+                              <button className="btn btn-sm btn-success" title="Reactivar" onClick={() => { setSelectedTubo(t); setMotivoReactivar(''); setReactivarModal(true); }}>
+                                <i className="ti ti-rotate" /> Reactivar
+                              </button>
+                            ) : t.estado !== 'RESERVADO' && t.estado !== 'VENDIDO' && (
                               <button className="btn btn-sm btn-danger" title="Dar de baja" onClick={() => { setSelectedTubo(t); setMotivoBaja(''); setBajaModal(true); }}>
                                 <i className="ti ti-trash" />
                               </button>
@@ -280,7 +305,11 @@ export default function TubosPage() {
                       <button className="btn btn-sm" onClick={() => navigate(`/tubos/${t.id}/detalle?qr=1`)}>
                         <i className="ti ti-qrcode" /> QR
                       </button>
-                      {t.estado !== 'DE_BAJA' && t.estado !== 'RESERVADO' && t.estado !== 'VENDIDO' && (
+                      {t.estado === 'DE_BAJA' ? (
+                        <button className="btn btn-sm btn-success" style={{ padding: '4px 8px' }} onClick={() => { setSelectedTubo(t); setMotivoReactivar(''); setReactivarModal(true); }}>
+                          <i className="ti ti-rotate" /> Reactivar
+                        </button>
+                      ) : t.estado !== 'RESERVADO' && t.estado !== 'VENDIDO' && (
                         <button className="btn btn-sm btn-danger" style={{ padding: '4px 8px' }} onClick={() => { setSelectedTubo(t); setMotivoBaja(''); setBajaModal(true); }}>
                           <i className="ti ti-trash" />
                         </button>
@@ -405,6 +434,36 @@ export default function TubosPage() {
                 rows={3}
                 style={{ width: '100%', padding: 8, borderRadius: 4, border: '1px solid var(--border-mid)' }}
                 required
+              />
+            </FormGroup>
+          </div>
+        </Modal>
+      )}
+
+      {/* Modal Reactivar */}
+      {reactivarModal && (
+        <Modal
+          open={true}
+          title="Reactivar Tubo"
+          onClose={() => setReactivarModal(false)}
+          footer={
+            <>
+              <button className="btn" onClick={() => setReactivarModal(false)}>Cancelar</button>
+              <button className="btn btn-success" onClick={handleReactivarSubmit} disabled={reactivarSaving}>
+                {reactivarSaving ? 'Procesando...' : 'Confirmar Reactivación'}
+              </button>
+            </>
+          }
+        >
+          <div style={{ padding: '10px 0' }}>
+            <p style={{ marginBottom: 12 }}>¿Reactivar el tubo <strong>{selectedTubo?.id}</strong>? Volverá a estado <strong>DISPONIBLE</strong>.</p>
+            <FormGroup label="Motivo de la reactivación">
+              <textarea
+                placeholder="Ej: se revisó y está en condiciones de volver a uso..."
+                value={motivoReactivar}
+                onChange={e => setMotivoReactivar(e.target.value)}
+                rows={3}
+                style={{ width: '100%', padding: 8, borderRadius: 4, border: '1px solid var(--border-mid)' }}
               />
             </FormGroup>
           </div>

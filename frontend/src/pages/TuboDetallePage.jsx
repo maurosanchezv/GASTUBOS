@@ -27,6 +27,8 @@ const GAS_LABELS = {
   ACETILENO: "Acetileno",
 };
 
+const GASES = ['CO2', 'Oxígeno', 'Argón', 'Nitrógeno', 'Aire comprimido', 'Acetileno', 'Mezcla Ar+CO2', 'Mezcla especial'];
+
 export default function TuboDetallePage() {
   const { nombre_empresa, telefono, isotipo_empresa, logo_empresa, fetchConfig } = useConfigStore();
   const branding = getBrandingSources(isotipo_empresa, logo_empresa);
@@ -45,6 +47,14 @@ export default function TuboDetallePage() {
   const [obsEstado, setObsEstado] = useState("");
   const [clientes, setClientes] = useState([]);
   const [clienteIdReserva, setClienteIdReserva] = useState("");
+
+  const [editModal, setEditModal] = useState(false);
+  const [editGas, setEditGas] = useState("");
+  const [editCapacidadLitros, setEditCapacidadLitros] = useState("");
+  const [editCapacidadKg, setEditCapacidadKg] = useState("");
+
+  const [reactivarModal, setReactivarModal] = useState(false);
+  const [motivoReactivar, setMotivoReactivar] = useState("");
 
   // Impresión Bluetooth
   const [printerModalOpen, setPrinterModalOpen] = useState(false);
@@ -310,6 +320,60 @@ export default function TuboDetallePage() {
     }
   }
 
+  function abrirEditar() {
+    setEditGas(tubo.gas);
+    setEditCapacidadLitros(tubo.capacidadLitros ?? "");
+    setEditCapacidadKg(tubo.capacidadKg ?? "");
+    setEditModal(true);
+  }
+
+  function handleGasChangeEdit(e) {
+    const val = e.target.value;
+    const valLower = val.toLowerCase();
+    const isKgBased = valLower === "acetileno" || valLower === "co2";
+    setEditGas(val);
+    setEditCapacidadLitros(isKgBased ? "" : 6);
+    setEditCapacidadKg(isKgBased ? (valLower === "co2" ? 25 : 6) : "");
+  }
+
+  async function handleGuardarEdicion() {
+    setSaving(true);
+    try {
+      const isKgBased =
+        editGas.toLowerCase() === "acetileno" || editGas.toLowerCase() === "co2";
+      await api.patch(`/tubos/${id}`, {
+        gas: editGas,
+        capacidadLitros: isKgBased ? null : Number(editCapacidadLitros),
+        capacidadKg: isKgBased ? Number(editCapacidadKg) : null,
+      });
+      toast("Tubo actualizado", "success");
+      setEditModal(false);
+      load();
+    } catch (err) {
+      toast(err.response?.data?.error || "Error al editar el tubo", "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleReactivar() {
+    setSaving(true);
+    try {
+      await api.post(`/tubos/${id}/cambiar-estado`, {
+        estadoNuevo: "DISPONIBLE",
+        observaciones: motivoReactivar,
+      });
+      toast("Tubo reactivado correctamente", "success");
+      setReactivarModal(false);
+      setMotivoReactivar("");
+      load();
+    } catch (err) {
+      toast(err.response?.data?.error || "Error al reactivar el tubo", "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (loading)
     return (
       <>
@@ -342,12 +406,24 @@ export default function TuboDetallePage() {
                 <i className="ti ti-printer" /> Imprimir QR
               </button>
             )}
-            <button
-              className="btn btn-sm btn-primary"
-              onClick={() => setCambioModal(true)}
-            >
-              <i className="ti ti-refresh" /> Cambiar estado
+            <button className="btn btn-sm" onClick={abrirEditar}>
+              <i className="ti ti-edit" /> Editar
             </button>
+            {tubo.estado === "DE_BAJA" ? (
+              <button
+                className="btn btn-sm btn-success"
+                onClick={() => setReactivarModal(true)}
+              >
+                <i className="ti ti-rotate" /> Reactivar
+              </button>
+            ) : (
+              <button
+                className="btn btn-sm btn-primary"
+                onClick={() => setCambioModal(true)}
+              >
+                <i className="ti ti-refresh" /> Cambiar estado
+              </button>
+            )}
           </>
         }
       />
@@ -674,6 +750,14 @@ export default function TuboDetallePage() {
                                   📄 Remisión: {a.metadata.numero}
                                 </div>
                               )}
+                              {a.metadata?.gasNuevo && (
+                                <div style={{ fontSize: 11, color: "var(--orange, #f97316)", fontWeight: 600, marginTop: 2, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                  🔧 {a.metadata.gasAnterior} · {a.metadata.capacidadKgAnterior ?? a.metadata.capacidadLitrosAnterior}
+                                  {a.metadata.capacidadKgAnterior ? "kg" : "m³"} → {a.metadata.gasNuevo} ·{" "}
+                                  {a.metadata.capacidadKgNueva ?? a.metadata.capacidadLitrosNueva}
+                                  {a.metadata.capacidadKgNueva ? "kg" : "m³"}
+                                </div>
+                              )}
                             </td>
                             <td style={{ color: "var(--text-secondary)" }}>
                               {a.usuario?.username}
@@ -757,6 +841,14 @@ export default function TuboDetallePage() {
                             {a.metadata?.numero && !a.metadata?.cantidad && (
                               <span style={{ fontSize: 11, color: "var(--purple, #8b5cf6)", fontWeight: 600 }}>
                                 📄 Remisión: {a.metadata.numero}
+                              </span>
+                            )}
+                            {a.metadata?.gasNuevo && (
+                              <span style={{ fontSize: 11, color: "var(--orange, #f97316)", fontWeight: 600 }}>
+                                🔧 {a.metadata.gasAnterior} · {a.metadata.capacidadKgAnterior ?? a.metadata.capacidadLitrosAnterior}
+                                {a.metadata.capacidadKgAnterior ? "kg" : "m³"} → {a.metadata.gasNuevo} ·{" "}
+                                {a.metadata.capacidadKgNueva ?? a.metadata.capacidadLitrosNueva}
+                                {a.metadata.capacidadKgNueva ? "kg" : "m³"}
                               </span>
                             )}
                           </div>
@@ -1134,6 +1226,117 @@ export default function TuboDetallePage() {
           </div>
         </div>
       </div>
+
+      {/* Modal reactivar tubo */}
+      <Modal
+        open={reactivarModal}
+        title="Reactivar tubo"
+        onClose={() => setReactivarModal(false)}
+        footer={
+          <>
+            <button className="btn" onClick={() => setReactivarModal(false)}>
+              Cancelar
+            </button>
+            <button
+              className="btn btn-success"
+              onClick={handleReactivar}
+              disabled={saving}
+            >
+              {saving ? "Procesando..." : "Confirmar reactivación"}
+            </button>
+          </>
+        }
+      >
+        <p style={{ marginBottom: 12 }}>
+          ¿Reactivar el tubo <strong>{tubo.id}</strong>? Volverá a estado{" "}
+          <strong>DISPONIBLE</strong>.
+        </p>
+        <FormGroup label="Motivo de la reactivación">
+          <textarea
+            value={motivoReactivar}
+            onChange={(e) => setMotivoReactivar(e.target.value)}
+            placeholder="Ej: se revisó y está en condiciones de volver a uso..."
+            style={{ height: 72 }}
+          />
+        </FormGroup>
+      </Modal>
+
+      {/* Modal edición de gas/capacidad */}
+      <Modal
+        open={editModal}
+        title="Editar tubo"
+        onClose={() => setEditModal(false)}
+        footer={
+          <>
+            <button className="btn" onClick={() => setEditModal(false)}>
+              Cancelar
+            </button>
+            <button
+              className="btn btn-primary"
+              onClick={handleGuardarEdicion}
+              disabled={
+                saving ||
+                (editGas.toLowerCase() === "acetileno" || editGas.toLowerCase() === "co2"
+                  ? !editCapacidadKg
+                  : !editCapacidadLitros)
+              }
+            >
+              {saving ? "Guardando..." : "Guardar cambios"}
+            </button>
+          </>
+        }
+      >
+        <FormGroup label="Tipo de gas" required>
+          <select value={editGas} onChange={handleGasChangeEdit}>
+            {GASES.map((g) => (
+              <option key={g}>{g}</option>
+            ))}
+          </select>
+        </FormGroup>
+        {editGas.toLowerCase() === "acetileno" ? (
+          <FormGroup label="Capacidad (kg)" required>
+            <select
+              value={editCapacidadKg}
+              onChange={(e) => setEditCapacidadKg(e.target.value)}
+            >
+              <option value="">Seleccionar...</option>
+              {[1, 1.2, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 7, 8].map((kg) => (
+                <option key={kg} value={kg}>
+                  {kg} kg
+                </option>
+              ))}
+            </select>
+          </FormGroup>
+        ) : editGas.toLowerCase() === "co2" ? (
+          <FormGroup label="Capacidad (kg)" required>
+            <select
+              value={editCapacidadKg}
+              onChange={(e) => setEditCapacidadKg(e.target.value)}
+            >
+              <option value="">Seleccionar...</option>
+              {[1, 2, 3, 4, 5, 6, 7, 8, 10, 13, 15, 20, 25, 30].map((kg) => (
+                <option key={kg} value={kg}>
+                  {kg} kg
+                </option>
+              ))}
+            </select>
+          </FormGroup>
+        ) : (
+          <FormGroup label="Capacidad (m³)" required>
+            <select
+              value={editCapacidadLitros}
+              onChange={(e) => setEditCapacidadLitros(e.target.value)}
+            >
+              <option value="">Seleccionar...</option>
+              {[1, 1.5, 2.5, 3, 4, 5, 6, 6.5, 7, 7.15, 7.5, 8.5].map((m3) => (
+                <option key={m3} value={m3}>
+                  {m3} m³
+                </option>
+              ))}
+            </select>
+          </FormGroup>
+        )}
+      </Modal>
 
       {/* Modal cambio de estado */}
       <Modal
