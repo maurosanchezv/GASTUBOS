@@ -28,6 +28,27 @@ const TIPO_INFO = {
   VENTA:          { label: 'Venta',    className: 'badge-tipo-VENTA' },
 }
 
+const toDateStr = (d) => d.toISOString().split('T')[0]
+const addDias = (dateStr, dias) => {
+  const d = new Date(dateStr + 'T00:00:00')
+  d.setDate(d.getDate() + dias)
+  return toDateStr(d)
+}
+
+// Calcula desde/hasta a mandarle a la API según el filtro elegido.
+// hasta se manda como el día siguiente para incluir el día completo sin
+// pelearse con husos horarios (el backend compara timestamps con `lte`).
+function getRangoHistorial(filtro, desdePersonalizado, hastaPersonalizado) {
+  const hoyStr = toDateStr(new Date())
+  if (filtro === '7d')  return { desde: addDias(hoyStr, -6),  hasta: addDias(hoyStr, 1) }
+  if (filtro === '30d') return { desde: addDias(hoyStr, -29), hasta: addDias(hoyStr, 1) }
+  if (filtro === 'personalizado') {
+    if (!desdePersonalizado || !hastaPersonalizado) return null
+    return { desde: desdePersonalizado, hasta: addDias(hastaPersonalizado, 1) }
+  }
+  return { desde: hoyStr, hasta: null } // 'hoy'
+}
+
 function getObservacionesLimpias(entrega) {
   if (!entrega?.observaciones) return null
   const tuboIdsActuales = new Set((entrega.detalles || []).map(d => d.tuboId))
@@ -425,6 +446,9 @@ export default function RepartoPage() {
 
   const [seccion, setSeccion] = useState('ruta') // 'ruta', 'historial' o 'camion'
   const [historialHoy, setHistorialHoy] = useState([])
+  const [filtroHistorial, setFiltroHistorial] = useState('hoy') // 'hoy' | '7d' | '30d' | 'personalizado'
+  const [historialDesde, setHistorialDesde] = useState('')
+  const [historialHasta, setHistorialHasta] = useState('')
   const [manualTuboId, setManualTuboId] = useState('')
   const [metodoPago, setMetodoPago] = useState('EFECTIVO')
   const [montoRecibido, setMontoRecibido] = useState('')
@@ -471,22 +495,25 @@ export default function RepartoPage() {
 
   const fetchHistorialHoy = async () => {
     if (!user) return
+    const rango = getRangoHistorial(filtroHistorial, historialDesde, historialHasta)
+    if (!rango) return // rango personalizado sin ambas fechas todavía
+    const cacheKey = `historial_offline_${user.id}_${filtroHistorial}${filtroHistorial === 'personalizado' ? `_${rango.desde}_${historialHasta}` : ''}`
     try {
       if (navigator.onLine) {
-        const hoy = new Date().toISOString().split('T')[0]
         const queryParams = user.rol === 'REPARTIDOR' ? `&repartidorId=${user.id}` : ''
-        const resConf = await api.get(`/entregas?confirmada=true&desde=${hoy}&limit=50${queryParams}`)
-        const resCanc = await api.get(`/entregas?cancelada=true&desde=${hoy}&limit=50${queryParams}`)
+        const hastaParam = rango.hasta ? `&hasta=${rango.hasta}` : ''
+        const resConf = await api.get(`/entregas?confirmada=true&desde=${rango.desde}${hastaParam}&limit=100${queryParams}`)
+        const resCanc = await api.get(`/entregas?cancelada=true&desde=${rango.desde}${hastaParam}&limit=100${queryParams}`)
         const sorted = [...(resConf.data.entregas || []), ...(resCanc.data.entregas || [])].sort(
           (a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)
         )
         setHistorialHoy(sorted)
-        localStorage.setItem(`historial_hoy_offline_${user.id}`, JSON.stringify(sorted))
+        localStorage.setItem(cacheKey, JSON.stringify(sorted))
       } else {
-        setHistorialHoy(safeParseJSON(`historial_hoy_offline_${user.id}`))
+        setHistorialHoy(safeParseJSON(cacheKey))
       }
     } catch {
-      setHistorialHoy(safeParseJSON(`historial_hoy_offline_${user.id}`))
+      setHistorialHoy(safeParseJSON(cacheKey))
     }
   }
 
@@ -762,10 +789,17 @@ export default function RepartoPage() {
     }
   }, [seccion, selectedCamionId])
 
+  // Filtros predefinidos (hoy/7d/30d) se disparan solos; el rango
+  // personalizado espera a que el usuario toque "Buscar".
+  useEffect(() => {
+    if (filtroHistorial === 'personalizado') return
+    fetchHistorialHoy()
+  }, [filtroHistorial])
+
   useEffect(() => {
     fetchRuta()
-    fetchHistorialHoy()
-    
+    // fetchHistorialHoy() del filtro inicial ya la dispara el efecto de arriba
+
     const interval = setInterval(() => {
       if (navigator.onLine) {
         fetchRuta()
@@ -1037,7 +1071,7 @@ export default function RepartoPage() {
             fontSize: '13px'
           }}
         >
-          Historial de Hoy ({historialHoy.length})
+          Historial ({historialHoy.length})
         </button>
         <button
           onClick={() => handleTabClick('camion')}
@@ -1177,9 +1211,47 @@ export default function RepartoPage() {
                 </div>
               )
             ) : seccion === 'historial' ? (
-              historialHoy.length === 0 ? (
-                <EmptyState icon="ti-history" message="No tienes entregas realizadas o canceladas hoy" />
-              ) : (
+              <>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 14 }}>
+                  <select
+                    value={filtroHistorial}
+                    onChange={e => setFiltroHistorial(e.target.value)}
+                    style={{ height: 38 }}
+                  >
+                    <option value="hoy">Hoy</option>
+                    <option value="7d">Últimos 7 días</option>
+                    <option value="30d">Últimos 30 días</option>
+                    <option value="personalizado">Rango personalizado...</option>
+                  </select>
+                  {filtroHistorial === 'personalizado' && (
+                    <>
+                      <input
+                        type="date"
+                        value={historialDesde}
+                        onChange={e => setHistorialDesde(e.target.value)}
+                        style={{ height: 38 }}
+                      />
+                      <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>hasta</span>
+                      <input
+                        type="date"
+                        value={historialHasta}
+                        onChange={e => setHistorialHasta(e.target.value)}
+                        style={{ height: 38 }}
+                      />
+                      <button
+                        className="btn btn-sm btn-primary"
+                        disabled={!historialDesde || !historialHasta}
+                        onClick={fetchHistorialHoy}
+                      >
+                        Buscar
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                {historialHoy.length === 0 ? (
+                  <EmptyState icon="ti-history" message="No tienes entregas realizadas o canceladas en este período" />
+                ) : (
                 <div className="reparto-grid">
                   {historialHoy.map(e => {
                     const tipo = TIPO_INFO[e.tipoOperacion] || { label: e.tipoOperacion, className: 'badge-OPERADOR' }
@@ -1225,7 +1297,8 @@ export default function RepartoPage() {
                     )
                   })}
                 </div>
-              )
+                )}
+              </>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                 <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
