@@ -148,6 +148,64 @@ export default function RepartoPage() {
     return [...recsPropios, ...recsTerceros]
   }
 
+  // Conecta a la impresora, envía un buffer ya armado en trozos (evita
+  // overflow de búfer en impresoras de 58mm) y desconecta al terminar.
+  // Reusado tanto por el ticket de entregas como por el de venta en camión.
+  const enviarBufferBluetooth = (deviceAddress, buffer, { cerrarModalAlTerminar = true } = {}) => {
+    return new Promise((resolve, reject) => {
+      if (!deviceAddress) {
+        toast('Por favor, selecciona una impresora', 'warning')
+        reject(new Error('Sin impresora seleccionada'))
+        return
+      }
+      setConnectingPrinter(true)
+      let alreadyPrinted = false
+      window.bluetoothSerial.connect(
+        deviceAddress,
+        () => {
+          if (alreadyPrinted) return
+          alreadyPrinted = true
+          const CHUNK_SIZE = 256
+          const CHUNK_DELAY = 30 // ms
+
+          const enviarTrozo = (index) => {
+            if (index >= buffer.length) {
+              toast('Impresión enviada correctamente', 'success')
+              setConnectingPrinter(false)
+              if (cerrarModalAlTerminar) setPrinterModalOpen(false)
+              setTimeout(() => {
+                window.bluetoothSerial.disconnect()
+              }, 300)
+              resolve()
+              return
+            }
+
+            const trozo = buffer.slice(index, index + CHUNK_SIZE)
+            window.bluetoothSerial.write(
+              trozo,
+              () => {
+                setTimeout(() => enviarTrozo(index + CHUNK_SIZE), CHUNK_DELAY)
+              },
+              (err) => {
+                toast('Error al enviar datos a la impresora: ' + err, 'error')
+                setConnectingPrinter(false)
+                window.bluetoothSerial.disconnect()
+                reject(err)
+              }
+            )
+          }
+
+          enviarTrozo(0)
+        },
+        (err) => {
+          toast('No se pudo conectar a la impresora. ¿Está encendida?', 'error')
+          setConnectingPrinter(false)
+          reject(err)
+        }
+      )
+    })
+  }
+
   const imprimirBluetooth = async (entrega, deviceAddress) => {
     if (!window.bluetoothSerial) return
     if (!deviceAddress) {
@@ -155,22 +213,17 @@ export default function RepartoPage() {
       return
     }
     setConnectingPrinter(true)
-    
+
     let logoBytes = null
     try {
       logoBytes = await generarLogoEscPos(branding.isotipoSrc, branding.logoSrc)
     } catch (e) {
       console.warn("No se pudo generar el logo para la impresion:", e)
     }
-    
-    let alreadyPrinted = false
-    window.bluetoothSerial.connect(
-      deviceAddress,
-      () => {
-        if (alreadyPrinted) return
-        alreadyPrinted = true
-        try {
-          const wrapText = (text, maxChars) => {
+
+    let binaryBuffer
+    try {
+      const wrapText = (text, maxChars) => {
             if (!text) return []
             const words = text.split(' ')
             const lines = []
@@ -347,54 +400,18 @@ export default function RepartoPage() {
           // Espaciado generoso al final para evitar superposiciones con la siguiente impresión
           builder.addTextLine('').addTextLine('').addTextLine('').addTextLine('').addTextLine('').addTextLine('')
           builder.feedLines(4)
-          const binaryBuffer = builder.getBuffer()
-           
-           // Escribir en trozos para evitar el desbordamiento de búfer en impresoras de 58mm
-           const CHUNK_SIZE = 256
-           const CHUNK_DELAY = 30 // ms
-           
-           const enviarTrozo = (index) => {
-             if (index >= binaryBuffer.length) {
-               toast('Impresión enviada correctamente', 'success')
-               setConnectingPrinter(false)
-               setPrinterModalOpen(false)
-               setTimeout(() => {
-                 window.bluetoothSerial.disconnect()
-               }, 300)
-               return
-             }
-             
-             const trozo = binaryBuffer.slice(index, index + CHUNK_SIZE)
-             window.bluetoothSerial.write(
-               trozo,
-               () => {
-                 setTimeout(() => {
-                   enviarTrozo(index + CHUNK_SIZE)
-                 }, CHUNK_DELAY)
-               },
-               (err) => {
-                 toast('Error al enviar datos a la impresora: ' + err, 'error')
-                 setConnectingPrinter(false)
-                 window.bluetoothSerial.disconnect()
-               }
-             )
-           }
-           
-           enviarTrozo(0)
-        } catch (e) {
-          toast('Error de formato: ' + e.message, 'error')
-          setConnectingPrinter(false)
-          window.bluetoothSerial.disconnect()
-        }
-      },
-      (err) => {
-        toast('No se pudo conectar a la impresora. ¿Está encendida?', 'error')
-        setConnectingPrinter(false)
-      }
-    )
+          binaryBuffer = builder.getBuffer()
+    } catch (e) {
+      toast('Error de formato: ' + e.message, 'error')
+      setConnectingPrinter(false)
+      return
+    }
+
+    enviarBufferBluetooth(deviceAddress, binaryBuffer).catch(() => {})
   }
 
   const handlePrintClick = (entrega) => {
+    setVentaParaImprimir(null)
     setEntregaParaImprimir(entrega)
     setModalDetalle(false) // Close the detail modal first to avoid overlay conflict
     setTimeout(() => {
@@ -436,6 +453,19 @@ export default function RepartoPage() {
   const [selectedCamionId, setSelectedCamionId] = useState(localStorage.getItem('repartidor_camion_id') || '')
   const [camionStock, setCamionStock] = useState([])
   const [loadingCamion, setLoadingCamion] = useState(false)
+
+  // Venta de gas fraccionada desde el camión ("Carga en Camión")
+  const [ventaModalOpen, setVentaModalOpen] = useState(false)
+  const [tuboVenta, setTuboVenta] = useState(null)
+  const [ventaClienteQuery, setVentaClienteQuery] = useState('')
+  const [ventaClienteResultados, setVentaClienteResultados] = useState([])
+  const [ventaClienteSeleccionado, setVentaClienteSeleccionado] = useState(null)
+  const [ventaCantidad, setVentaCantidad] = useState('')
+  const [ventaPrecio, setVentaPrecio] = useState('')
+  const [ventaMetodoPago, setVentaMetodoPago] = useState('EFECTIVO')
+  const [ventaMontoRecibido, setVentaMontoRecibido] = useState('')
+  const [ventaGuardando, setVentaGuardando] = useState(false)
+  const [ventaParaImprimir, setVentaParaImprimir] = useState(null)
 
   const totalIds = activeEntrega?.detalles?.map(d => d.tuboId) || []
   const todosListos = totalIds.length > 0 && totalIds.every(id => scannedIds.includes(id))
@@ -747,9 +777,11 @@ export default function RepartoPage() {
     if (id) {
       localStorage.setItem('repartidor_camion_id', id)
       fetchCamionStock(id)
+      api.post(`/camiones/${id}/seleccionar`).catch(() => {})
     } else {
       localStorage.removeItem('repartidor_camion_id')
       setCamionStock([])
+      api.delete('/camiones/seleccion').catch(() => {})
     }
   }
 
@@ -758,9 +790,208 @@ export default function RepartoPage() {
       fetchCamiones()
       if (selectedCamionId) {
         fetchCamionStock(selectedCamionId)
+        // Re-sincroniza con el backend por si el camión ya estaba elegido
+        // desde una sesión anterior (localStorage) y el servidor no lo sabe.
+        api.post(`/camiones/${selectedCamionId}/seleccionar`).catch(() => {})
       }
     }
   }, [seccion, selectedCamionId])
+
+  // --- Venta de gas fraccionada desde el camión ("Carga en Camión") ---
+  const abrirModalVenta = (tubo) => {
+    setTuboVenta(tubo)
+    setVentaClienteQuery('')
+    setVentaClienteResultados([])
+    setVentaClienteSeleccionado(null)
+    setVentaCantidad('')
+    setVentaPrecio('')
+    setVentaMetodoPago('EFECTIVO')
+    setVentaMontoRecibido('')
+    setVentaModalOpen(true)
+  }
+
+  const buscarClientesVenta = async (q) => {
+    setVentaClienteQuery(q)
+    setVentaClienteSeleccionado(null)
+    if (!q || q.trim().length < 2) {
+      setVentaClienteResultados([])
+      return
+    }
+    try {
+      const res = await api.get(`/clientes?q=${encodeURIComponent(q.trim())}`)
+      setVentaClienteResultados(res.data || [])
+    } catch {
+      setVentaClienteResultados([])
+    }
+  }
+
+  const confirmarVenta = async () => {
+    if (!tuboVenta) return
+    if (!ventaClienteSeleccionado) {
+      toast('Selecciona un cliente', 'warning')
+      return
+    }
+    const restante = Number(tuboVenta.cantidadActual || 0)
+    const cant = Number(ventaCantidad)
+    if (!cant || cant <= 0) {
+      toast('Ingresa una cantidad válida', 'warning')
+      return
+    }
+    if (cant > restante) {
+      toast(`Solo quedan ${formatNumberSpanish(restante)} disponibles en este tubo`, 'warning')
+      return
+    }
+    if (ventaPrecio === '' || Number(ventaPrecio) < 0) {
+      toast('Ingresa el precio de venta', 'warning')
+      return
+    }
+    const precio = Number(ventaPrecio)
+
+    setVentaGuardando(true)
+    try {
+      const res = await api.post('/cargas/venta-camion', {
+        tuboId: tuboVenta.id,
+        clienteId: ventaClienteSeleccionado.id,
+        cantidad: cant,
+        precioUnitario: precio,
+        metodoPago: ventaMetodoPago,
+        montoRecibido: ventaMontoRecibido === '' ? cant * precio : Number(ventaMontoRecibido),
+      })
+      toast('Venta registrada', 'success')
+      setVentaModalOpen(false)
+      setEntregaParaImprimir(null)
+      setVentaParaImprimir(res.data)
+      fetchCamionStock(selectedCamionId)
+      setTimeout(() => {
+        if (window.bluetoothSerial) {
+          buscarImpresoras()
+        } else {
+          window.print()
+        }
+      }, 150)
+    } catch (err) {
+      toast(err.response?.data?.error || 'Error al registrar la venta', 'error')
+    } finally {
+      setVentaGuardando(false)
+    }
+  }
+
+  const imprimirVentaCamionBluetooth = async (carga, deviceAddress) => {
+    if (!window.bluetoothSerial) return
+    if (!deviceAddress) {
+      toast('Por favor, selecciona una impresora', 'warning')
+      return
+    }
+    setConnectingPrinter(true)
+
+    let logoBytes = null
+    try {
+      logoBytes = await generarLogoEscPos(branding.isotipoSrc, branding.logoSrc)
+    } catch (e) {
+      console.warn("No se pudo generar el logo para la impresion:", e)
+    }
+
+    let binaryBuffer
+    try {
+      const wrapText = (text, maxChars) => {
+        if (!text) return []
+        const words = text.split(' ')
+        const lines = []
+        let currentLine = ''
+        words.forEach(word => {
+          if ((currentLine + word).length <= maxChars) {
+            currentLine += (currentLine ? ' ' : '') + word
+          } else {
+            if (currentLine) lines.push(currentLine)
+            let remaining = word
+            while (remaining.length > maxChars) {
+              lines.push(remaining.slice(0, maxChars))
+              remaining = remaining.slice(maxChars)
+            }
+            currentLine = remaining
+          }
+        })
+        if (currentLine) lines.push(currentLine)
+        return lines
+      }
+
+      const builder = new EscPosBuilder()
+      const width = paperWidth
+      const justify = (left, right) => {
+        const pad = Math.max(1, width - left.length - right.length)
+        return left + ' '.repeat(pad) + right
+      }
+      const line = () => '-'.repeat(width)
+      const doubleLine = () => '='.repeat(width)
+
+      builder.initialize()
+      if (logoBytes) {
+        builder.addBytes(logoBytes)
+        builder.addTextLine('')
+      } else {
+        builder.alignCenter().boldOn().doubleSizeOn().addTextLine((nombre_empresa || 'GASTUBOS').toUpperCase()).doubleSizeOff()
+      }
+
+      builder.alignCenter()
+      if (direccion) {
+        wrapText(direccion, width).forEach(l => builder.addTextLine(l))
+      }
+      if (telefono) {
+        wrapText('Tel: ' + telefono, width).forEach(l => builder.addTextLine(l))
+      }
+      builder.addTextLine(doubleLine())
+
+      builder.alignLeft().boldOn().addTextLine('VENTA CAMION: ' + carga.numero).boldOff()
+      builder.addTextLine(line())
+
+      const clienteText = 'Cliente: ' + (carga.cliente?.nombre || '')
+      wrapText(clienteText, width).forEach(l => builder.addTextLine(l))
+      builder.addTextLine('RUC/CI: ' + (carga.cliente?.ruc || '-'))
+      builder.addTextLine('Fecha: ' + new Date(carga.fechaCarga).toLocaleString('es-PY'))
+      builder.addTextLine('Chofer: ' + (carga.operador?.nombre || carga.operador?.username || ''))
+      builder.addTextLine(doubleLine())
+
+      builder.boldOn().addTextLine(justify('PRODUCTO', 'SUBTOTAL')).boldOff()
+      builder.addTextLine(line())
+
+      const cantStr = `${formatNumberSpanish(carga.cantidad)} ${carga.unidad}`
+      const precioUnitStr = Number(carga.precioUnitario).toLocaleString('es-PY')
+      const subtotal = Number(carga.cantidad) * Number(carga.precioUnitario)
+      const subtotalStr = subtotal.toLocaleString('es-PY') + ' GS'
+
+      builder.addTextLine(`${carga.tubo?.gas || ''} (Tubo ${carga.tuboId})`.slice(0, width))
+      builder.addTextLine(justify(`  ${cantStr} x ${precioUnitStr}`, subtotalStr))
+      builder.addTextLine(line())
+      builder.boldOn().addTextLine(justify('TOTAL:', subtotalStr)).boldOff()
+      builder.addTextLine(doubleLine())
+
+      builder.addTextLine('Forma de pago: ' + (carga.metodoPago || '-'))
+      builder.addTextLine('Recibido: ' + Number(carga.montoRecibido || 0).toLocaleString('es-PY') + ' GS')
+      builder.addTextLine(doubleLine())
+
+      builder.addTextLine('').addTextLine('')
+      const lineLength = width >= 48 ? 18 : 13
+      const soloLine = '-'.repeat(lineLength)
+      const padCentro = Math.max(0, Math.floor((width - lineLength) / 2))
+      builder.addTextLine(' '.repeat(padCentro) + soloLine)
+      const labelFirma = 'Firma Cliente'
+      const padLabel = Math.max(0, Math.floor((width - labelFirma.length) / 2))
+      builder.addTextLine(' '.repeat(padLabel) + labelFirma)
+      builder.addTextLine('')
+
+      builder.alignCenter().boldOn().addTextLine('Gracias por su preferencia!').boldOff()
+
+      builder.addTextLine('').addTextLine('').addTextLine('').addTextLine('').addTextLine('').addTextLine('')
+      builder.feedLines(4)
+      binaryBuffer = builder.getBuffer()
+    } catch (e) {
+      toast('Error de formato: ' + e.message, 'error')
+      setConnectingPrinter(false)
+      return
+    }
+
+    enviarBufferBluetooth(deviceAddress, binaryBuffer).catch(() => {})
+  }
 
   useEffect(() => {
     fetchRuta()
@@ -1281,28 +1512,40 @@ export default function RepartoPage() {
                           <EmptyState icon="ti-cylinder" message="El camión no tiene cilindros asignados" />
                         ) : (
                           <div style={{ display: 'flex', flexDirection: 'column' }}>
-                            {camionStock.map((t, idx) => (
-                              <div 
-                                key={t.id} 
-                                style={{ 
-                                  display: 'flex', 
-                                  alignItems: 'center', 
-                                  justifyContent: 'space-between', 
-                                  padding: '12px 16px', 
-                                  borderBottom: idx === camionStock.length - 1 ? 'none' : '1px solid var(--border-light)' 
-                                }}
-                              >
-                                <div>
-                                  <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 'bold', fontSize: 13 }}>{t.id}</div>
-                                  <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>
-                                    {t.gas} · {formatCapacidad(t)}
+                            {camionStock.map((t, idx) => {
+                              const puedeVender = t.estado === 'RESERVADO' && Number(t.cantidadActual || 0) > 0
+                              return (
+                                <div
+                                  key={t.id}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    padding: '12px 16px',
+                                    borderBottom: idx === camionStock.length - 1 ? 'none' : '1px solid var(--border-light)'
+                                  }}
+                                >
+                                  <div>
+                                    <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 'bold', fontSize: 13 }}>{t.id}</div>
+                                    <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>
+                                      {t.gas} · {formatCapacidad(t)}
+                                      {puedeVender && (
+                                        <> · <strong>{formatNumberSpanish(t.cantidadActual)} restantes</strong></>
+                                      )}
+                                    </div>
                                   </div>
+                                  {puedeVender ? (
+                                    <button className="btn btn-primary btn-sm" onClick={() => abrirModalVenta(t)}>
+                                      <i className="ti ti-cash" /> Vender
+                                    </button>
+                                  ) : (
+                                    <span className={`badge badge-${t.estado}`} style={{ fontSize: 10 }}>
+                                      {t.estado === 'DEVUELTO' ? 'DEVUELTO (VACÍO)' : 'EN TRÁNSITO'}
+                                    </span>
+                                  )}
                                 </div>
-                                <span className={`badge badge-${t.estado}`} style={{ fontSize: 10 }}>
-                                  {t.estado === 'DEVUELTO' ? 'DEVUELTO (VACÍO)' : 'EN TRÁNSITO'}
-                                </span>
-                              </div>
-                            ))}
+                              )
+                            })}
                           </div>
                         )}
                       </div>
@@ -2017,6 +2260,74 @@ export default function RepartoPage() {
         )}
       </div>
 
+      {ventaParaImprimir && createPortal(
+        <div className="print-ticket-container">
+          <div className="ticket-header">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', marginBottom: '10px' }}>
+              <img src={branding.isotipoSrc} alt="Isotipo" style={{ width: '40px', height: '40px', objectFit: 'contain' }} />
+              <img src={branding.logoSrc} alt="Logo" style={{ width: '108px', height: '40px', objectFit: 'contain' }} />
+            </div>
+            {direccion ? <p style={{ margin: 0, fontSize: '10px' }}>{direccion}</p> : <p style={{ margin: 0, fontSize: '10px' }}>Gestión de Gases Industriales</p>}
+            {telefono && <p style={{ margin: '2px 0 0', fontSize: '10px' }}>Tel: {telefono}</p>}
+            <p style={{ margin: '4px 0 0', fontSize: '11px', fontWeight: 'bold' }}>VENTA CAMION: {ventaParaImprimir.numero}</p>
+          </div>
+
+          <div style={{ margin: '8px 0', fontSize: '11px' }}>
+            <strong>Cliente:</strong> {ventaParaImprimir.cliente?.nombre}<br />
+            <strong>RUC/CI:</strong> {ventaParaImprimir.cliente?.ruc || '—'}<br />
+            <strong>Fecha:</strong> {new Date(ventaParaImprimir.fechaCarga).toLocaleString('es-PY')}<br />
+            <strong>Chofer:</strong> {ventaParaImprimir.operador?.nombre || ventaParaImprimir.operador?.username || ''}
+          </div>
+
+          <table className="ticket-table">
+            <thead>
+              <tr>
+                <th style={{ textAlign: 'left' }}>Producto</th>
+                <th style={{ textAlign: 'center' }}>Cant.</th>
+                <th style={{ textAlign: 'right' }}>Subtotal</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  <strong>{ventaParaImprimir.tubo?.gas}</strong>
+                  <span style={{ fontSize: '10px', color: '#555', display: 'block' }}>Tubo: {ventaParaImprimir.tuboId}</span>
+                </td>
+                <td style={{ textAlign: 'center' }}>
+                  {formatNumberSpanish(ventaParaImprimir.cantidad)} {ventaParaImprimir.unidad}<br />
+                  <span style={{ fontSize: '9px', color: '#888' }}>
+                    x {Number(ventaParaImprimir.precioUnitario).toLocaleString('es-PY')}
+                  </span>
+                </td>
+                <td style={{ textAlign: 'right', fontWeight: '500' }}>
+                  {(Number(ventaParaImprimir.cantidad) * Number(ventaParaImprimir.precioUnitario)).toLocaleString('es-PY')} GS
+                </td>
+              </tr>
+              <tr>
+                <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px', paddingTop: '6px' }}>TOTAL:</td>
+                <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px', color: 'var(--blue)', paddingTop: '6px' }}>
+                  {(Number(ventaParaImprimir.cantidad) * Number(ventaParaImprimir.precioUnitario)).toLocaleString('es-PY')} GS
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div style={{ margin: '8px 0', fontSize: '11px' }}>
+            <strong>Forma de pago:</strong> {ventaParaImprimir.metodoPago || '-'}<br />
+            <strong>Recibido:</strong> {Number(ventaParaImprimir.montoRecibido || 0).toLocaleString('es-PY')} GS
+          </div>
+
+          <div className="ticket-signatures">
+            <div className="signature-line">Firma Cliente</div>
+          </div>
+
+          <div className="ticket-footer">
+            ¡Gracias por su preferencia!
+          </div>
+        </div>,
+        document.body
+      )}
+
       {entregaParaImprimir && createPortal(
         <div className="print-ticket-container">
           <div className="ticket-header">
@@ -2028,7 +2339,7 @@ export default function RepartoPage() {
             {telefono && <p style={{ margin: '2px 0 0', fontSize: '10px' }}>Tel: {telefono}</p>}
             <p style={{ margin: '4px 0 0', fontSize: '11px', fontWeight: 'bold' }}>REMISIÓN: {entregaParaImprimir.numero}</p>
           </div>
-          
+
           <div style={{ margin: '8px 0', fontSize: '11px' }}>
             <strong>Cliente:</strong> {entregaParaImprimir.cliente?.nombre}<br />
             <strong>RUC/CI:</strong> {entregaParaImprimir.cliente?.ruc || '—'}<br />
@@ -2281,7 +2592,9 @@ export default function RepartoPage() {
             </button>
             <button
               className="btn btn-primary"
-              onClick={() => imprimirBluetooth(entregaParaImprimir || activeEntrega, selectedDeviceAddress)}
+              onClick={() => ventaParaImprimir
+                ? imprimirVentaCamionBluetooth(ventaParaImprimir, selectedDeviceAddress)
+                : imprimirBluetooth(entregaParaImprimir || activeEntrega, selectedDeviceAddress)}
               disabled={connectingPrinter || !selectedDeviceAddress}
               style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
             >
@@ -2374,6 +2687,125 @@ export default function RepartoPage() {
             </label>
           </div>
         </div>
+      </Modal>
+
+      {/* Modal de Venta de Gas desde el Camión */}
+      <Modal
+        open={ventaModalOpen}
+        title={`Vender gas — ${tuboVenta?.id || ''}`}
+        onClose={() => setVentaModalOpen(false)}
+        footer={
+          <div style={{ display: 'flex', gap: 10, width: '100%' }}>
+            <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setVentaModalOpen(false)}>
+              Cancelar
+            </button>
+            <button
+              className="btn btn-primary"
+              style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+              onClick={confirmarVenta}
+              disabled={ventaGuardando}
+            >
+              {ventaGuardando ? <Spinner size="sm" /> : <i className="ti ti-cash" />}
+              Confirmar Venta
+            </button>
+          </div>
+        }
+      >
+        {tuboVenta && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div className="card" style={{ padding: 10, fontSize: 12 }}>
+              <strong>{tuboVenta.gas}</strong> · {formatCapacidad(tuboVenta)}<br />
+              Disponible: <strong>{formatNumberSpanish(tuboVenta.cantidadActual)}</strong>
+            </div>
+
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Cliente</label>
+              {ventaClienteSeleccionado ? (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 10, border: '1px solid var(--border)', borderRadius: 8, background: 'var(--surface-2)' }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{ventaClienteSeleccionado.nombre}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{ventaClienteSeleccionado.ruc}</div>
+                  </div>
+                  <button className="btn btn-sm" onClick={() => { setVentaClienteSeleccionado(null); setVentaClienteQuery('') }}>
+                    Cambiar
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <input
+                    type="text"
+                    placeholder="Buscar por nombre o RUC/CI..."
+                    value={ventaClienteQuery}
+                    onChange={e => buscarClientesVenta(e.target.value)}
+                    style={{ width: '100%', height: 40 }}
+                  />
+                  {ventaClienteResultados.length > 0 && (
+                    <div style={{ marginTop: 6, maxHeight: 160, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
+                      {ventaClienteResultados.map(c => (
+                        <div
+                          key={c.id}
+                          onClick={() => { setVentaClienteSeleccionado(c); setVentaClienteResultados([]) }}
+                          style={{ padding: '8px 10px', cursor: 'pointer', borderBottom: '1px solid var(--border-light)' }}
+                        >
+                          <div style={{ fontSize: 13 }}>{c.nombre}</div>
+                          <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{c.ruc}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', gap: 10 }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Cantidad</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.001"
+                  value={ventaCantidad}
+                  onChange={e => setVentaCantidad(e.target.value)}
+                  style={{ width: '100%', height: 40 }}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Precio unitario</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={ventaPrecio}
+                  onChange={e => setVentaPrecio(e.target.value)}
+                  style={{ width: '100%', height: 40 }}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 10 }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Forma de pago</label>
+                <select value={ventaMetodoPago} onChange={e => setVentaMetodoPago(e.target.value)} style={{ width: '100%', height: 40 }}>
+                  <option value="EFECTIVO">Efectivo</option>
+                  <option value="TRANSFERENCIA">Transferencia</option>
+                  <option value="OTRO">Otro</option>
+                </select>
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Monto recibido</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  placeholder={ventaCantidad && ventaPrecio ? String(Number(ventaCantidad) * Number(ventaPrecio)) : ''}
+                  value={ventaMontoRecibido}
+                  onChange={e => setVentaMontoRecibido(e.target.value)}
+                  style={{ width: '100%', height: 40 }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* Modal de Advertencia por Tubos No Escaneados */}

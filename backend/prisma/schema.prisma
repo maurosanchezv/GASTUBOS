@@ -47,6 +47,7 @@ enum TipoPropietario {
 enum TipoCarga {
   NORMAL
   SALON
+  CAMION
 }
 
 enum TipoOperacion {
@@ -103,6 +104,7 @@ model Usuario {
   entregasRepartidor         Entrega[]   @relation("EntregaRepartidor")
   cargas                     Carga[]
   cilindrosTercerosRecibidos CilindroTerceroInfo[]
+  camionesEnUso              Camion[]    @relation("CamionRepartidorActual")
 
   @@map("usuarios")
 }
@@ -128,6 +130,7 @@ model Cliente {
   ventas      Venta[]
   entregas    Entrega[]
   recambios   Recambio[]
+  cargas      Carga[]     // ventas fraccionadas de gas desde camión
   cilindrosTerceros CilindroTerceroInfo[]
   sucursales  SucursalCliente[]
 
@@ -174,6 +177,10 @@ model Tubo {
   activo          Boolean         @default(true)
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
+
+  // Gas restante en el tubo (usado por ventas fraccionadas desde camión).
+  // Se setea al cargar el tubo y se va descontando hasta llegar a 0.
+  cantidadActual  Decimal?        @db.Decimal(10, 3)
 
   // cliente actualmente asignado (null si está en depósito)
   clienteId       String?
@@ -313,9 +320,16 @@ model Carga {
   observaciones String?
   createdAt     DateTime  @default(now())
 
+  // Solo se completan cuando tipoCarga = CAMION (venta fraccionada del repartidor)
+  clienteId     String?
+  cliente       Cliente?  @relation(fields: [clienteId], references: [id])
+  metodoPago    String?
+  montoRecibido Decimal?  @db.Decimal(10, 2)
+
   @@index([tuboId])
   @@index([operadorId])
   @@index([fechaCarga])
+  @@index([clienteId])
   @@map("cargas")
 }
 
@@ -387,6 +401,10 @@ model Camion {
   updatedAt    DateTime @updatedAt
 
   tubos        Tubo[]
+
+  // Repartidor que tiene este camión seleccionado ahora mismo (null = nadie lo tiene)
+  repartidorActualId String?
+  repartidorActual   Usuario? @relation("CamionRepartidorActual", fields: [repartidorActualId], references: [id])
 
   @@map("camiones")
 }

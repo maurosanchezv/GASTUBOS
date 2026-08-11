@@ -10,7 +10,7 @@ import { z } from 'zod'
 import { prisma } from '../utils/prisma.js'
 import { requireAuth, requireRol } from '../middleware/auth.js'
 import { registrarAuditoria } from '../utils/auditoria.js'
-import { generarNumero } from '../utils/helpers.js'
+import { generarNumero, mapTuboGasToTipoGas } from '../utils/helpers.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -85,20 +85,6 @@ const entregaSchema = z.object({
   // Solo si tipoOperacion = VENTA
   referencia:       z.string().optional(),
 })
-
-// Helper para mapear el gas del tubo (string) al enum de TipoGas
-function mapTuboGasToTipoGas(tuboGas) {
-  if (!tuboGas) return 'CO2'
-  const norm = tuboGas.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-  if (norm.includes('co2')) return 'CO2'
-  if (norm.includes('oxigeno')) return 'OXIGENO'
-  if (norm.includes('argon')) return 'ARGON'
-  if (norm.includes('nitrogeno')) return 'NITROGENO'
-  if (norm.includes('aire')) return 'AIRE_COMPRIMIDO'
-  if (norm.includes('mezcla')) return 'MEZCLA_CO2_ARGON'
-  if (norm.includes('acetileno')) return 'ACETILENO'
-  return 'CO2'
-}
 
 // ─── GET /api/entregas ────────────────────────────────────────────────────────
 router.get('/', async (req, res, next) => {
