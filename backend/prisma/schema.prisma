@@ -389,12 +389,12 @@ model Carga {
   operadorId    String
   operador      Usuario   @relation(fields: [operadorId], references: [id])
   observaciones String?
+  metodoPago    String?
   createdAt     DateTime  @default(now())
 
   // Solo se completan cuando tipoCarga = CAMION (venta fraccionada del repartidor)
   clienteId     String?
   cliente       Cliente?  @relation(fields: [clienteId], references: [id])
-  metodoPago    String?
   montoRecibido Decimal?  @db.Decimal(10, 2)
 
   @@index([tuboId])

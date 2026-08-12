@@ -55,7 +55,7 @@ const formatNumberSpanish = (val) => {
 
 const FORM_INICIAL = {
   tuboId: '', tipoGas: '', unidad: '', tipoCarga: 'NORMAL', cantidad: '',
-  fechaCarga: new Date().toISOString().slice(0, 16), observaciones: '',
+  fechaCarga: new Date().toISOString().slice(0, 16), observaciones: '', metodoPago: '',
 }
 
 export default function CargasPage() {
@@ -218,6 +218,10 @@ export default function CargasPage() {
       toast('Completá los campos obligatorios', 'error')
       return
     }
+    if (!form.metodoPago) {
+      toast('Seleccioná la forma de pago', 'error')
+      return
+    }
     setConfirmOpen(true)
   }
 
@@ -233,6 +237,7 @@ export default function CargasPage() {
         precioUnitario: Number(calcPrecio) || 0,
         fechaCarga:    new Date(form.fechaCarga).toISOString(),
         observaciones: form.observaciones || undefined,
+        metodoPago:    form.metodoPago,
       })
       toast(tuboSeleccionado ? 'Carga registrada — tubo pasó a estado CARGADO' : 'Carga en salón registrada con éxito', 'success')
       setConfirmOpen(false)
@@ -719,6 +724,17 @@ export default function CargasPage() {
           ) : null}
         </div>
 
+        <FormGroup label="Forma de pago" required>
+          <select
+            value={form.metodoPago}
+            onChange={e => setForm(prev => ({ ...prev, metodoPago: e.target.value }))}
+          >
+            <option value="">Seleccioná...</option>
+            <option value="EFECTIVO">Efectivo</option>
+            <option value="TRANSFERENCIA">Transferencia</option>
+          </select>
+        </FormGroup>
+
         <FormGroup label="Observaciones">
           <textarea
             placeholder="Notas opcionales sobre esta carga..."
@@ -773,7 +789,12 @@ export default function CargasPage() {
                 {Number(calcPrecio || 0).toLocaleString('es-PY')} GS / {form.unidad === 'KG' ? 'kg' : 'm³'}
               </span>
             </div>
-            
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+              <span style={{ color: 'var(--text-muted)' }}>Forma de pago:</span>
+              <span style={{ fontWeight: 600 }}>{form.metodoPago === 'TRANSFERENCIA' ? 'Transferencia' : 'Efectivo'}</span>
+            </div>
+
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
               <span style={{ fontWeight: 600 }}>Monto Total:</span>
               <span style={{ fontWeight: 800, fontSize: 15, color: 'var(--green)' }}>

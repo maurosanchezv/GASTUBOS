@@ -20,6 +20,7 @@ const cargaSchema = z.object({
   precioUnitario: z.number().nonnegative().optional().default(0),
   fechaCarga:    z.string().datetime(),
   observaciones: z.string().optional(),
+  metodoPago:    z.enum(['EFECTIVO', 'TRANSFERENCIA']),
 })
 
 const ventaCamionSchema = z.object({
@@ -112,6 +113,7 @@ router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res,
           fechaCarga:    new Date(data.fechaCarga),
           operadorId:    req.user.id,
           observaciones: data.observaciones,
+          metodoPago:    data.metodoPago,
         },
         include: {
           tubo:     { select: { id: true, serie: true, gas: true } },

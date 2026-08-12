@@ -74,6 +74,7 @@ const entregaSchema = z.object({
   observaciones:    z.string().optional(),
   tubosIds:         z.array(z.string()).min(1, 'Debe incluir al menos un tubo'),
   costoDelivery:    z.coerce.number().optional().default(0),
+  metodoPago:       z.enum(['EFECTIVO', 'TRANSFERENCIA']),
   tubosDetalles:    z.array(z.object({
     tuboId:         z.string(),
     cantidadGas:    z.coerce.number().optional(),
@@ -268,6 +269,7 @@ router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res,
           observaciones:    data.observaciones,
           creadoPorId:      req.user.id,
           costoDelivery:    data.costoDelivery,
+          metodoPago:       data.metodoPago,
           detalles: {
             create: detallesAInsertar,
           },
@@ -385,7 +387,9 @@ router.put('/:id/confirmar', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR', 'REPA
         where: { id },
         data: {
           confirmada: true,
-          metodoPago: metodoPago || null,
+          // La forma de pago ya se elige al crear la entrega; solo se pisa acá
+          // si explícitamente viene una nueva (compatibilidad hacia atrás).
+          metodoPago: metodoPago || entrega.metodoPago || null,
           montoRecibido: montoRecibido !== undefined ? montoRecibido : null,
           observaciones: observacionesActualizadas || null,
         },

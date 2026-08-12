@@ -25,6 +25,7 @@ const EMPTY = {
   fechaVencimiento: '', referencia: '',
   latitud: null, longitud: null,
   costoDelivery: '',
+  metodoPago: '',
 }
 
 const GAS_STRING_TO_ENUM = {
@@ -583,6 +584,7 @@ export default function EntregasPage() {
     if (form.tipoOperacion === 'ALQUILER' && !form.fechaVencimiento) {
       return toast('Ingresá la fecha de vencimiento del alquiler', 'error')
     }
+    if (!form.metodoPago) return toast('Seleccioná la forma de pago', 'error')
     setSaving(true)
     try {
       await api.post('/entregas', {
@@ -860,6 +862,14 @@ export default function EntregasPage() {
                     <div className="form-group">
                       <label className="form-label">Costo de Delivery (GS)</label>
                       <input type="number" min="0" value={form.costoDelivery} onChange={f('costoDelivery')} placeholder="0" />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Forma de pago <span className="form-required">*</span></label>
+                      <select value={form.metodoPago} onChange={f('metodoPago')} required>
+                        <option value="">Seleccioná...</option>
+                        <option value="EFECTIVO">Efectivo</option>
+                        <option value="TRANSFERENCIA">Transferencia</option>
+                      </select>
                     </div>
                     {form.tipoOperacion === 'ALQUILER' && (
                       <div className="form-group">
@@ -1338,7 +1348,8 @@ export default function EntregasPage() {
                   <strong>Dirección:</strong> {entregaSeleccionada.direccionEntrega}<br />
                   <strong>Fecha de Orden:</strong> {new Date(entregaSeleccionada.fechaEntrega).toLocaleString('es-PY')}<br />
                   <strong>Chofer Asignado:</strong> {entregaSeleccionada.repartidor?.nombre || 'Sin asignar'}<br />
-                  <strong>Tipo Operación:</strong> {entregaSeleccionada.tipoOperacion.replace('_', ' ')}
+                  <strong>Tipo Operación:</strong> {entregaSeleccionada.tipoOperacion.replace('_', ' ')}<br />
+                  <strong>Forma de pago:</strong> {entregaSeleccionada.metodoPago === 'TRANSFERENCIA' ? 'Transferencia' : 'Efectivo'}
                 </div>
                 
                 <table className="ticket-table">
@@ -1452,7 +1463,7 @@ export default function EntregasPage() {
                     <strong>Repartidor:</strong> {entregaSeleccionada.repartidor?.nombre || '—'}<br />
                     <strong>Método Pago:</strong> {entregaSeleccionada.metodoPago || 'Efectivo'} {entregaSeleccionada.montoRecibido ? `(${Number(entregaSeleccionada.montoRecibido).toLocaleString('es-PY')} GS)` : ''}
                   </div>
-                  
+
                   {/* Secc 1: Tubos Entregados */}
                   <div style={{ fontSize: 11, fontWeight: 700, margin: '8px 0 4px', color: 'var(--blue)' }}>
                     CILINDROS ENTREGADOS:
@@ -1599,9 +1610,7 @@ export default function EntregasPage() {
             <strong>Dirección:</strong> {entregaSeleccionada.direccionEntrega}<br />
             <strong>Fecha:</strong> {new Date(entregaSeleccionada.fechaEntrega).toLocaleString('es-PY')}<br />
             <strong>Chofer/Repartidor:</strong> {entregaSeleccionada.repartidor?.nombre || 'Sin asignar'}<br />
-            {ticketTab === 'comprobante' && entregaSeleccionada.metodoPago && (
-              <><strong>Pago:</strong> {entregaSeleccionada.metodoPago}<br /></>
-            )}
+            <strong>Forma de pago:</strong> {entregaSeleccionada.metodoPago === 'TRANSFERENCIA' ? 'Transferencia' : 'Efectivo'}<br />
             <strong>Tipo:</strong> {entregaSeleccionada.tipoOperacion.replace('_', ' ')}
           </div>
           

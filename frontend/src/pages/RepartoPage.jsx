@@ -468,7 +468,6 @@ export default function RepartoPage() {
   const [historialDesde, setHistorialDesde] = useState('')
   const [historialHasta, setHistorialHasta] = useState('')
   const [manualTuboId, setManualTuboId] = useState('')
-  const [metodoPago, setMetodoPago] = useState('EFECTIVO')
   const [montoRecibido, setMontoRecibido] = useState('')
   const [modalWarningParcial, setModalWarningParcial] = useState(false)
   const [modalConfirmarCompleta, setModalConfirmarCompleta] = useState(false)
@@ -1176,7 +1175,6 @@ export default function RepartoPage() {
     setRecambios([])
     setNuevoRecambioId('')
     setManualTuboId('')
-    setMetodoPago('EFECTIVO')
     const subtotal = (entrega.detalles || []).reduce((acc, d) => {
       const val = Number(d.subtotal ?? (d.cantidadGas > 0 ? d.cantidadGas * d.precioUnitario : d.precioUnitario) ?? 0)
       return acc + (isNaN(val) ? 0 : val)
@@ -1195,7 +1193,6 @@ export default function RepartoPage() {
     setRecambios([])
     setNuevoRecambioId('')
     setManualTuboId('')
-    setMetodoPago('EFECTIVO')
     setMontoRecibido('')
   }
 
@@ -1215,7 +1212,6 @@ export default function RepartoPage() {
       const payload = {
         confirmados: scannedIds,
         recambios,
-        metodoPago,
         montoRecibido: Number(montoRecibido) || 0
       }
       if (navigator.onLine) {
@@ -2538,7 +2534,8 @@ export default function RepartoPage() {
             <strong>Dirección:</strong> {entregaParaImprimir.direccionEntrega}<br />
             <strong>Fecha:</strong> {new Date(entregaParaImprimir.fechaEntrega).toLocaleString('es-PY')}<br />
             <strong>Chofer:</strong> {entregaParaImprimir.repartidor?.nombre || 'Sin asignar'}<br />
-            <strong>Tipo:</strong> {entregaParaImprimir.tipoOperacion.replace('_', ' ')}
+            <strong>Tipo:</strong> {entregaParaImprimir.tipoOperacion.replace('_', ' ')}<br />
+            <strong>Forma de pago:</strong> {entregaParaImprimir.metodoPago === 'TRANSFERENCIA' ? 'Transferencia' : 'Efectivo'}
           </div>
           
           <table className="ticket-table">
@@ -2674,7 +2671,8 @@ export default function RepartoPage() {
               <strong>Dirección:</strong> {entregaSeleccionada.direccionEntrega}<br />
               <strong>Fecha:</strong> {new Date(entregaSeleccionada.fechaEntrega).toLocaleString('es-PY')}<br />
               <strong>Chofer:</strong> {entregaSeleccionada.repartidor?.nombre || 'Sin asignar'}<br />
-              <strong>Tipo:</strong> {(entregaSeleccionada.tipoOperacion || '').replace('_', ' ')}
+              <strong>Tipo:</strong> {(entregaSeleccionada.tipoOperacion || '').replace('_', ' ')}<br />
+              <strong>Forma de pago:</strong> {entregaSeleccionada.metodoPago === 'TRANSFERENCIA' ? 'Transferencia' : 'Efectivo'}
             </div>
             
             <table className="ticket-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
