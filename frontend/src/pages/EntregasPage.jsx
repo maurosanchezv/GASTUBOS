@@ -1808,9 +1808,9 @@ function TuboChip({ tuboId, detail, onChange, onRemove }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <label style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>PRECIO (Gs):</label>
           <input 
-            type="number" 
-            min="0" 
-            step="500"
+            type="number"
+            min="0"
+            step="1"
             placeholder="0"
             value={detail?.precioUnitario ?? ''} 
             onChange={e => onChange(tuboId, 'precioUnitario', e.target.value)}
