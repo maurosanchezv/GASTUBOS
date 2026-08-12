@@ -5,7 +5,7 @@ import { Html5Qrcode } from 'html5-qrcode'
 import api from '../services/api.js'
 import { useAuthStore } from '../store/authStore.js'
 import { useConfigStore } from '../store/configStore.js'
-import { PageHeader, Spinner, EmptyState, StateBadge, Modal, formatCapacidad, ObservacionCell } from '../components/ui.jsx'
+import { PageHeader, Spinner, EmptyState, StateBadge, Modal, formatCapacidad, formatUnidadGas, ObservacionCell } from '../components/ui.jsx'
 import { useToast } from '../components/ui.jsx'
 import { EscPosBuilder, generarLogoEscPos } from '../utils/escPosBuilder.js'
 import { LOGO_TUBOS_SVG, LOGO_PMS_SVG, getBrandingSources } from '../utils/logosSvg.js'
@@ -2972,7 +2972,7 @@ export default function RepartoPage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div className="card" style={{ padding: 10, fontSize: 12 }}>
               <strong>{tuboVenta.gas}</strong> · {formatCapacidad(tuboVenta)}<br />
-              Disponible: <strong>{formatNumberSpanish(tuboVenta.cantidadActual)}</strong>
+              Disponible: <strong>{formatNumberSpanish(tuboVenta.cantidadActual)} {formatUnidadGas(tuboVenta.gas)}</strong>
             </div>
 
             <div>

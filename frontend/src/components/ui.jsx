@@ -192,6 +192,13 @@ export function formatCapacidad(tubo) {
   return `${Number(val)} m³`
 }
 
+// ── Format gas unit of measure helper ──────────────────────────
+export function formatUnidadGas(gas) {
+  const g = (gas || '').toLowerCase()
+  if (g.includes('co2') || g.includes('acetileno')) return 'kg'
+  return 'm³'
+}
+
 // ── Toast notification ─────────────────────────────────────────
 
 let _showToast = null
