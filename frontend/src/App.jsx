@@ -29,6 +29,8 @@ import RemisionPage    from './pages/RemisionPage.jsx'
 import CamionesPage    from './pages/CamionesPage.jsx'
 import TuboPublicoPage from './pages/TuboPublicoPage.jsx'  // sin auth
 import CilindrosTercerosPage from './pages/CilindrosTercerosPage.jsx'
+import ProductosPage      from './pages/ProductosPage.jsx'
+import VentaProductosPage from './pages/VentaProductosPage.jsx'
 
 // El REPARTIDOR no debe ver el Dashboard administrativo; lo desviamos
 // directo a su hoja de ruta. El resto de los roles entra al Dashboard.
@@ -89,6 +91,12 @@ export default function App() {
           } />
           <Route path="devoluciones" element={
             <PrivateRoute roles={['ADMIN', 'SUPERVISOR', 'OPERADOR', 'REPARTIDOR']}><DevolucionesPage /></PrivateRoute>
+          } />
+          <Route path="productos" element={
+            <PrivateRoute roles={['ADMIN', 'SUPERVISOR', 'OPERADOR']}><ProductosPage /></PrivateRoute>
+          } />
+          <Route path="venta-productos" element={
+            <PrivateRoute roles={['ADMIN', 'SUPERVISOR', 'OPERADOR']}><VentaProductosPage /></PrivateRoute>
           } />
           {/* Rutas temporalmente deshabilitadas
           <Route path="alquileres" element={

@@ -84,6 +84,11 @@ enum UnidadGas {
   M3
 }
 
+enum MetodoPago {
+  EFECTIVO
+  TRANSFERENCIA
+}
+
 // ─── USUARIOS ─────────────────────────────────────────────────────────────────
 
 model Usuario {
@@ -105,6 +110,7 @@ model Usuario {
   cargas                     Carga[]
   cilindrosTercerosRecibidos CilindroTerceroInfo[]
   camionesEnUso              Camion[]    @relation("CamionRepartidorActual")
+  ventasProductos            VentaProducto[]
 
   @@map("usuarios")
 }
@@ -133,6 +139,7 @@ model Cliente {
   cargas      Carga[]     // ventas fraccionadas de gas desde camión
   cilindrosTerceros CilindroTerceroInfo[]
   sucursales  SucursalCliente[]
+  ventasProductos VentaProducto[]
 
   @@map("clientes")
 }
@@ -300,6 +307,70 @@ model Venta {
   createdAt     DateTime @default(now())
 
   @@map("ventas")
+}
+
+// ─── PRODUCTOS Y VENTA DE PRODUCTOS ────────────────────────────────────────────
+// Maestro de productos/accesorios (independiente de los cilindros/Tubo) y sus
+// ventas. Separado del flujo de venta de cilindros (Venta, arriba) porque no
+// hay un Tubo físico involucrado.
+
+model Producto {
+  id              String   @id @default(cuid())
+  codigo          String   @unique
+  nombre          String
+  descripcion     String?
+  categoria       String                     // slug libre, ej. "soldadura-tig"
+  categoriaNombre String?
+  precio          Decimal  @db.Decimal(10, 2)
+  unidad          String   @default("unidades")
+  stock           Int?     // reservado para control de stock futuro, sin lógica aplicada aún
+  stockMinimo     Int?
+  activo          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  detalles        DetalleVentaProducto[]
+
+  @@index([categoria])
+  @@map("productos")
+}
+
+model VentaProducto {
+  id            String     @id @default(cuid())
+  numero        String     @unique  // VP-2026-001
+  clienteId     String?
+  cliente       Cliente?   @relation(fields: [clienteId], references: [id])
+  usuarioId     String
+  usuario       Usuario    @relation(fields: [usuarioId], references: [id])
+  metodoPago    MetodoPago
+  total         Decimal    @db.Decimal(10, 2)
+  observaciones String?
+  cancelada     Boolean    @default(false)
+  fechaVenta    DateTime   @default(now())
+  createdAt     DateTime   @default(now())
+
+  detalles      DetalleVentaProducto[]
+
+  @@index([clienteId])
+  @@index([usuarioId])
+  @@index([fechaVenta])
+  @@map("ventas_productos")
+}
+
+model DetalleVentaProducto {
+  id              String        @id @default(cuid())
+  ventaProductoId String
+  ventaProducto   VentaProducto @relation(fields: [ventaProductoId], references: [id])
+  productoId      String?                        // null = ítem libre, no catalogado
+  producto        Producto?     @relation(fields: [productoId], references: [id])
+  descripcion     String                          // snapshot del nombre (o texto libre tipeado)
+  cantidad        Decimal       @db.Decimal(10, 3) @default(1.000)
+  precioUnitario  Decimal       @db.Decimal(10, 2) // snapshot, no se recalcula si el maestro cambia después
+  subtotal        Decimal       @db.Decimal(10, 2) // cantidad × precioUnitario, calculado server-side
+
+  @@index([ventaProductoId])
+  @@index([productoId])
+  @@map("detalles_venta_productos")
 }
 
 // ─── CARGAS ───────────────────────────────────────────────────────────────────

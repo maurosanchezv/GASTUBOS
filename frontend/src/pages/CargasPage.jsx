@@ -1,7 +1,7 @@
 // gastubos/frontend/src/pages/CargasPage.jsx
 import { useState, useEffect, useCallback } from 'react'
 import api from '../services/api.js'
-import { PageHeader, Modal, FormGroup, Spinner, EmptyState, GasDot, StateBadge, useToast, formatCapacidad } from '../components/ui.jsx'
+import { PageHeader, Modal, FormGroup, Spinner, EmptyState, GasDot, StateBadge, useToast, formatCapacidad, ObservacionCell } from '../components/ui.jsx'
 import { useAuthStore } from '../store/authStore.js'
 
 const TIPO_GAS_LABEL = {
@@ -12,6 +12,18 @@ const TIPO_GAS_LABEL = {
   AIRE_COMPRIMIDO: 'Aire comprimido',
   MEZCLA_CO2_ARGON:'Mezcla 80% CO₂ / 20% Argón',
   ACETILENO:       'Acetileno',
+}
+
+const TIPO_CARGA_LABEL = {
+  NORMAL: 'Normal',
+  SALON:  'Salón',
+  CAMION: 'En camión',
+}
+
+const TIPO_CARGA_BADGE = {
+  NORMAL: 'badge-CARGADO',
+  SALON:  'badge-REPARTIDOR',
+  CAMION: 'badge-ALQUILADO',
 }
 
 const TIPO_GAS_UNIDAD = {
@@ -462,8 +474,8 @@ export default function CargasPage() {
                           <tr key={c.id}>
                             <td style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{c.numero}</td>
                             <td>
-                              <span className={`badge ${c.tipoCarga === 'SALON' ? 'badge-REPARTIDOR' : 'badge-CARGADO'}`} style={{ fontSize: 10 }}>
-                                {c.tipoCarga === 'SALON' ? 'Salón' : 'Normal'}
+                              <span className={`badge ${TIPO_CARGA_BADGE[c.tipoCarga] || 'badge-CARGADO'}`} style={{ fontSize: 10 }}>
+                                {TIPO_CARGA_LABEL[c.tipoCarga] || 'Normal'}
                               </span>
                             </td>
                             <td>
@@ -497,8 +509,8 @@ export default function CargasPage() {
                             <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
                               {c.operador?.nombre || c.operador?.username}
                             </td>
-                            <td style={{ fontSize: 11, color: 'var(--text-secondary)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {c.observaciones || '—'}
+                            <td style={{ fontSize: 11 }}>
+                              <ObservacionCell texto={c.observaciones} titulo="Observaciones de la carga" />
                             </td>
                           </tr>
                         )
@@ -523,6 +535,12 @@ export default function CargasPage() {
                           </div>
                         </div>
                         <div className="list-card-body">
+                          <div className="list-card-item">
+                            <span className="list-card-label">Tipo</span>
+                            <span className={`badge ${TIPO_CARGA_BADGE[c.tipoCarga] || 'badge-CARGADO'}`} style={{ fontSize: 10 }}>
+                              {TIPO_CARGA_LABEL[c.tipoCarga] || 'Normal'}
+                            </span>
+                          </div>
                           <div className="list-card-item">
                             <span className="list-card-label">Tubo</span>
                             <span className="list-card-value">{c.tubo?.id || 'Carga en salón'}</span>
@@ -556,7 +574,9 @@ export default function CargasPage() {
                           {c.observaciones && (
                             <div className="list-card-item col-span-2">
                               <span className="list-card-label">Obs.</span>
-                              <span className="list-card-value" style={{ whiteSpace: 'normal', fontSize: 11 }}>{c.observaciones}</span>
+                              <span className="list-card-value" style={{ fontSize: 11 }}>
+                                <ObservacionCell texto={c.observaciones} titulo="Observaciones de la carga" maxWidth={220} />
+                              </span>
                             </div>
                           )}
                         </div>

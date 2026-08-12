@@ -26,6 +26,8 @@ import precioRoutes   from './routes/precios.js'
 import camionRoutes   from './routes/camiones.js'
 import configRoutes   from './routes/config.js'
 import cilindrosTercerosRoutes from './routes/cilindrosTerceros.js'
+import productoRoutes      from './routes/productos.js'
+import ventaProductoRoutes from './routes/ventasProductos.js'
 
 const app  = express()
 const PORT = process.env.PORT || 3001
@@ -96,6 +98,8 @@ app.use('/api/precios',    precioRoutes)
 app.use('/api/camiones',   camionRoutes)
 app.use('/api/config',     configRoutes)
 app.use('/api/cilindros-terceros', cilindrosTercerosRoutes)
+app.use('/api/productos',       productoRoutes)
+app.use('/api/venta-productos', ventaProductoRoutes)
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => res.json({ ok: true, version: '1.0.0' }))

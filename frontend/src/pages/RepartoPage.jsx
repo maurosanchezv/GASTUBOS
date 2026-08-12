@@ -5,7 +5,7 @@ import { Html5Qrcode } from 'html5-qrcode'
 import api from '../services/api.js'
 import { useAuthStore } from '../store/authStore.js'
 import { useConfigStore } from '../store/configStore.js'
-import { PageHeader, Spinner, EmptyState, StateBadge, Modal, formatCapacidad } from '../components/ui.jsx'
+import { PageHeader, Spinner, EmptyState, StateBadge, Modal, formatCapacidad, ObservacionCell } from '../components/ui.jsx'
 import { useToast } from '../components/ui.jsx'
 import { EscPosBuilder, generarLogoEscPos } from '../utils/escPosBuilder.js'
 import { LOGO_TUBOS_SVG, LOGO_PMS_SVG, getBrandingSources } from '../utils/logosSvg.js'
@@ -1720,8 +1720,8 @@ export default function RepartoPage() {
                     )}
 
                     {activeEntrega.observaciones && (
-                      <div style={{ fontSize: 11, fontStyle: 'italic', background: 'var(--surface-2)', padding: '6px 10px', borderRadius: 6, marginTop: 8 }}>
-                        <strong>Obs:</strong> {activeEntrega.observaciones}
+                      <div style={{ fontSize: 11, background: 'var(--surface-2)', padding: '6px 10px', borderRadius: 6, marginTop: 8 }}>
+                        <strong>Obs:</strong> <ObservacionCell texto={activeEntrega.observaciones} titulo="Observaciones de la entrega" maxWidth={320} />
                       </div>
                     )}
                   </div>
