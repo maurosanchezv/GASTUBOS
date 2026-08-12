@@ -464,6 +464,7 @@ export default function RepartoPage() {
   const [seccion, setSeccion] = useState('ruta') // 'ruta', 'historial' o 'camion'
   const [historialHoy, setHistorialHoy] = useState([])
   const [filtroHistorial, setFiltroHistorial] = useState('hoy') // 'hoy' | '7d' | '30d' | 'personalizado'
+  const [filtroTipoHistorial, setFiltroTipoHistorial] = useState('todas') // 'todas' | 'entregas' | 'camion'
   const [historialDesde, setHistorialDesde] = useState('')
   const [historialHasta, setHistorialHasta] = useState('')
   const [manualTuboId, setManualTuboId] = useState('')
@@ -490,6 +491,8 @@ export default function RepartoPage() {
   const [ventaMontoRecibido, setVentaMontoRecibido] = useState('')
   const [ventaGuardando, setVentaGuardando] = useState(false)
   const [ventaParaImprimir, setVentaParaImprimir] = useState(null)
+  const [cargaCamionSeleccionada, setCargaCamionSeleccionada] = useState(null)
+  const [modalDetalleCamion, setModalDetalleCamion] = useState(false)
 
   const totalIds = activeEntrega?.detalles?.map(d => d.tuboId) || []
   const todosListos = totalIds.length > 0 && totalIds.every(id => scannedIds.includes(id))
@@ -528,21 +531,33 @@ export default function RepartoPage() {
     const rango = getRangoHistorial(filtroHistorial, historialDesde, historialHasta)
     if (!rango) return // rango personalizado sin ambas fechas todavía
     const cacheKey = `historial_offline_${user.id}_${filtroHistorial}${filtroHistorial === 'personalizado' ? `_${rango.desde}_${historialHasta}` : ''}`
-    try {
-      if (navigator.onLine) {
-        const queryParams = user.rol === 'REPARTIDOR' ? `&repartidorId=${user.id}` : ''
-        const hastaParam = rango.hasta ? `&hasta=${rango.hasta}` : ''
-        const resConf = await api.get(`/entregas?confirmada=true&desde=${rango.desde}${hastaParam}&limit=100${queryParams}`)
-        const resCanc = await api.get(`/entregas?cancelada=true&desde=${rango.desde}${hastaParam}&limit=100${queryParams}`)
-        const sorted = [...(resConf.data.entregas || []), ...(resCanc.data.entregas || [])].sort(
-          (a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)
-        )
-        setHistorialHoy(sorted)
-        localStorage.setItem(cacheKey, JSON.stringify(sorted))
-      } else {
+    if (navigator.onLine) {
+      const queryParams = user.rol === 'REPARTIDOR' ? `&repartidorId=${user.id}` : ''
+      const hastaParam = rango.hasta ? `&hasta=${rango.hasta}` : ''
+      // Promise.allSettled en vez de Promise.all: con señal débil en ruta,
+      // que falle uno de los 3 pedidos no debe borrar los que sí llegaron bien.
+      const [resConf, resCanc, resCargasCamion] = await Promise.allSettled([
+        api.get(`/entregas?confirmada=true&desde=${rango.desde}${hastaParam}&limit=100${queryParams}`),
+        api.get(`/entregas?cancelada=true&desde=${rango.desde}${hastaParam}&limit=100${queryParams}`),
+        // Admin/Supervisor ven las cargas en camión de todos los repartidores,
+        // igual que ya ven las entregas de todos (sin filtrar por operadorId).
+        api.get(`/cargas?tipoCarga=CAMION${user.rol === 'REPARTIDOR' ? `&operadorId=${user.id}` : ''}&desde=${rango.desde}${hastaParam}&limit=100`),
+      ])
+      if (resConf.status === 'rejected' && resCanc.status === 'rejected' && resCargasCamion.status === 'rejected') {
         setHistorialHoy(safeParseJSON(cacheKey))
+        return
       }
-    } catch {
+      const entregasConf = resConf.status === 'fulfilled' ? (resConf.value.data.entregas || []) : []
+      const entregasCanc = resCanc.status === 'fulfilled' ? (resCanc.value.data.entregas || []) : []
+      const cargasCamion = resCargasCamion.status === 'fulfilled' ? (resCargasCamion.value.data.cargas || []) : []
+      const entregasNorm = [...entregasConf, ...entregasCanc].map(e => ({ ...e, _tipo: 'entrega' }))
+      const cargasNorm = cargasCamion.map(c => ({ ...c, _tipo: 'carga_camion' }))
+      const sorted = [...entregasNorm, ...cargasNorm].sort(
+        (a, b) => new Date(b.updatedAt || b.fechaCarga) - new Date(a.updatedAt || a.fechaCarga)
+      )
+      setHistorialHoy(sorted)
+      localStorage.setItem(cacheKey, JSON.stringify(sorted))
+    } else {
       setHistorialHoy(safeParseJSON(cacheKey))
     }
   }
@@ -889,6 +904,7 @@ export default function RepartoPage() {
       setEntregaParaImprimir(null)
       setVentaParaImprimir(res.data)
       fetchCamionStock(selectedCamionId)
+      fetchHistorialHoy()
       setTimeout(() => {
         if (window.bluetoothSerial) {
           buscarImpresoras()
@@ -901,6 +917,19 @@ export default function RepartoPage() {
     } finally {
       setVentaGuardando(false)
     }
+  }
+
+  const reimprimirVentaCamion = (carga) => {
+    setEntregaParaImprimir(null)
+    setVentaParaImprimir(carga)
+    setModalDetalleCamion(false)
+    setTimeout(() => {
+      if (window.bluetoothSerial) {
+        buscarImpresoras()
+      } else {
+        window.print()
+      }
+    }, 150)
   }
 
   const imprimirVentaCamionBluetooth = async (carga, deviceAddress) => {
@@ -1022,10 +1051,13 @@ export default function RepartoPage() {
 
   // Filtros predefinidos (hoy/7d/30d) se disparan solos; el rango
   // personalizado espera a que el usuario toque "Buscar".
+  // Depende también de `user` porque al cargar la página el usuario puede
+  // resolverse después del primer render, y si no reintentamos acá el
+  // historial queda vacío hasta que el usuario fuerce un refresco manual.
   useEffect(() => {
     if (filtroHistorial === 'personalizado') return
     fetchHistorialHoy()
-  }, [filtroHistorial])
+  }, [filtroHistorial, user])
 
   useEffect(() => {
     fetchRuta()
@@ -1130,6 +1162,9 @@ export default function RepartoPage() {
       return
     }
     setSeccion(nuevaSeccion)
+    if (nuevaSeccion === 'historial' && filtroHistorial !== 'personalizado') {
+      fetchHistorialHoy()
+    }
   }
 
   // Seleccionar remisión para entregar
@@ -1480,16 +1515,99 @@ export default function RepartoPage() {
                   )}
                 </div>
 
-                {historialHoy.length === 0 ? (
-                  <EmptyState icon="ti-history" message="No tienes entregas realizadas o canceladas en este período" />
-                ) : (
+                {(() => {
+                  const countEntregas = historialHoy.filter(e => e._tipo === 'entrega').length
+                  const countCamion = historialHoy.filter(e => e._tipo === 'carga_camion').length
+                  return (
+                    <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+                      <button
+                        className={`btn btn-sm ${filtroTipoHistorial === 'todas' ? 'btn-primary' : 'btn-secondary'}`}
+                        onClick={() => setFiltroTipoHistorial('todas')}
+                      >
+                        Todas ({historialHoy.length})
+                      </button>
+                      <button
+                        className={`btn btn-sm ${filtroTipoHistorial === 'entregas' ? 'btn-primary' : 'btn-secondary'}`}
+                        onClick={() => setFiltroTipoHistorial('entregas')}
+                      >
+                        Entregas ({countEntregas})
+                      </button>
+                      <button
+                        className={`btn btn-sm ${filtroTipoHistorial === 'camion' ? 'btn-primary' : 'btn-secondary'}`}
+                        onClick={() => setFiltroTipoHistorial('camion')}
+                      >
+                        En camión ({countCamion})
+                      </button>
+                    </div>
+                  )
+                })()}
+
+                {(() => {
+                  const historialFiltrado = historialHoy.filter(e => {
+                    if (filtroTipoHistorial === 'entregas') return e._tipo === 'entrega'
+                    if (filtroTipoHistorial === 'camion') return e._tipo === 'carga_camion'
+                    return true
+                  })
+                  if (historialFiltrado.length === 0) {
+                    return (
+                      <EmptyState
+                        icon="ti-history"
+                        message={
+                          filtroTipoHistorial === 'camion'
+                            ? 'No tenés ventas en camión registradas en este período'
+                            : 'No tenés entregas realizadas o canceladas en este período'
+                        }
+                      />
+                    )
+                  }
+                  return (
                 <div className="reparto-grid">
-                  {historialHoy.map(e => {
+                  {historialFiltrado.map(e => {
+                    if (e._tipo === 'carga_camion') {
+                      const monto = Number(e.cantidad) * Number(e.precioUnitario)
+                      return (
+                        <div
+                          key={`carga-${e.id}`}
+                          className="reparto-card"
+                          style={{ opacity: 0.85, cursor: 'pointer' }}
+                          onClick={() => {
+                            setCargaCamionSeleccionada(e)
+                            setModalDetalleCamion(true)
+                          }}
+                        >
+                          <div className="reparto-card-head">
+                            <span className="reparto-card-num">{e.numero}</span>
+                            <span className="badge badge-ALQUILADO">En camión</span>
+                          </div>
+
+                          <div className="reparto-card-cli">{e.cliente?.nombre}</div>
+
+                          <div className="reparto-card-addr">
+                            <i className="ti ti-cylinder" style={{ color: 'var(--text-muted)', marginTop: 2 }} />
+                            <span>{e.tubo?.gas} — Tubo {e.tuboId}</span>
+                          </div>
+
+                          <div className="reparto-card-meta">
+                            <span><i className="ti ti-scale" /> {formatNumberSpanish(e.cantidad)} {e.unidad}</span>
+                            {e.metodoPago && <span><i className="ti ti-credit-card" /> {e.metodoPago}</span>}
+                            <span><i className="ti ti-currency-dollar" /> {monto.toLocaleString('es-PY')} GS</span>
+                          </div>
+
+                          {user.rol !== 'REPARTIDOR' && e.operador && (
+                            <div style={{ fontSize: 11, color: 'var(--text-secondary)', background: 'var(--surface-2)', padding: '4px 8px', borderRadius: 4, display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                              <i className="ti ti-truck" style={{ color: 'var(--blue)' }} />
+                              <span>Chofer: <strong>{e.operador.nombre || e.operador.username}</strong></span>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    }
+
                     const tipo = TIPO_INFO[e.tipoOperacion] || { label: e.tipoOperacion, className: 'badge-OPERADOR' }
                     return (
-                      <div 
-                        key={e.id} 
-                        className="reparto-card" 
+                      <div
+                        key={e.id}
+                        className="reparto-card"
                         style={{ opacity: 0.85, cursor: 'pointer' }}
                         onClick={() => {
                           setEntregaSeleccionada(e)
@@ -1528,7 +1646,8 @@ export default function RepartoPage() {
                     )
                   })}
                 </div>
-                )}
+                  )
+                })()}
               </>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -2645,6 +2764,73 @@ export default function RepartoPage() {
             <div className="ticket-footer" style={{ textAlign: 'center', borderTop: '1px dashed #000', paddingTop: '8px', marginTop: '16px', fontSize: '10px' }}>
               ¡Gracias por su preferencia!
             </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Modal de Detalle de Venta en Camión desde Historial */}
+      <Modal
+        open={modalDetalleCamion}
+        title={`Venta en Camión: ${cargaCamionSeleccionada?.numero || ''}`}
+        onClose={() => setModalDetalleCamion(false)}
+        width={400}
+        footer={
+          <div style={{ display: 'flex', gap: 10, width: '100%' }}>
+            <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setModalDetalleCamion(false)}>
+              Cerrar
+            </button>
+            <button
+              className="btn btn-primary"
+              style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+              onClick={() => reimprimirVentaCamion(cargaCamionSeleccionada)}
+            >
+              <i className="ti ti-printer" /> Reimprimir
+            </button>
+          </div>
+        }
+      >
+        {cargaCamionSeleccionada && (
+          <div className="ticket-preview">
+            <div style={{ margin: '4px 0 10px', fontSize: '11px' }}>
+              <strong>Cliente:</strong> {cargaCamionSeleccionada.cliente?.nombre}<br />
+              <strong>Fecha:</strong> {new Date(cargaCamionSeleccionada.fechaCarga).toLocaleString('es-PY')}<br />
+              <strong>Chofer:</strong> {cargaCamionSeleccionada.operador?.nombre || cargaCamionSeleccionada.operador?.username || ''}
+            </div>
+
+            <table className="ticket-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px dashed #000' }}>
+                  <th style={{ textAlign: 'left', paddingBottom: '4px' }}>Tubo / Gas</th>
+                  <th style={{ textAlign: 'center', paddingBottom: '4px' }}>Cant.</th>
+                  <th style={{ textAlign: 'right', paddingBottom: '4px' }}>Subtotal</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td style={{ paddingTop: '6px' }}>
+                    <strong>{cargaCamionSeleccionada.tuboId}</strong><br />
+                    <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>{cargaCamionSeleccionada.tubo?.gas}</span>
+                  </td>
+                  <td style={{ textAlign: 'center', paddingTop: '6px' }}>
+                    {formatNumberSpanish(cargaCamionSeleccionada.cantidad)} {cargaCamionSeleccionada.unidad}
+                  </td>
+                  <td style={{ textAlign: 'right', paddingTop: '6px', fontWeight: 600 }}>
+                    {(Number(cargaCamionSeleccionada.cantidad) * Number(cargaCamionSeleccionada.precioUnitario)).toLocaleString('es-PY')} GS
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div style={{ margin: '10px 0', fontSize: '11px' }}>
+              <strong>Forma de pago:</strong> {cargaCamionSeleccionada.metodoPago || '-'}<br />
+              <strong>Recibido:</strong> {Number(cargaCamionSeleccionada.montoRecibido || 0).toLocaleString('es-PY')} GS
+            </div>
+
+            {cargaCamionSeleccionada.observaciones && (
+              <div style={{ fontSize: 11, borderTop: '1px dashed #ddd', paddingTop: 6 }}>
+                <strong>Obs:</strong> <ObservacionCell texto={cargaCamionSeleccionada.observaciones} titulo="Observaciones de la venta" maxWidth={280} />
+              </div>
+            )}
           </div>
         )}
       </Modal>

@@ -35,10 +35,12 @@ const ventaCamionSchema = z.object({
 // ─── GET /api/cargas ──────────────────────────────────────────────────────────
 router.get('/', async (req, res, next) => {
   try {
-    const { tuboId, tipoGas, desde, hasta, page = 1, limit = 50 } = req.query
+    const { tuboId, tipoGas, tipoCarga, operadorId, desde, hasta, page = 1, limit = 50 } = req.query
     const where = {}
-    if (tuboId)  where.tuboId  = tuboId
-    if (tipoGas) where.tipoGas = tipoGas
+    if (tuboId)     where.tuboId     = tuboId
+    if (tipoGas)    where.tipoGas    = tipoGas
+    if (tipoCarga)  where.tipoCarga  = tipoCarga
+    if (operadorId) where.operadorId = operadorId
     if (desde || hasta) {
       where.fechaCarga = {}
       if (desde) where.fechaCarga.gte = new Date(desde)
@@ -51,6 +53,7 @@ router.get('/', async (req, res, next) => {
         include: {
           tubo:     { select: { id: true, serie: true, gas: true } },
           operador: { select: { id: true, username: true, nombre: true } },
+          cliente:  { select: { id: true, nombre: true, ruc: true } },
         },
         orderBy: { fechaCarga: 'desc' },
         skip: (Number(page) - 1) * Number(limit),
