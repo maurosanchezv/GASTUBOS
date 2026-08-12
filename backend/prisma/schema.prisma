@@ -499,8 +499,10 @@ model CilindroTerceroInfo {
   estado          EstadoTercero @default(PENDIENTE)
   observaciones   String?
 
-  clienteId       String
-  cliente         Cliente       @relation(fields: [clienteId], references: [id])
+  // Opcional: los recibidos por retorno directo en Cargas quedan sin cliente
+  // hasta completarse después desde esta misma pantalla.
+  clienteId       String?
+  cliente         Cliente?      @relation(fields: [clienteId], references: [id])
 
   entregaId       String?
   entrega         Entrega?      @relation(fields: [entregaId], references: [id])

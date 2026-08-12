@@ -117,6 +117,38 @@ router.get('/', async (req, res, next) => {
   }
 })
 
+// ─── POST /api/cilindros-terceros ─────────────────────────────────────────────
+// Registra un cilindro de tercero recibido por retorno directo (sin entrega
+// asociada), por ejemplo al escanear un código desconocido en Cargas.
+router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
+  try {
+    const { gas, capacidadLitros, capacidadKg, observaciones } = req.body
+
+    if (!gas || !gas.trim()) {
+      return res.status(400).json({ error: 'El gas es obligatorio' })
+    }
+    if (!capacidadLitros && !capacidadKg) {
+      return res.status(400).json({ error: 'Ingresá la capacidad del cilindro' })
+    }
+
+    const registro = await prisma.cilindroTerceroInfo.create({
+      data: {
+        gas: gas.trim(),
+        capacidadLitros: capacidadLitros !== undefined && capacidadLitros !== null && capacidadLitros !== '' ? Number(capacidadLitros) : null,
+        capacidadKg: capacidadKg !== undefined && capacidadKg !== null && capacidadKg !== '' ? Number(capacidadKg) : null,
+        estado: 'PENDIENTE',
+        clienteId: null,
+        repartidorId: req.user.id,
+        observaciones: observaciones || undefined,
+      },
+    })
+
+    res.status(201).json(registro)
+  } catch (error) {
+    next(error)
+  }
+})
+
 // ─── POST /api/cilindros-terceros/:id/adquirir ────────────────────────────────
 router.post('/:id/adquirir', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
   try {

@@ -1,8 +1,11 @@
 // gastubos/frontend/src/pages/CargasPage.jsx
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Html5Qrcode } from 'html5-qrcode'
 import api from '../services/api.js'
 import { PageHeader, Modal, FormGroup, Spinner, EmptyState, GasDot, StateBadge, useToast, formatCapacidad, ObservacionCell } from '../components/ui.jsx'
 import { useAuthStore } from '../store/authStore.js'
+
+const SCANNER_RETORNO_ID = 'cargas-retorno-qr-reader'
 
 const TIPO_GAS_LABEL = {
   CO2:             'CO₂',
@@ -38,10 +41,13 @@ const GAS_STRING_TO_ENUM = {
   'Nitrógeno': 'NITROGENO', 'Nitrogeno': 'NITROGENO',
   'Aire comprimido': 'AIRE_COMPRIMIDO',
   'Mezcla': 'MEZCLA_CO2_ARGON',
+  'Mezcla especial': 'MEZCLA_CO2_ARGON',
   'Acetileno': 'ACETILENO',
 }
 
 const ESTADOS_CARGABLES = ['VACIO', 'DEVUELTO', 'DISPONIBLE']
+const ESTADOS_CON_CLIENTE = ['ENTREGADO', 'ALQUILADO']
+const GASES_TERCERO = ['Oxígeno', 'CO2', 'Argón', 'Nitrógeno', 'Aire comprimido', 'Mezcla CO2/Argón', 'Acetileno']
 
 const formatNumberSpanish = (val) => {
   const num = Number(val)
@@ -79,6 +85,19 @@ export default function CargasPage() {
   const [filtroHasta, setFiltroHasta] = useState('')
   const [calcPrecio, setCalcPrecio] = useState('')       // SIEMPRE manual, nunca se recalcula
   const [calcMonto, setCalcMonto] = useState('')
+
+  // Retorno de cilindros: escaneo/tipeo de código, reconoce propio vs tercero
+  const [codigoRetorno, setCodigoRetorno] = useState('')
+  const [buscandoRetorno, setBuscandoRetorno] = useState(false)
+  const [terceroPendiente, setTerceroPendiente] = useState(null) // { codigo } cuando el código no matchea ningún tubo
+  const [terceroGas, setTerceroGas] = useState('')
+  const [terceroCapacidad, setTerceroCapacidad] = useState('')
+  const [guardandoTercero, setGuardandoTercero] = useState(false)
+  const [historialRetorno, setHistorialRetorno] = useState([]) // feedback de lo procesado en esta sesión
+  const [confirmarDevolucion, setConfirmarDevolucion] = useState(null) // tubo que figura entregado/alquilado, pendiente de confirmar
+  const [procesandoDevolucion, setProcesandoDevolucion] = useState(false)
+  const [escaneandoRetorno, setEscaneandoRetorno] = useState(false)
+  const scannerRetornoRef = useRef(null)
 
   const limit = 50
 
@@ -136,8 +155,139 @@ export default function CargasPage() {
 
   useEffect(() => {
     if (tab === 'pendientes') loadTubos()
-    else loadHistorial()
+    else if (tab === 'historial') loadHistorial()
   }, [tab, loadTubos, loadHistorial])
+
+  useEffect(() => {
+    return () => {
+      if (scannerRetornoRef.current) {
+        scannerRetornoRef.current.stop().catch(() => {})
+      }
+    }
+  }, [])
+
+  function registrarHistorialRetorno(item) {
+    setHistorialRetorno(prev => [{ ...item, id: Date.now() + Math.random() }, ...prev].slice(0, 30))
+  }
+
+  const startScannerRetorno = () => {
+    setEscaneandoRetorno(true)
+    setTimeout(() => {
+      const scanner = new Html5Qrcode(SCANNER_RETORNO_ID)
+      scannerRetornoRef.current = scanner
+      scanner.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 250, height: 250 } },
+        (text) => {
+          let id = text.trim()
+          if (id.includes('/tubos/')) {
+            id = id.split('/tubos/')[1].split('?')[0].split('/')[0]
+          }
+          stopScannerRetorno()
+          buscarRetorno(id)
+        },
+        () => {}
+      ).catch(() => {
+        toast('No se pudo acceder a la cámara', 'error')
+        setEscaneandoRetorno(false)
+      })
+    }, 250)
+  }
+
+  const stopScannerRetorno = async () => {
+    if (scannerRetornoRef.current) {
+      try {
+        await scannerRetornoRef.current.stop()
+        scannerRetornoRef.current = null
+      } catch (err) {
+        console.error('Error al apagar el escáner', err)
+      }
+    }
+    setEscaneandoRetorno(false)
+  }
+
+  async function buscarRetorno(codigoRaw) {
+    const codigo = (codigoRaw || '').trim().toUpperCase()
+    if (!codigo || buscandoRetorno) return
+    setBuscandoRetorno(true)
+    try {
+      const { data: tubo } = await api.get(`/tubos/${encodeURIComponent(codigo)}`)
+
+      if (ESTADOS_CARGABLES.includes(tubo.estado)) {
+        setCodigoRetorno('')
+        registrarHistorialRetorno({ codigo, tipo: 'propio', mensaje: `Tubo propio (${tubo.estado}) — abriendo carga` })
+        abrirModalConTubo(tubo)
+        return
+      }
+
+      if (ESTADOS_CON_CLIENTE.includes(tubo.estado)) {
+        setCodigoRetorno('')
+        setConfirmarDevolucion(tubo)
+        return
+      }
+
+      toast(`El tubo ${codigo} está en estado ${tubo.estado}, no se puede procesar como retorno`, 'error')
+      registrarHistorialRetorno({ codigo, tipo: 'error', mensaje: `Estado ${tubo.estado}, no se procesó` })
+    } catch (err) {
+      if (err.response?.status === 404) {
+        setTerceroPendiente({ codigo })
+        setTerceroGas('')
+        setTerceroCapacidad('')
+        setCodigoRetorno('')
+      } else {
+        toast(err.response?.data?.error || 'Error al buscar el código', 'error')
+      }
+    } finally {
+      setBuscandoRetorno(false)
+    }
+  }
+
+  function cancelarConfirmarDevolucion() {
+    registrarHistorialRetorno({ codigo: confirmarDevolucion.id, tipo: 'error', mensaje: 'Cancelado — no se registró ningún cambio' })
+    setConfirmarDevolucion(null)
+  }
+
+  async function confirmarDevolucionYCargar() {
+    if (!confirmarDevolucion) return
+    const tubo = confirmarDevolucion
+    setProcesandoDevolucion(true)
+    try {
+      await api.post('/devoluciones', { tuboId: tubo.id })
+      setConfirmarDevolucion(null)
+      registrarHistorialRetorno({ codigo: tubo.id, tipo: 'propio', mensaje: 'Tubo propio devuelto — abriendo carga' })
+      abrirModalConTubo({ ...tubo, estado: 'DEVUELTO', clienteId: null })
+    } catch (err) {
+      toast(err.response?.data?.error || 'Error al registrar la devolución', 'error')
+    } finally {
+      setProcesandoDevolucion(false)
+    }
+  }
+
+  async function guardarTercero() {
+    if (!terceroPendiente) return
+    if (!terceroGas) return toast('Seleccioná el gas', 'error')
+    if (!terceroCapacidad || Number(terceroCapacidad) <= 0) return toast('Ingresá la capacidad', 'error')
+
+    const esKg = ['acetileno', 'co2'].includes(terceroGas.toLowerCase())
+    setGuardandoTercero(true)
+    try {
+      await api.post('/cilindros-terceros', {
+        gas: terceroGas,
+        capacidadKg: esKg ? Number(terceroCapacidad) : undefined,
+        capacidadLitros: !esKg ? Number(terceroCapacidad) : undefined,
+        observaciones: `Recibido por retorno directo en Cargas. Código escaneado: ${terceroPendiente.codigo}`,
+      })
+      toast('Cilindro de tercero registrado, pendiente de asignar cliente', 'success')
+      registrarHistorialRetorno({ codigo: terceroPendiente.codigo, tipo: 'tercero', mensaje: `Registrado como cilindro de tercero (${terceroGas})` })
+      setTerceroPendiente(null)
+      setTerceroGas('')
+      setTerceroCapacidad('')
+    } catch (err) {
+      toast(err.response?.data?.error || 'Error al registrar el cilindro de tercero', 'error')
+    } finally {
+      setGuardandoTercero(false)
+    }
+  }
 
   function abrirModalConTubo(tubo) {
     const gasEnum = GAS_STRING_TO_ENUM[tubo.gas] || ''
@@ -255,20 +405,24 @@ export default function CargasPage() {
     <>
       <PageHeader
         title="Cargas y Recargas"
-        subtitle={tab === 'pendientes'
-          ? `${tubos.length} tubo${tubos.length !== 1 ? 's' : ''} para cargar`
-          : `${total} registro${total !== 1 ? 's' : ''} en historial`}
+        subtitle={
+          tab === 'pendientes' ? `${tubos.length} tubo${tubos.length !== 1 ? 's' : ''} para cargar`
+          : tab === 'retorno' ? 'Escaneá o escribí el código del cilindro que vuelve'
+          : `${total} registro${total !== 1 ? 's' : ''} en historial`
+        }
         actions={
           <>
-            <button
-              className="btn btn-sm"
-              onClick={tab === 'pendientes' ? loadTubos : loadHistorial}
-              disabled={loading}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-            >
-              <i className={`ti ti-refresh ${loading ? 'ti-spin' : ''}`} />
-              Actualizar
-            </button>
+            {tab !== 'retorno' && (
+              <button
+                className="btn btn-sm"
+                onClick={tab === 'pendientes' ? loadTubos : loadHistorial}
+                disabled={loading}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                <i className={`ti ti-refresh ${loading ? 'ti-spin' : ''}`} />
+                Actualizar
+              </button>
+            )}
             {(user?.rol === 'ADMIN' || user?.rol === 'SUPERVISOR' || user?.rol === 'OPERADOR') && (
               <button className="btn btn-primary btn-sm" onClick={abrirModalSalon}>
                 <i className="ti ti-plus" /> Carga en salón
@@ -283,6 +437,7 @@ export default function CargasPage() {
         <div style={{ display: 'flex', gap: 4, marginBottom: 16, borderBottom: '1px solid var(--border)', paddingBottom: 0 }}>
           {[
             { key: 'pendientes', label: 'Tubos para cargar', icon: 'ti-cylinder' },
+            { key: 'retorno',    label: 'Retorno de Cilindros', icon: 'ti-arrow-back-up' },
             { key: 'historial',  label: 'Historial de cargas', icon: 'ti-history' },
           ].map(t => (
             <button
@@ -596,6 +751,140 @@ export default function CargasPage() {
                 <button className="btn btn-sm" disabled={page === 1} onClick={() => setPage(p => p - 1)}>← Anterior</button>
                 <span style={{ fontSize: 12, color: 'var(--text-muted)', alignSelf: 'center' }}>{page} / {totalPages}</span>
                 <button className="btn btn-sm" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>Siguiente →</button>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* TAB: Retorno de Cilindros */}
+        {tab === 'retorno' && (
+          <>
+            <div className="card" style={{ padding: 16, marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+                Código del cilindro
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  autoFocus
+                  placeholder="Escaneá o escribí el código y presioná Enter..."
+                  value={codigoRetorno}
+                  onChange={e => setCodigoRetorno(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); buscarRetorno(codigoRetorno) } }}
+                  disabled={buscandoRetorno}
+                  style={{ flex: 1, height: 42, fontSize: 14 }}
+                />
+                <button
+                  className="btn btn-primary"
+                  onClick={() => buscarRetorno(codigoRetorno)}
+                  disabled={buscandoRetorno || !codigoRetorno.trim()}
+                  style={{ height: 42 }}
+                >
+                  {buscandoRetorno ? <Spinner size={16} /> : <><i className="ti ti-search" /> Buscar</>}
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  onClick={startScannerRetorno}
+                  disabled={buscandoRetorno}
+                  title="Escanear con la cámara"
+                  style={{ height: 42, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                >
+                  <i className="ti ti-qrcode" /> Escanear
+                </button>
+              </div>
+              <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '8px 0 0' }}>
+                Si el código corresponde a un tubo propio, se abre directo el formulario de carga.
+                Si no existe en el sistema, se pide gas y capacidad para registrarlo como cilindro de tercero.
+              </p>
+            </div>
+
+            {confirmarDevolucion && (
+              <div className="card" style={{ padding: 16, marginBottom: 16, border: '1px solid var(--amber, #d97706)' }}>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>
+                  <i className="ti ti-alert-triangle" style={{ color: 'var(--amber, #d97706)' }} /> Tubo {confirmarDevolucion.id} figura entregado
+                </div>
+                <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '0 0 12px' }}>
+                  Según el sistema, este tubo está {confirmarDevolucion.estado === 'ALQUILADO' ? 'alquilado a' : 'entregado a'}{' '}
+                  <strong>{confirmarDevolucion.cliente?.nombre || 'un cliente'}</strong>. ¿Confirmás que volvió físicamente y continuar a cargarlo?
+                  Si escaneaste el código equivocado, cancelá y no se va a modificar nada.
+                </p>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="btn btn-sm" onClick={cancelarConfirmarDevolucion} disabled={procesandoDevolucion}>
+                    Cancelar
+                  </button>
+                  <button className="btn btn-primary btn-sm" onClick={confirmarDevolucionYCargar} disabled={procesandoDevolucion}>
+                    {procesandoDevolucion ? 'Procesando...' : 'Sí, volvió — continuar a cargar'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {terceroPendiente && (
+              <div className="card" style={{ padding: 16, marginBottom: 16, border: '1px solid var(--amber, #d97706)' }}>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>
+                  <i className="ti ti-alert-triangle" style={{ color: 'var(--amber, #d97706)' }} /> Código no encontrado: {terceroPendiente.codigo}
+                </div>
+                <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '0 0 12px' }}>
+                  No hay ningún tubo registrado con ese código. Completá los datos para registrarlo como cilindro de tercero pendiente.
+                </p>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  <FormGroup label="Gas" required>
+                    <select value={terceroGas} onChange={e => setTerceroGas(e.target.value)}>
+                      <option value="">Seleccioná...</option>
+                      {GASES_TERCERO.map(g => <option key={g} value={g}>{g}</option>)}
+                    </select>
+                  </FormGroup>
+                  <FormGroup label={`Capacidad (${['acetileno', 'co2'].includes(terceroGas.toLowerCase()) ? 'kg' : 'litros'})`} required>
+                    <input
+                      type="number" min="0" step="0.01"
+                      value={terceroCapacidad}
+                      onChange={e => setTerceroCapacidad(e.target.value)}
+                    />
+                  </FormGroup>
+                </div>
+                <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                  <button className="btn btn-sm" onClick={() => setTerceroPendiente(null)} disabled={guardandoTercero}>
+                    Cancelar
+                  </button>
+                  <button className="btn btn-primary btn-sm" onClick={guardarTercero} disabled={guardandoTercero}>
+                    {guardandoTercero ? 'Guardando...' : 'Registrar cilindro de tercero'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {escaneandoRetorno && (
+              <Modal
+                open={escaneandoRetorno}
+                title="Escanear Cilindro"
+                onClose={stopScannerRetorno}
+                width={400}
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 15, alignItems: 'center', background: '#000', padding: 12, borderRadius: 8 }}>
+                  <div id={SCANNER_RETORNO_ID} style={{ width: '100%', maxWidth: '320px', overflow: 'hidden' }} />
+                  <button className="btn btn-danger" onClick={stopScannerRetorno} style={{ width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, height: 42 }}>
+                    <i className="ti ti-player-stop" style={{ fontSize: 16 }} /> Apagar Cámara / Cancelar
+                  </button>
+                </div>
+              </Modal>
+            )}
+
+            {historialRetorno.length === 0 ? (
+              <EmptyState icon="ti-arrow-back-up" message="Todavía no escaneaste ningún cilindro en esta sesión" />
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {historialRetorno.map(item => (
+                  <div
+                    key={item.id}
+                    className="card"
+                    style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}
+                  >
+                    <span className={`badge ${item.tipo === 'propio' ? 'badge-CARGADO' : item.tipo === 'tercero' ? 'badge-ALQUILADO' : 'badge-DE_BAJA'}`}>
+                      {item.tipo === 'propio' ? 'Propio' : item.tipo === 'tercero' ? 'Tercero' : 'Error'}
+                    </span>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{item.codigo}</span>
+                    <span style={{ color: 'var(--text-secondary)' }}>{item.mensaje}</span>
+                  </div>
+                ))}
               </div>
             )}
           </>
