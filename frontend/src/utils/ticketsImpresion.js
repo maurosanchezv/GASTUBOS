@@ -387,3 +387,82 @@ export async function construirBufferTicketRemisionInicial(entrega, config) {
   builder.feedLines(4)
   return builder.getBuffer()
 }
+
+// Comprobante de retorno de cilindro, registrado desde oficina (Cargas), no
+// desde una entrega. No es una venta (sin tabla de precios): sirve como
+// constancia firmable de que el cliente entregó el cilindro de vuelta.
+// retorno: { fecha, usuario, cliente, tuboId, gas, capacidad, estado, observaciones }
+// config: { branding: {isotipoSrc, logoSrc}, nombreEmpresa, direccion, telefono, paperWidth }
+export async function construirBufferTicketRetorno(retorno, config) {
+  const { branding, nombreEmpresa, direccion, telefono, paperWidth } = config
+  const { fecha, usuario, cliente, tuboId, gas, capacidad, estado, observaciones } = retorno
+
+  let logoBytes = null
+  try {
+    logoBytes = await generarLogoEscPos(branding.isotipoSrc, branding.logoSrc)
+  } catch (e) {
+    console.warn('No se pudo generar el logo para la impresion:', e)
+  }
+
+  const builder = new EscPosBuilder()
+  const width = paperWidth
+  const { wrapText, line, doubleLine } = crearHelpersTicket(width)
+
+  builder.initialize()
+  if (logoBytes) {
+    builder.addBytes(logoBytes)
+    builder.addTextLine('')
+  } else {
+    builder.alignCenter().boldOn().doubleSizeOn().addTextLine((nombreEmpresa || 'GASTUBOS').toUpperCase()).doubleSizeOff()
+  }
+
+  builder.alignCenter()
+  if (direccion) {
+    wrapText(direccion, width).forEach(l => builder.addTextLine(l))
+  }
+  if (telefono) {
+    wrapText('Tel: ' + telefono, width).forEach(l => builder.addTextLine(l))
+  }
+  builder.addTextLine(doubleLine())
+
+  builder.alignCenter().boldOn().addTextLine('COMPROBANTE DE RETORNO').addTextLine('DE CILINDRO').boldOff()
+  builder.addTextLine(doubleLine())
+
+  builder.alignLeft()
+  builder.addTextLine('Fecha: ' + new Date(fecha).toLocaleString('es-PY'))
+  wrapText('Registrado por: ' + (usuario || '-'), width).forEach(l => builder.addTextLine(l))
+  wrapText('Cliente: ' + (cliente || 'No identificado'), width).forEach(l => builder.addTextLine(l))
+  builder.addTextLine(line())
+
+  if (tuboId) {
+    builder.boldOn().addTextLine('Tubo: ' + tuboId).boldOff()
+  } else {
+    builder.boldOn().addTextLine('Cilindro de tercero').boldOff()
+    builder.addTextLine('(sin identificar)')
+  }
+  builder.addTextLine('Gas: ' + (gas || '-'))
+  if (capacidad) {
+    builder.addTextLine('Capacidad: ' + capacidad)
+  }
+  builder.addTextLine('Estado: ' + (estado || '-'))
+  builder.addTextLine(line())
+
+  if (observaciones) {
+    wrapText('Obs: ' + observaciones, width).forEach(l => builder.addTextLine(l))
+    builder.addTextLine(line())
+  }
+
+  builder.addTextLine('').addTextLine('')
+  const lineLengthFirma = width >= 48 ? 18 : 13
+  const soloLine = '-'.repeat(lineLengthFirma)
+  const padCentro = Math.max(0, Math.floor((width - lineLengthFirma) / 2))
+  builder.addTextLine(' '.repeat(padCentro) + soloLine)
+  const labelFirma = 'Firma Cliente'
+  const padLabel = Math.max(0, Math.floor((width - labelFirma.length) / 2))
+  builder.addTextLine(' '.repeat(padLabel) + labelFirma)
+  builder.addTextLine('')
+
+  builder.addTextLine('').addTextLine('').addTextLine('').addTextLine('').addTextLine('').addTextLine('')
+  builder.feedLines(4)
+  return builder.getBuffer()
+}

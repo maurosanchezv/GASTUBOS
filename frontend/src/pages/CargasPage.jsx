@@ -1,9 +1,14 @@
 // gastubos/frontend/src/pages/CargasPage.jsx
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { Html5Qrcode } from 'html5-qrcode'
 import api from '../services/api.js'
 import { PageHeader, Modal, FormGroup, Spinner, EmptyState, GasDot, StateBadge, useToast, formatCapacidad, ObservacionCell } from '../components/ui.jsx'
 import { useAuthStore } from '../store/authStore.js'
+import { useConfigStore } from '../store/configStore.js'
+import { getBrandingSources } from '../utils/logosSvg.js'
+import { construirBufferTicketRetorno } from '../utils/ticketsImpresion.js'
+import { conectarImpresoraWebBluetooth, enviarBufferWebBluetooth, esNavegadorMovilConWebBluetooth } from '../utils/webBluetoothPrinter.js'
 
 const SCANNER_RETORNO_ID = 'cargas-retorno-qr-reader'
 
@@ -67,6 +72,8 @@ const FORM_INICIAL = {
 export default function CargasPage() {
   const { user } = useAuthStore()
   const { toast } = useToast()
+  const { nombre_empresa, direccion, telefono, isotipo_empresa, logo_empresa } = useConfigStore()
+  const branding = getBrandingSources(isotipo_empresa, logo_empresa)
 
   const [q,        setQ]        = useState('')
   const [tab,      setTab]      = useState('pendientes') // 'pendientes' | 'historial'
@@ -99,6 +106,11 @@ export default function CargasPage() {
   const [procesandoDevolucion, setProcesandoDevolucion] = useState(false)
   const [escaneandoRetorno, setEscaneandoRetorno] = useState(false)
   const scannerRetornoRef = useRef(null)
+
+  // Ticket de retorno de cilindro: impresión y reimpresión (persistida, ver tab 'retornosHistorial')
+  const [retornoParaImprimir, setRetornoParaImprimir] = useState(null)
+  const [retornosHistorial, setRetornosHistorial] = useState([])
+  const [loadingRetornosHistorial, setLoadingRetornosHistorial] = useState(false)
 
   const limit = 50
 
@@ -157,6 +169,7 @@ export default function CargasPage() {
   useEffect(() => {
     if (tab === 'pendientes') loadTubos()
     else if (tab === 'historial') loadHistorial()
+    else if (tab === 'retornosHistorial') loadRetornosHistorial()
   }, [tab, loadTubos, loadHistorial])
 
   useEffect(() => {
@@ -253,9 +266,24 @@ export default function CargasPage() {
     const tubo = confirmarDevolucion
     setProcesandoDevolucion(true)
     try {
-      await api.post('/devoluciones', { tuboId: tubo.id })
+      // El nombre del cliente se guarda como texto en observaciones porque
+      // Auditoria no tiene un campo estructurado para eso y el tubo pierde
+      // la relación con el cliente apenas se marca como devuelto — sin esto
+      // no habría forma de recuperar el dato al reimprimir más adelante.
+      const clienteNombre = tubo.cliente?.nombre || null
+      await api.post('/devoluciones', { tuboId: tubo.id, observaciones: `Cliente: ${clienteNombre || 'Sin identificar'}` })
       setConfirmarDevolucion(null)
-      registrarHistorialRetorno({ codigo: tubo.id, tipo: 'propio', mensaje: 'Tubo propio devuelto — abriendo carga' })
+      const retorno = {
+        fecha: new Date().toISOString(),
+        usuario: user?.nombre || user?.username || '-',
+        cliente: clienteNombre,
+        tuboId: tubo.id,
+        gas: tubo.gas,
+        capacidad: formatCapacidad(tubo),
+        estado: 'Devuelto',
+        observaciones: null,
+      }
+      registrarHistorialRetorno({ codigo: tubo.id, tipo: 'propio', mensaje: 'Tubo propio devuelto — abriendo carga', retorno })
       abrirModalConTubo({ ...tubo, estado: 'DEVUELTO', clienteId: null })
     } catch (err) {
       toast(err.response?.data?.error || 'Error al registrar la devolución', 'error')
@@ -279,7 +307,20 @@ export default function CargasPage() {
         observaciones: `Recibido por retorno directo en Cargas. Código escaneado: ${terceroPendiente.codigo}`,
       })
       toast('Cilindro de tercero registrado, pendiente de asignar cliente', 'success')
-      registrarHistorialRetorno({ codigo: terceroPendiente.codigo, tipo: 'tercero', mensaje: `Registrado como cilindro de tercero (${terceroGas})` })
+      const retorno = {
+        fecha: new Date().toISOString(),
+        usuario: user?.nombre || user?.username || '-',
+        cliente: null,
+        tuboId: null,
+        gas: terceroGas,
+        // No se usa formatCapacidad acá: decide kg/litros por substring en el
+        // nombre del gas ("co2"), y "Mezcla CO2/Argón" mide en m³ aunque
+        // contenga "CO2" — usamos directo el mismo esKg que ya se usó al guardar.
+        capacidad: `${terceroCapacidad} ${esKg ? 'kg' : 'm³'}`,
+        estado: 'Pendiente de asignar cliente',
+        observaciones: `Código escaneado: ${terceroPendiente.codigo}`,
+      }
+      registrarHistorialRetorno({ codigo: terceroPendiente.codigo, tipo: 'tercero', mensaje: `Registrado como cilindro de tercero (${terceroGas})`, retorno })
       setTerceroPendiente(null)
       setTerceroGas('')
       setTerceroCapacidad('')
@@ -287,6 +328,95 @@ export default function CargasPage() {
       toast(err.response?.data?.error || 'Error al registrar el cilindro de tercero', 'error')
     } finally {
       setGuardandoTercero(false)
+    }
+  }
+
+  // Punto único de despacho de impresión del ticket de retorno, mismo patrón
+  // de tres vías que RepartoPage.jsx/EntregasPage.jsx: nativo (Bluetooth
+  // clásico) → Web Bluetooth en navegador móvil → diálogo del sistema.
+  const dispararImpresionRetorno = (retorno) => {
+    setRetornoParaImprimir(retorno)
+    setTimeout(() => {
+      if (esNavegadorMovilConWebBluetooth()) {
+        imprimirRetornoWebBluetooth(retorno)
+      } else {
+        window.print()
+      }
+    }, 150)
+  }
+
+  const imprimirRetornoWebBluetooth = async (retorno) => {
+    try {
+      const buffer = await construirBufferTicketRetorno(retorno, {
+        branding, nombreEmpresa: nombre_empresa, direccion, telefono, paperWidth: 32,
+      })
+      const conexion = await conectarImpresoraWebBluetooth()
+      await enviarBufferWebBluetooth(conexion, buffer)
+      toast('Impresión enviada correctamente', 'success')
+    } catch (err) {
+      if (err?.name !== 'NotFoundError') { // el usuario cerró el picker sin elegir nada
+        toast('Error al imprimir: ' + (err?.message || String(err)), 'error')
+      }
+    }
+  }
+
+  // "Cliente: X" es el formato que confirmarDevolucionYCargar guarda en las
+  // observaciones de Auditoria (no hay campo estructurado para el cliente en
+  // una devolución). Los registros previos a este cambio no van a matchear
+  // y van a mostrar "No identificado" — no hay forma de recuperar ese dato.
+  function extraerClienteDeObservaciones(obs) {
+    if (!obs) return null
+    const match = obs.match(/Cliente:\s*([^|]+)/)
+    if (!match) return null
+    const nombre = match[1].trim()
+    return nombre && nombre !== 'Sin identificar' ? nombre : null
+  }
+
+  async function loadRetornosHistorial() {
+    setLoadingRetornosHistorial(true)
+    try {
+      const [devRes, terRes] = await Promise.all([
+        api.get('/devoluciones', { params: { limit: 100 } }),
+        api.get('/cilindros-terceros', { params: { limit: 200 } }),
+      ])
+
+      const devoluciones = (devRes.data.registros || []).map(r => ({
+        id: `devolucion:${r.id}`,
+        fecha: r.createdAt,
+        usuario: r.usuario?.nombre || r.usuario?.username || '-',
+        cliente: extraerClienteDeObservaciones(r.observaciones),
+        tuboId: r.tuboId,
+        gas: r.tubo?.gas || '-',
+        capacidad: null,
+        estado: r.estadoNuevo === 'DEVUELTO' ? 'Devuelto' : r.estadoNuevo === 'VACIO' ? 'Vacío' : r.estadoNuevo === 'EN_REVISION' ? 'En revisión' : r.estadoNuevo,
+        observaciones: null,
+      }))
+
+      // Solo los registrados sin entrega asociada: los que trae un
+      // repartidor durante una entrega tienen entregaId y son un flujo
+      // distinto (recambios de la app), no un retorno directo en Cargas.
+      const terceros = (terRes.data.items || [])
+        .filter(item => !item.esRegistrado && item.entregaId == null)
+        .map(item => ({
+          id: `tercero:${item.id}`,
+          fecha: item.createdAt,
+          usuario: item.repartidor?.nombre || '-',
+          cliente: item.cliente?.nombre || null,
+          tuboId: null,
+          gas: item.gas,
+          // No se usa formatCapacidad acá por el mismo motivo que en
+          // guardarTercero: para estos registros conviene leer directo qué
+          // campo quedó cargado en vez de inferir la unidad por el nombre del gas.
+          capacidad: item.capacidadKg != null ? `${item.capacidadKg} kg` : item.capacidadLitros != null ? `${item.capacidadLitros} m³` : null,
+          estado: item.estado === 'PENDIENTE' ? 'Pendiente de asignar cliente' : item.estado,
+          observaciones: item.observaciones,
+        }))
+
+      setRetornosHistorial([...devoluciones, ...terceros].sort((a, b) => new Date(b.fecha) - new Date(a.fecha)))
+    } catch (err) {
+      toast(err.response?.data?.error || 'Error al cargar el historial de retornos', 'error')
+    } finally {
+      setLoadingRetornosHistorial(false)
     }
   }
 
@@ -439,6 +569,7 @@ export default function CargasPage() {
         subtitle={
           tab === 'pendientes' ? `${tubos.length} tubo${tubos.length !== 1 ? 's' : ''} para cargar`
           : tab === 'retorno' ? 'Escaneá o escribí el código del cilindro que vuelve'
+          : tab === 'retornosHistorial' ? `${retornosHistorial.length} retorno${retornosHistorial.length !== 1 ? 's' : ''} registrado${retornosHistorial.length !== 1 ? 's' : ''}`
           : `${total} registro${total !== 1 ? 's' : ''} en historial`
         }
         actions={
@@ -446,11 +577,11 @@ export default function CargasPage() {
             {tab !== 'retorno' && (
               <button
                 className="btn btn-sm"
-                onClick={tab === 'pendientes' ? loadTubos : loadHistorial}
-                disabled={loading}
+                onClick={tab === 'pendientes' ? loadTubos : tab === 'retornosHistorial' ? loadRetornosHistorial : loadHistorial}
+                disabled={loading || loadingRetornosHistorial}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
               >
-                <i className={`ti ti-refresh ${loading ? 'ti-spin' : ''}`} />
+                <i className={`ti ti-refresh ${(loading || loadingRetornosHistorial) ? 'ti-spin' : ''}`} />
                 Actualizar
               </button>
             )}
@@ -469,6 +600,7 @@ export default function CargasPage() {
           {[
             { key: 'pendientes', label: 'Tubos para cargar', icon: 'ti-cylinder' },
             { key: 'retorno',    label: 'Retorno de Cilindros', icon: 'ti-arrow-back-up' },
+            { key: 'retornosHistorial', label: 'Historial de Retornos', icon: 'ti-receipt-2' },
             { key: 'historial',  label: 'Historial de cargas', icon: 'ti-history' },
           ].map(t => (
             <button
@@ -913,14 +1045,80 @@ export default function CargasPage() {
                       {item.tipo === 'propio' ? 'Propio' : item.tipo === 'tercero' ? 'Tercero' : 'Error'}
                     </span>
                     <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{item.codigo}</span>
-                    <span style={{ color: 'var(--text-secondary)' }}>{item.mensaje}</span>
+                    <span style={{ color: 'var(--text-secondary)', flex: 1 }}>{item.mensaje}</span>
+                    {item.retorno && (
+                      <button className="btn btn-sm" onClick={() => dispararImpresionRetorno(item.retorno)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                        <i className="ti ti-printer" /> Imprimir ticket
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
             )}
           </>
         )}
+
+        {/* TAB: Historial de Retornos (persistido, para reimprimir días después) */}
+        {tab === 'retornosHistorial' && (
+          loadingRetornosHistorial ? (
+            <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}><Spinner /></div>
+          ) : retornosHistorial.length === 0 ? (
+            <EmptyState icon="ti-receipt-2" message="Todavía no hay retornos registrados" />
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {retornosHistorial.map(item => (
+                <div
+                  key={item.id}
+                  className="card"
+                  style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, flexWrap: 'wrap' }}
+                >
+                  <span className={`badge ${item.tuboId ? 'badge-CARGADO' : 'badge-ALQUILADO'}`}>
+                    {item.tuboId ? 'Propio' : 'Tercero'}
+                  </span>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{item.tuboId || item.gas}</span>
+                  <span style={{ color: 'var(--text-secondary)' }}>
+                    {item.cliente || 'No identificado'} · {item.estado} · {new Date(item.fecha).toLocaleString('es-PY')}
+                  </span>
+                  <span style={{ flex: 1 }} />
+                  <button className="btn btn-sm" onClick={() => dispararImpresionRetorno(item)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                    <i className="ti ti-printer" /> Reimprimir ticket
+                  </button>
+                </div>
+              ))}
+            </div>
+          )
+        )}
       </div>
+
+      {/* Ticket de retorno: solo visible al imprimir (window.print) */}
+      {retornoParaImprimir && createPortal(
+        <div className="print-ticket-container">
+          <div className="ticket-header">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 15, marginBottom: 10 }}>
+              <img src={branding.isotipoSrc} alt="Isotipo" style={{ width: 40, height: 40, objectFit: 'contain' }} />
+              <img src={branding.logoSrc} alt="Logo" style={{ width: 108, height: 40, objectFit: 'contain' }} />
+            </div>
+            {direccion && <p style={{ margin: 0, fontSize: 10 }}>{direccion}</p>}
+            {telefono && <p style={{ margin: '2px 0 0', fontSize: 10 }}>Tel: {telefono}</p>}
+            <p style={{ margin: '4px 0 0', fontSize: 11, fontWeight: 'bold' }}>COMPROBANTE DE RETORNO DE CILINDRO</p>
+          </div>
+
+          <div style={{ margin: '8px 0', fontSize: 11 }}>
+            <strong>Fecha:</strong> {new Date(retornoParaImprimir.fecha).toLocaleString('es-PY')}<br />
+            <strong>Registrado por:</strong> {retornoParaImprimir.usuario || '-'}<br />
+            <strong>Cliente:</strong> {retornoParaImprimir.cliente || 'No identificado'}<br />
+            <strong>{retornoParaImprimir.tuboId ? 'Tubo:' : 'Cilindro de tercero:'}</strong> {retornoParaImprimir.tuboId || '(sin identificar)'}<br />
+            <strong>Gas:</strong> {retornoParaImprimir.gas}{retornoParaImprimir.capacidad ? ` (${retornoParaImprimir.capacidad})` : ''}<br />
+            <strong>Estado:</strong> {retornoParaImprimir.estado}
+            {retornoParaImprimir.observaciones && <><br /><strong>Obs:</strong> {retornoParaImprimir.observaciones}</>}
+          </div>
+
+          <div className="ticket-signatures">
+            <div className="signature-line">Firma Cliente</div>
+          </div>
+        </div>,
+        document.body
+      )}
 
       {/* Modal de carga */}
       <Modal

@@ -15,6 +15,32 @@ const devolucionSchema = z.object({
   observaciones: z.string().optional(),
 })
 
+// GET /api/devoluciones — historial de devoluciones de tubo propio, para
+// poder reimprimir el comprobante más adelante. No expone el resto del log
+// de auditoría (por eso no reusa /api/auditoria, que está restringido a
+// ADMIN/SUPERVISOR): solo lee filas con accion = 'Devolución registrada'.
+router.get('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
+  try {
+    const { page = 1, limit = 50 } = req.query
+    const where = { accion: 'Devolución registrada' }
+
+    const [registros, total] = await Promise.all([
+      prisma.auditoria.findMany({
+        where,
+        include: {
+          tubo:    { select: { id: true, gas: true } },
+          usuario: { select: { username: true, nombre: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (Number(page) - 1) * Number(limit),
+        take: Number(limit),
+      }),
+      prisma.auditoria.count({ where }),
+    ])
+    res.json({ registros, total })
+  } catch (err) { next(err) }
+})
+
 // POST /api/devoluciones
 router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR', 'REPARTIDOR'), async (req, res, next) => {
   try {
