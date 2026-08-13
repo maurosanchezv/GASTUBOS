@@ -28,6 +28,7 @@ import RepartoPage     from './pages/RepartoPage.jsx'
 import RemisionPage    from './pages/RemisionPage.jsx'
 import CamionesPage    from './pages/CamionesPage.jsx'
 import TuboPublicoPage from './pages/TuboPublicoPage.jsx'  // sin auth
+import DiagnosticoBluetoothPage from './pages/DiagnosticoBluetoothPage.jsx'  // sin auth, herramienta interna
 import CilindrosTercerosPage from './pages/CilindrosTercerosPage.jsx'
 import ProductosPage      from './pages/ProductosPage.jsx'
 import VentaProductosPage from './pages/VentaProductosPage.jsx'
@@ -64,6 +65,9 @@ export default function App() {
       <Routes>
         {/* Pública: página de tubo al escanear QR */}
         <Route path="/tubos/:id" element={<TuboPublicoPage />} />
+
+        {/* Pública: diagnóstico interno de Web Bluetooth (no se linkea desde ningún menú) */}
+        <Route path="/diagnostico-bluetooth" element={<DiagnosticoBluetoothPage />} />
 
         {/* Auth */}
         <Route path="/login" element={<LoginPage />} />

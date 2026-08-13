@@ -7,20 +7,11 @@ import { useAuthStore } from '../store/authStore.js'
 import { useConfigStore } from '../store/configStore.js'
 import { PageHeader, Spinner, EmptyState, StateBadge, Modal, formatCapacidad, formatUnidadGas, ObservacionCell } from '../components/ui.jsx'
 import { useToast } from '../components/ui.jsx'
-import { EscPosBuilder, generarLogoEscPos } from '../utils/escPosBuilder.js'
 import { LOGO_TUBOS_SVG, LOGO_PMS_SVG, getBrandingSources } from '../utils/logosSvg.js'
+import { formatNumberSpanish, getObservacionesLimpias, construirBufferTicketEntrega, construirBufferTicketVentaCamion } from '../utils/ticketsImpresion.js'
+import { conectarImpresoraWebBluetooth, enviarBufferWebBluetooth, esNavegadorMovilConWebBluetooth } from '../utils/webBluetoothPrinter.js'
 
 const SCANNER_ID = 'reparto-qr-reader'
-
-const formatNumberSpanish = (val) => {
-  const num = Number(val)
-  if (isNaN(num)) return '0'
-  const rounded = Math.round(num * 1000) / 1000
-  if (Number.isInteger(rounded)) {
-    return rounded.toString()
-  }
-  return rounded.toString().replace('.', ',')
-}
 
 const TIPO_INFO = {
   ENTREGA_SIMPLE: { label: 'Entrega',  className: 'badge-tipo-ENTREGA_SIMPLE' },
@@ -47,27 +38,6 @@ function getRangoHistorial(filtro, desdePersonalizado, hastaPersonalizado) {
     return { desde: desdePersonalizado, hasta: addDias(hastaPersonalizado, 1) }
   }
   return { desde: hoyStr, hasta: null } // 'hoy'
-}
-
-function getObservacionesLimpias(entrega) {
-  if (!entrega?.observaciones) return null
-  const tuboIdsActuales = new Set((entrega.detalles || []).map(d => d.tuboId))
-  let partes = entrega.observaciones.split('|').map(s => s.trim()).filter(Boolean)
-  
-  partes = partes.filter(p => {
-    if (p.includes('Agregado por repartidor')) {
-      const match = p.match(/:\s*([^\]]+)\]/)
-      if (match && match[1]) {
-        const tuboIdNota = match[1].trim()
-        return tuboIdsActuales.has(tuboIdNota)
-      }
-      return (entrega.detalles || []).some(d => d.esAdicional)
-    }
-    return true
-  })
-
-  const res = partes.join(' | ').trim()
-  return res || null
 }
 
 export default function RepartoPage() {
@@ -227,6 +197,10 @@ export default function RepartoPage() {
     })
   }
 
+  const configTicket = () => ({
+    branding, nombreEmpresa: nombre_empresa, direccion, telefono, paperWidth, duplicarTicket,
+  })
+
   const imprimirBluetooth = async (entrega, deviceAddress) => {
     if (!window.bluetoothSerial) return
     if (!deviceAddress) {
@@ -235,193 +209,12 @@ export default function RepartoPage() {
     }
     setConnectingPrinter(true)
 
-    let logoBytes = null
-    try {
-      logoBytes = await generarLogoEscPos(branding.isotipoSrc, branding.logoSrc)
-    } catch (e) {
-      console.warn("No se pudo generar el logo para la impresion:", e)
-    }
-
     let binaryBuffer
     try {
-      const wrapText = (text, maxChars) => {
-            if (!text) return []
-            const words = text.split(' ')
-            const lines = []
-            let currentLine = ''
-            
-            words.forEach(word => {
-              if ((currentLine + word).length <= maxChars) {
-                currentLine += (currentLine ? ' ' : '') + word
-              } else {
-                if (currentLine) lines.push(currentLine)
-                let remaining = word
-                while (remaining.length > maxChars) {
-                  lines.push(remaining.slice(0, maxChars))
-                  remaining = remaining.slice(maxChars)
-                }
-                currentLine = remaining
-              }
-            })
-            if (currentLine) lines.push(currentLine)
-            return lines
-          }
-
-          const builder = new EscPosBuilder()
-          const width = paperWidth
-          
-          const justify = (left, right) => {
-            const pad = Math.max(1, width - left.length - right.length)
-            return left + ' '.repeat(pad) + right
-          }
-          
-          const line = () => '-'.repeat(width)
-          const doubleLine = () => '='.repeat(width)
-          
-          const padChar = (text) => {
-            const pad = Math.max(0, Math.floor((width - text.length) / 2))
-            return ' '.repeat(pad) + text
-          }
-
-          const construirTicket = (tituloCopia) => {
-            builder.initialize()
-            
-            // Encabezado con Logo o fallback de texto
-            if (logoBytes) {
-              builder.addBytes(logoBytes)
-              builder.addTextLine('')
-            } else {
-              builder.alignCenter().boldOn().doubleSizeOn().addTextLine((nombre_empresa || 'GASTUBOS').toUpperCase()).doubleSizeOff()
-            }
-            
-            builder.alignCenter()
-            if (direccion) {
-              wrapText(direccion, width).forEach(l => builder.addTextLine(l))
-            }
-            if (telefono) {
-              wrapText('Tel: ' + telefono, width).forEach(l => builder.addTextLine(l))
-            }
-            builder.addTextLine(doubleLine())
-            
-            if (tituloCopia) {
-              builder.alignCenter().boldOn().addTextLine(tituloCopia).boldOff()
-              builder.addTextLine(line())
-            }
-            
-            // Información de Remisión
-            builder.alignLeft().boldOn().addTextLine('REMISION: ' + entrega.numero).boldOff()
-            builder.addTextLine(line())
-
-            // Datos del Cliente (mismo orden que la remisión de la computadora)
-            const clienteText = 'Cliente: ' + (entrega.cliente?.nombre || '')
-            wrapText(clienteText, width).forEach(l => builder.addTextLine(l))
-            
-            builder.addTextLine('RUC/CI: ' + (entrega.cliente?.ruc || '-'))
-            
-            const dirText = 'Direccion: ' + (entrega.direccionEntrega || '')
-            wrapText(dirText, width).forEach(l => builder.addTextLine(l))
-            
-            builder.addTextLine('Fecha: ' + new Date(entrega.fechaEntrega).toLocaleString('es-PY'))
-            
-            const choferText = 'Chofer: ' + (entrega.repartidor?.nombre || 'Sin asignar')
-            wrapText(choferText, width).forEach(l => builder.addTextLine(l))
-            
-            builder.addTextLine('Tipo: ' + (entrega.tipoOperacion || '').replace('_', ' '))
-            builder.addTextLine(doubleLine())
-
-            // Detalle de Productos (Tubo/Gas - Cant - Precio - Subtotal)
-            builder.boldOn().addTextLine(justify('PRODUCTO', 'SUBTOTAL')).boldOff()
-            builder.addTextLine(line())
-
-            let subtotalItems = 0
-            entrega.detalles?.forEach(d => {
-              const capStr = d.tubo ? ` ${formatCapacidad(d.tubo)}` : ''
-              let desc = `${d.tuboId} (${d.tubo?.gas || ''}${capStr})`
-              if (d.tubo?.serie && d.tubo?.serie !== d.tuboId) {
-                desc += ` Nro:${d.tubo.serie}`
-              }
-              const cant = `${formatNumberSpanish(d.cantidadGas)} ${d.unidadGas}`
-              const precioUnit = Number(d.precioUnitario).toLocaleString('es-PY')
-              const price = Number(d.subtotal).toLocaleString('es-PY') + ' GS'
-
-              builder.addTextLine(desc.slice(0, width))
-              if (Number(d.cantidadGas) > 0) {
-                builder.addTextLine(justify(`  ${cant} x ${precioUnit}`, price))
-              } else {
-                builder.addTextLine(justify(`  1 Envase Vacío`, price))
-              }
-              subtotalItems += Number(d.subtotal)
-            })
-            builder.addTextLine(line())
-
-            // Totales
-            const deliveryCost = Number(entrega.costoDelivery || 0)
-            builder.addTextLine(justify('DELIVERY:', deliveryCost.toLocaleString('es-PY') + ' GS'))
-            builder.boldOn().addTextLine(justify('TOTAL:', (subtotalItems + deliveryCost).toLocaleString('es-PY') + ' GS')).boldOff()
-            builder.addTextLine(doubleLine())
-
-            // Recambios/Devoluciones
-            const recsBT = recambiosParaImprimir(entrega)
-            if (recsBT.length > 0) {
-              builder.boldOn().addTextLine('RECAMBIOS RECIBIDOS:').boldOff()
-              recsBT.forEach(desc => {
-                const wrapped = wrapText(desc, width - 2)
-                wrapped.forEach((lineText, idx) => {
-                  if (idx === 0) {
-                    builder.addTextLine('- ' + lineText)
-                  } else {
-                    builder.addTextLine('  ' + lineText)
-                  }
-                })
-              })
-              builder.addTextLine(line())
-            }
-
-            // Observaciones
-            const obsBT = getObservacionesLimpias(entrega)
-            if (obsBT) {
-              const obsText = 'Obs: ' + obsBT
-              wrapText(obsText, width).forEach(l => builder.addTextLine(l))
-              builder.addTextLine(line())
-            }
-            
-            // Firmas side-by-side
-            builder.addTextLine('').addTextLine('')
-            const lineLength = width >= 48 ? 18 : 13
-            const leftLine = '-'.repeat(lineLength)
-            const rightLine = '-'.repeat(lineLength)
-            const spacesBetweenLines = width - (lineLength * 2)
-            builder.addTextLine(leftLine + ' '.repeat(spacesBetweenLines) + rightLine)
-            
-            const labelLeft = 'Firma Chofer'
-            const labelRight = 'Firma Cliente'
-            const padLeft = Math.max(0, Math.floor((lineLength - labelLeft.length) / 2))
-            const padRight = Math.max(0, Math.floor((lineLength - labelRight.length) / 2))
-            
-            const strLeft = ' '.repeat(padLeft) + labelLeft + ' '.repeat(Math.max(0, lineLength - labelLeft.length - padLeft))
-            const strRight = ' '.repeat(padRight) + labelRight + ' '.repeat(Math.max(0, lineLength - labelRight.length - padRight))
-            
-            builder.addTextLine(strLeft + ' '.repeat(spacesBetweenLines) + strRight)
-            builder.addTextLine('')
-            
-            // Pie de ticket
-            builder.alignCenter().boldOn().addTextLine('Gracias por su preferencia!').boldOff()
-          }
-
-          if (duplicarTicket) {
-            construirTicket('*** COPIA CHOFER ***')
-            builder.addTextLine('').addTextLine('').addTextLine('')
-            builder.alignCenter().addTextLine('- - - - - - - - - - - - - - - -')
-            builder.addTextLine('').addTextLine('').addTextLine('')
-            construirTicket('*** COPIA CLIENTE ***')
-          } else {
-            construirTicket(null)
-          }
-
-          // Espaciado generoso al final para evitar superposiciones con la siguiente impresión
-          builder.addTextLine('').addTextLine('').addTextLine('').addTextLine('').addTextLine('').addTextLine('')
-          builder.feedLines(4)
-          binaryBuffer = builder.getBuffer()
+      binaryBuffer = await construirBufferTicketEntrega(entrega, {
+        ...configTicket(),
+        recambios: recambiosParaImprimir(entrega),
+      })
     } catch (e) {
       toast('Error de formato: ' + e.message, 'error')
       setConnectingPrinter(false)
@@ -431,17 +224,71 @@ export default function RepartoPage() {
     enviarBufferBluetooth(deviceAddress, binaryBuffer).catch(() => {})
   }
 
+  // Vía alternativa cuando no hay app nativa (window.bluetoothSerial): conecta
+  // directo por Web Bluetooth (BLE) desde el navegador. El picker de
+  // dispositivos lo muestra el propio navegador, así que no depende del modal
+  // de impresoras nativo (printerModalOpen).
+  const imprimirEntregaWebBluetooth = async (entrega) => {
+    setConnectingPrinter(true)
+    try {
+      const buffer = await construirBufferTicketEntrega(entrega, {
+        ...configTicket(),
+        recambios: recambiosParaImprimir(entrega),
+      })
+      const conexion = await conectarImpresoraWebBluetooth()
+      await enviarBufferWebBluetooth(conexion, buffer)
+      toast('Impresión enviada correctamente', 'success')
+    } catch (err) {
+      if (err?.name !== 'NotFoundError') { // el usuario cerró el picker sin elegir nada
+        toast('Error al imprimir: ' + (err?.message || String(err)), 'error')
+      }
+    } finally {
+      setConnectingPrinter(false)
+    }
+  }
+
+  const imprimirVentaCamionWebBluetooth = async (carga) => {
+    setConnectingPrinter(true)
+    try {
+      const buffer = await construirBufferTicketVentaCamion(carga, configTicket())
+      const conexion = await conectarImpresoraWebBluetooth()
+      await enviarBufferWebBluetooth(conexion, buffer)
+      toast('Impresión enviada correctamente', 'success')
+    } catch (err) {
+      if (err?.name !== 'NotFoundError') {
+        toast('Error al imprimir: ' + (err?.message || String(err)), 'error')
+      }
+    } finally {
+      setConnectingPrinter(false)
+    }
+  }
+
+  // Punto único de despacho de impresión: app nativa (Bluetooth clásico) →
+  // Web Bluetooth (navegador Android) → diálogo de impresión del sistema
+  // como último recurso. Reemplaza el condicional que antes estaba repetido
+  // en cada punto donde se dispara una impresión.
+  const dispararImpresion = (tipo, datos) => {
+    if (window.bluetoothSerial) {
+      buscarImpresoras()
+    } else if (esNavegadorMovilConWebBluetooth()) {
+      if (tipo === 'entrega') imprimirEntregaWebBluetooth(datos)
+      else imprimirVentaCamionWebBluetooth(datos)
+    } else {
+      // Desktop sigue usando el diálogo del sistema como siempre. Solo en
+      // teléfono sin Web Bluetooth (iOS, Firefox) avisamos que no hay vía
+      // Bluetooth disponible, en vez de fallar en silencio.
+      if (window.innerWidth < 768 && !navigator.bluetooth) {
+        toast('Este navegador no soporta impresión Bluetooth. Usá Chrome en Android.', 'warning')
+      }
+      window.print()
+    }
+  }
+
   const handlePrintClick = (entrega) => {
     setVentaParaImprimir(null)
     setEntregaParaImprimir(entrega)
     setModalDetalle(false) // Close the detail modal first to avoid overlay conflict
-    setTimeout(() => {
-      if (window.bluetoothSerial) {
-        buscarImpresoras()
-      } else {
-        window.print()
-      }
-    }, 150)
+    setTimeout(() => dispararImpresion('entrega', entrega), 150)
   }
   
   // Entrega seleccionada para entrega activa en calle
@@ -904,13 +751,7 @@ export default function RepartoPage() {
       setVentaParaImprimir(res.data)
       fetchCamionStock(selectedCamionId)
       fetchHistorialHoy()
-      setTimeout(() => {
-        if (window.bluetoothSerial) {
-          buscarImpresoras()
-        } else {
-          window.print()
-        }
-      }, 150)
+      setTimeout(() => dispararImpresion('ventaCamion', res.data), 150)
     } catch (err) {
       toast(err.response?.data?.error || 'Error al registrar la venta', 'error')
     } finally {
@@ -922,13 +763,7 @@ export default function RepartoPage() {
     setEntregaParaImprimir(null)
     setVentaParaImprimir(carga)
     setModalDetalleCamion(false)
-    setTimeout(() => {
-      if (window.bluetoothSerial) {
-        buscarImpresoras()
-      } else {
-        window.print()
-      }
-    }, 150)
+    setTimeout(() => dispararImpresion('ventaCamion', carga), 150)
   }
 
   const imprimirVentaCamionBluetooth = async (carga, deviceAddress) => {
@@ -939,106 +774,9 @@ export default function RepartoPage() {
     }
     setConnectingPrinter(true)
 
-    let logoBytes = null
-    try {
-      logoBytes = await generarLogoEscPos(branding.isotipoSrc, branding.logoSrc)
-    } catch (e) {
-      console.warn("No se pudo generar el logo para la impresion:", e)
-    }
-
     let binaryBuffer
     try {
-      const wrapText = (text, maxChars) => {
-        if (!text) return []
-        const words = text.split(' ')
-        const lines = []
-        let currentLine = ''
-        words.forEach(word => {
-          if ((currentLine + word).length <= maxChars) {
-            currentLine += (currentLine ? ' ' : '') + word
-          } else {
-            if (currentLine) lines.push(currentLine)
-            let remaining = word
-            while (remaining.length > maxChars) {
-              lines.push(remaining.slice(0, maxChars))
-              remaining = remaining.slice(maxChars)
-            }
-            currentLine = remaining
-          }
-        })
-        if (currentLine) lines.push(currentLine)
-        return lines
-      }
-
-      const builder = new EscPosBuilder()
-      const width = paperWidth
-      const justify = (left, right) => {
-        const pad = Math.max(1, width - left.length - right.length)
-        return left + ' '.repeat(pad) + right
-      }
-      const line = () => '-'.repeat(width)
-      const doubleLine = () => '='.repeat(width)
-
-      builder.initialize()
-      if (logoBytes) {
-        builder.addBytes(logoBytes)
-        builder.addTextLine('')
-      } else {
-        builder.alignCenter().boldOn().doubleSizeOn().addTextLine((nombre_empresa || 'GASTUBOS').toUpperCase()).doubleSizeOff()
-      }
-
-      builder.alignCenter()
-      if (direccion) {
-        wrapText(direccion, width).forEach(l => builder.addTextLine(l))
-      }
-      if (telefono) {
-        wrapText('Tel: ' + telefono, width).forEach(l => builder.addTextLine(l))
-      }
-      builder.addTextLine(doubleLine())
-
-      builder.alignLeft().boldOn().addTextLine('VENTA CAMION: ' + carga.numero).boldOff()
-      builder.addTextLine(line())
-
-      const clienteText = 'Cliente: ' + (carga.cliente?.nombre || '')
-      wrapText(clienteText, width).forEach(l => builder.addTextLine(l))
-      builder.addTextLine('RUC/CI: ' + (carga.cliente?.ruc || '-'))
-      builder.addTextLine('Fecha: ' + new Date(carga.fechaCarga).toLocaleString('es-PY'))
-      builder.addTextLine('Chofer: ' + (carga.operador?.nombre || carga.operador?.username || ''))
-      builder.addTextLine(doubleLine())
-
-      builder.boldOn().addTextLine(justify('PRODUCTO', 'SUBTOTAL')).boldOff()
-      builder.addTextLine(line())
-
-      const cantStr = `${formatNumberSpanish(carga.cantidad)} ${carga.unidad}`
-      const precioUnitStr = Number(carga.precioUnitario).toLocaleString('es-PY')
-      const subtotal = Number(carga.cantidad) * Number(carga.precioUnitario)
-      const subtotalStr = subtotal.toLocaleString('es-PY') + ' GS'
-
-      builder.addTextLine(`${carga.tubo?.gas || ''} (Tubo ${carga.tuboId})`.slice(0, width))
-      builder.addTextLine(justify(`  ${cantStr} x ${precioUnitStr}`, subtotalStr))
-      builder.addTextLine(line())
-      builder.boldOn().addTextLine(justify('TOTAL:', subtotalStr)).boldOff()
-      builder.addTextLine(doubleLine())
-
-      builder.addTextLine('Forma de pago: ' + (carga.metodoPago || '-'))
-      builder.addTextLine('Recibido: ' + Number(carga.montoRecibido || 0).toLocaleString('es-PY') + ' GS')
-      builder.addTextLine(doubleLine())
-
-      builder.addTextLine('').addTextLine('')
-      const lineLength = width >= 48 ? 18 : 13
-      const soloLine = '-'.repeat(lineLength)
-      const padCentro = Math.max(0, Math.floor((width - lineLength) / 2))
-      builder.addTextLine(' '.repeat(padCentro) + soloLine)
-      const labelFirma = 'Firma Cliente'
-      const padLabel = Math.max(0, Math.floor((width - labelFirma.length) / 2))
-      builder.addTextLine(' '.repeat(padLabel) + labelFirma)
-      builder.addTextLine('')
-
-      builder.alignCenter().boldOn().addTextLine('Gracias por su preferencia!').boldOff()
-
-      builder.addTextLine('').addTextLine('').addTextLine('').addTextLine('').addTextLine('').addTextLine('')
-      builder.feedLines(4)
-      binaryBuffer = builder.getBuffer()
+      binaryBuffer = await construirBufferTicketVentaCamion(carga, configTicket())
     } catch (e) {
       toast('Error de formato: ' + e.message, 'error')
       setConnectingPrinter(false)

@@ -13,6 +13,8 @@ import { PageHeader, StateBadge, Spinner, GasDot, EmptyState, Modal, formatCapac
 import { useToast } from '../components/ui.jsx'
 import { useConfigStore } from '../store/configStore.js'
 import { LOGO_TUBOS_SVG, LOGO_PMS_SVG, getBrandingSources } from '../utils/logosSvg.js'
+import { construirBufferTicketEntrega, construirBufferTicketRemisionInicial } from '../utils/ticketsImpresion.js'
+import { conectarImpresoraWebBluetooth, enviarBufferWebBluetooth, esNavegadorMovilConWebBluetooth } from '../utils/webBluetoothPrinter.js'
 
 // ... (EMPTY y fixes de Leaflet se mantienen arriba)
 delete L.Icon.Default.prototype._getIconUrl
@@ -201,8 +203,35 @@ export default function EntregasPage() {
     return [...recsPropios, ...recsTerceros]
   }
 
+  // Punto único de despacho de impresión, igual que en RepartoPage.jsx: app
+  // nativa (Bluetooth clásico) → Web Bluetooth (navegador Android) → diálogo
+  // de impresión del sistema como último recurso.
+  const imprimirTicketWebBluetooth = async () => {
+    try {
+      const config = { branding, nombreEmpresa: nombre_empresa, direccion, telefono, paperWidth: 32 }
+      const buffer = ticketTab === 'remision'
+        ? await construirBufferTicketRemisionInicial(entregaSeleccionada, config)
+        : await construirBufferTicketEntrega(entregaSeleccionada, { ...config, duplicarTicket: false, recambios: getRecambiosRecibidos(entregaSeleccionada) })
+      const conexion = await conectarImpresoraWebBluetooth()
+      await enviarBufferWebBluetooth(conexion, buffer)
+      toast('Impresión enviada correctamente', 'success')
+    } catch (err) {
+      if (err?.name !== 'NotFoundError') { // el usuario cerró el picker sin elegir nada
+        toast('Error al imprimir: ' + (err?.message || String(err)), 'error')
+      }
+    }
+  }
+
   const handlePrintTicket = () => {
-    window.print()
+    // navigator.bluetooth también existe en Chrome/Edge de escritorio, así
+    // que hay que confirmar que además sea un teléfono — si no, esto
+    // rompía la impresión de PC (sin Bluetooth, requestDevice() rechaza en
+    // silencio y no pasaba nada al hacer clic en "Imprimir").
+    if (esNavegadorMovilConWebBluetooth()) {
+      imprimirTicketWebBluetooth()
+    } else {
+      window.print()
+    }
   }
 
   useEffect(() => {
