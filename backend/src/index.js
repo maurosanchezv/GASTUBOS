@@ -20,6 +20,7 @@ import ventaRoutes    from './routes/ventas.js'
 import auditoriaRoutes from './routes/auditoria.js'
 import usuarioRoutes  from './routes/usuarios.js'
 import reporteRoutes  from './routes/reportes.js'
+import movimientosDineroRoutes from './routes/movimientosDinero.js'
 import cargaRoutes    from './routes/cargas.js'
 import publicRoutes   from './routes/public.js'   // ruta pública para QR sin auth
 import precioRoutes   from './routes/precios.js'
@@ -94,6 +95,7 @@ app.use('/api/auditoria',  auditoriaRoutes)
 app.use('/api/usuarios',   usuarioRoutes)
 app.use('/api/cargas',     cargaRoutes)
 app.use('/api/reportes',   reporteRoutes)
+app.use('/api/movimientos-dinero', movimientosDineroRoutes)
 app.use('/api/precios',    precioRoutes)
 app.use('/api/camiones',   camionRoutes)
 app.use('/api/config',     configRoutes)

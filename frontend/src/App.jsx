@@ -19,6 +19,7 @@ import DevolucionesPage from './pages/DevolucionesPage.jsx'
 import AlquileresPage  from './pages/AlquileresPage.jsx'
 import VentasPage      from './pages/VentasPage.jsx'
 import ReportesPage    from './pages/ReportesPage.jsx'
+import MovimientoDineroPage from './pages/MovimientoDineroPage.jsx'
 import AuditoriaPage   from './pages/AuditoriaPage.jsx'
 import PerfilPage      from './pages/PerfilPage.jsx'
 import UsuariosPage    from './pages/UsuariosPage.jsx'
@@ -111,6 +112,9 @@ export default function App() {
           } /> */}
           <Route path="reportes" element={
             <PrivateRoute roles={['ADMIN', 'SUPERVISOR']}><ReportesPage /></PrivateRoute>
+          } />
+          <Route path="movimiento-dinero" element={
+            <PrivateRoute roles={['ADMIN', 'SUPERVISOR']}><MovimientoDineroPage /></PrivateRoute>
           } />
           <Route path="auditoria" element={
             <PrivateRoute roles={['ADMIN', 'SUPERVISOR']}><AuditoriaPage /></PrivateRoute>
