@@ -52,7 +52,27 @@ const GAS_STRING_TO_ENUM = {
 
 const ESTADOS_CARGABLES = ['VACIO', 'DEVUELTO', 'DISPONIBLE']
 const ESTADOS_CON_CLIENTE = ['ENTREGADO', 'ALQUILADO']
-const GASES_TERCERO = ['Oxígeno', 'CO2', 'Argón', 'Nitrógeno', 'Aire comprimido', 'Mezcla CO2/Argón', 'Acetileno']
+// Mismo listado de gases y presets de capacidad que usa el selector del
+// Repartidor (RepartoPage.jsx) al registrar un retorno, para que ambos
+// canales pidan exactamente los mismos datos de la misma forma.
+const GASES_TERCERO = ['CO2', 'Oxígeno', 'Argón', 'Nitrógeno', 'Aire comprimido', 'Acetileno', 'Mezcla Ar+CO2', 'Mezcla especial']
+const CAPACIDADES_TERCERO = {
+  Acetileno: ['1 kg', '1.2 kg', '1.5 kg', '2 kg', '2.5 kg', '3 kg', '3.5 kg', '4 kg', '4.5 kg', '5 kg', '5.5 kg', '6 kg', '7 kg', '8 kg'],
+  CO2:       ['1 kg', '2 kg', '3 kg', '4 kg', '5 kg', '6 kg', '7 kg', '8 kg', '10 kg', '13 kg', '15 kg', '20 kg', '25 kg', '30 kg'],
+  DEFAULT:   ['1 m³', '1.5 m³', '2.5 m³', '3 m³', '4 m³', '5 m³', '6 m³', '6.5 m³', '7 m³', '7.15 m³', '7.5 m³', '8.5 m³'],
+}
+const capacidadesParaGasTercero = (gas) => {
+  const gLower = (gas || '').toLowerCase()
+  if (gLower === 'acetileno') return CAPACIDADES_TERCERO.Acetileno
+  if (gLower === 'co2') return CAPACIDADES_TERCERO.CO2
+  return CAPACIDADES_TERCERO.DEFAULT
+}
+const capacidadPorDefectoParaGasTercero = (gas) => {
+  const gLower = (gas || '').toLowerCase()
+  if (gLower === 'acetileno') return '6 kg'
+  if (gLower === 'co2') return '25 kg'
+  return '6 m³'
+}
 
 const formatNumberSpanish = (val) => {
   const num = Number(val)
@@ -98,8 +118,8 @@ export default function CargasPage() {
   const [codigoRetorno, setCodigoRetorno] = useState('')
   const [buscandoRetorno, setBuscandoRetorno] = useState(false)
   const [terceroPendiente, setTerceroPendiente] = useState(null) // { codigo } cuando el código no matchea ningún tubo
-  const [terceroGas, setTerceroGas] = useState('')
-  const [terceroCapacidad, setTerceroCapacidad] = useState('')
+  const [terceroGas, setTerceroGas] = useState('Oxígeno')
+  const [terceroCapacidad, setTerceroCapacidad] = useState('6 m³')
   const [terceroClienteId, setTerceroClienteId] = useState('')
   const [guardandoTercero, setGuardandoTercero] = useState(false)
   const [clientes, setClientes] = useState([])
@@ -258,8 +278,8 @@ export default function CargasPage() {
     } catch (err) {
       if (err.response?.status === 404) {
         setTerceroPendiente({ codigo })
-        setTerceroGas('')
-        setTerceroCapacidad('')
+        setTerceroGas('Oxígeno')
+        setTerceroCapacidad('6 m³')
         setTerceroClienteId('')
         setCodigoRetorno('')
       } else {
@@ -308,10 +328,10 @@ export default function CargasPage() {
 
   async function guardarTercero() {
     if (!terceroPendiente) return
-    if (!terceroGas) return toast('Seleccioná el gas', 'error')
-    if (!terceroCapacidad || Number(terceroCapacidad) <= 0) return toast('Ingresá la capacidad', 'error')
+    if (!terceroGas || !terceroCapacidad) return toast('Seleccioná el gas y la capacidad', 'error')
 
     const esKg = ['acetileno', 'co2'].includes(terceroGas.toLowerCase())
+    const capacidadNum = parseFloat(terceroCapacidad)
     const clienteElegido = terceroClienteId ? clientes.find(c => c.id === terceroClienteId) : null
     setGuardandoTercero(true)
     try {
@@ -319,8 +339,8 @@ export default function CargasPage() {
         gas: terceroGas,
         codigo: terceroPendiente.codigo,
         clienteId: terceroClienteId || undefined,
-        capacidadKg: esKg ? Number(terceroCapacidad) : undefined,
-        capacidadLitros: !esKg ? Number(terceroCapacidad) : undefined,
+        capacidadKg: esKg ? capacidadNum : undefined,
+        capacidadLitros: !esKg ? capacidadNum : undefined,
         observaciones: `Recibido por retorno directo en Cargas. Código escaneado: ${terceroPendiente.codigo}`,
       })
       toast(
@@ -334,17 +354,14 @@ export default function CargasPage() {
         tuboId: null,
         codigo: terceroPendiente.codigo,
         gas: terceroGas,
-        // No se usa formatCapacidad acá: decide kg/litros por substring en el
-        // nombre del gas ("co2"), y "Mezcla CO2/Argón" mide en m³ aunque
-        // contenga "CO2" — usamos directo el mismo esKg que ya se usó al guardar.
-        capacidad: `${terceroCapacidad} ${esKg ? 'kg' : 'm³'}`,
+        capacidad: terceroCapacidad,
         estado: clienteElegido ? 'Devuelto' : 'Pendiente de asignar cliente',
         observaciones: `Código escaneado: ${terceroPendiente.codigo}`,
       }
       registrarHistorialRetorno({ codigo: terceroPendiente.codigo, tipo: 'tercero', mensaje: `Registrado como cilindro de tercero (${terceroGas})`, retorno })
       setTerceroPendiente(null)
-      setTerceroGas('')
-      setTerceroCapacidad('')
+      setTerceroGas('Oxígeno')
+      setTerceroCapacidad('6 m³')
       setTerceroClienteId('')
     } catch (err) {
       toast(err.response?.data?.error || 'Error al registrar el cilindro de tercero', 'error')
@@ -1040,27 +1057,65 @@ export default function CargasPage() {
                 <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '0 0 12px' }}>
                   No hay ningún tubo registrado con ese código. Completá los datos para registrarlo como cilindro de tercero pendiente.
                 </p>
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                  <FormGroup label="Gas" required>
-                    <select value={terceroGas} onChange={e => setTerceroGas(e.target.value)}>
-                      <option value="">Seleccioná...</option>
-                      {GASES_TERCERO.map(g => <option key={g} value={g}>{g}</option>)}
-                    </select>
-                  </FormGroup>
-                  <FormGroup label={`Capacidad (${['acetileno', 'co2'].includes(terceroGas.toLowerCase()) ? 'kg' : 'litros'})`} required>
-                    <input
-                      type="number" min="0" step="0.01"
-                      value={terceroCapacidad}
-                      onChange={e => setTerceroCapacidad(e.target.value)}
-                    />
-                  </FormGroup>
-                  <FormGroup label="Cliente (opcional)" hint="Si lo conocés, asignalo ahora — si no, se puede completar después desde Cilindros de Terceros">
-                    <select value={terceroClienteId} onChange={e => setTerceroClienteId(e.target.value)}>
-                      <option value="">Sin identificar</option>
-                      {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-                    </select>
-                  </FormGroup>
+                <div style={{
+                  background: 'var(--blue-light)', borderRadius: 6,
+                  padding: '10px 12px', marginBottom: 12, display: 'flex',
+                  justifyContent: 'space-between', alignItems: 'center',
+                }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--blue-dark)' }}>SELECCIÓN:</span>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--blue-dark)' }}>{terceroGas} {terceroCapacidad}</span>
                 </div>
+
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>1. Seleccionar Gas</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+                    {GASES_TERCERO.map(g => (
+                      <button
+                        key={g}
+                        type="button"
+                        onClick={() => { setTerceroGas(g); setTerceroCapacidad(capacidadPorDefectoParaGasTercero(g)) }}
+                        style={{
+                          padding: '8px 4px', fontSize: 11, fontWeight: terceroGas === g ? 700 : 500,
+                          background: terceroGas === g ? 'var(--blue)' : 'var(--surface-2)',
+                          color: terceroGas === g ? '#fff' : 'var(--text-secondary)',
+                          border: `1px solid ${terceroGas === g ? 'var(--blue)' : 'var(--border)'}`,
+                          borderRadius: 6, cursor: 'pointer', transition: 'all .15s ease',
+                        }}
+                      >
+                        {g}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>2. Seleccionar Capacidad</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+                    {capacidadesParaGasTercero(terceroGas).map(c => (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => setTerceroCapacidad(c)}
+                        style={{
+                          padding: '8px 4px', fontSize: 11, fontWeight: terceroCapacidad === c ? 700 : 500,
+                          background: terceroCapacidad === c ? 'var(--blue-mid)' : 'var(--surface-2)',
+                          color: terceroCapacidad === c ? '#fff' : 'var(--text-secondary)',
+                          border: `1px solid ${terceroCapacidad === c ? 'var(--blue-mid)' : 'var(--border)'}`,
+                          borderRadius: 6, cursor: 'pointer', transition: 'all .15s ease',
+                        }}
+                      >
+                        {c}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <FormGroup label="Cliente (opcional)" hint="Si lo conocés, asignalo ahora — si no, se puede completar después desde Cilindros de Terceros">
+                  <select value={terceroClienteId} onChange={e => setTerceroClienteId(e.target.value)}>
+                    <option value="">Sin identificar</option>
+                    {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                  </select>
+                </FormGroup>
                 <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
                   <button className="btn btn-sm" onClick={() => { setTerceroPendiente(null); setTerceroClienteId('') }} disabled={guardandoTercero}>
                     Cancelar
