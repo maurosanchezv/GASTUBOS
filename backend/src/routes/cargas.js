@@ -21,6 +21,10 @@ const cargaSchema = z.object({
   fechaCarga:    z.string().datetime(),
   observaciones: z.string().optional(),
   metodoPago:    z.enum(['EFECTIVO', 'TRANSFERENCIA']),
+  // Si se completa: el cliente retira el tubo recargado en el momento (ej.
+  // trajo su propio tubo vacío a Retorno de Cilindros) — el tubo queda
+  // ENTREGADO a este cliente en vez de disponible en depósito.
+  clienteId:     z.string().optional().nullable(),
 })
 
 const ventaCamionSchema = z.object({
@@ -98,6 +102,12 @@ router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res,
       }
     }
 
+    if (data.clienteId) {
+      const cliente = await prisma.cliente.findUnique({ where: { id: data.clienteId } })
+      if (!cliente) return res.status(400).json({ error: 'Cliente no encontrado' })
+    }
+
+    const estadoFinal = data.clienteId ? 'ENTREGADO' : 'CARGADO'
     const numero = await generarNumero('CG')
 
     const carga = await prisma.$transaction(async (tx) => {
@@ -114,17 +124,21 @@ router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res,
           operadorId:    req.user.id,
           observaciones: data.observaciones,
           metodoPago:    data.metodoPago,
+          clienteId:     data.clienteId || null,
         },
         include: {
           tubo:     { select: { id: true, serie: true, gas: true } },
           operador: { select: { username: true, nombre: true } },
+          cliente:  { select: { id: true, nombre: true } },
         },
       })
 
       if (data.tuboId) {
         await tx.tubo.update({
           where: { id: data.tuboId },
-          data:  { estado: 'CARGADO', cantidadActual: data.cantidad },
+          data: data.clienteId
+            ? { estado: 'ENTREGADO', cantidadActual: data.cantidad, clienteId: data.clienteId, ubicacion: 'Cliente' }
+            : { estado: 'CARGADO', cantidadActual: data.cantidad },
         })
       }
 
@@ -135,11 +149,11 @@ router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res,
       await registrarAuditoria({
         tuboId:         data.tuboId,
         usuarioId:      req.user.id,
-        accion:         'Carga registrada',
+        accion:         estadoFinal === 'ENTREGADO' ? 'Carga registrada — retirada por el cliente' : 'Carga registrada',
         estadoAnterior: tubo.estado,
-        estadoNuevo:    'CARGADO',
+        estadoNuevo:    estadoFinal,
         observaciones:  data.observaciones,
-        metadata:       { cargaId: carga.id, numero, tipoGas: data.tipoGas, cantidad: data.cantidad, unidad: data.unidad },
+        metadata:       { cargaId: carga.id, numero, tipoGas: data.tipoGas, cantidad: data.cantidad, unidad: data.unidad, clienteId: data.clienteId || undefined },
       })
     }
 

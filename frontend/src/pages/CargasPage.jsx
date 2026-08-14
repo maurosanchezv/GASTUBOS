@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Html5Qrcode } from 'html5-qrcode'
 import api from '../services/api.js'
-import { PageHeader, Modal, FormGroup, Spinner, EmptyState, GasDot, StateBadge, useToast, formatCapacidad, ObservacionCell } from '../components/ui.jsx'
+import { PageHeader, Modal, Confirm, FormGroup, Spinner, EmptyState, GasDot, StateBadge, useToast, formatCapacidad, ObservacionCell } from '../components/ui.jsx'
 import { useAuthStore } from '../store/authStore.js'
 import { useConfigStore } from '../store/configStore.js'
 import { getBrandingSources } from '../utils/logosSvg.js'
@@ -100,7 +100,16 @@ export default function CargasPage() {
   const [terceroPendiente, setTerceroPendiente] = useState(null) // { codigo } cuando el código no matchea ningún tubo
   const [terceroGas, setTerceroGas] = useState('')
   const [terceroCapacidad, setTerceroCapacidad] = useState('')
+  const [terceroClienteId, setTerceroClienteId] = useState('')
   const [guardandoTercero, setGuardandoTercero] = useState(false)
+  const [clientes, setClientes] = useState([])
+
+  // Carga desde Retorno de Cilindros: si el cliente se lleva el tubo recién
+  // recargado en el momento (no queda disponible en depósito), se le asigna
+  // acá — solo aplica cuando la carga se dispara desde ese flujo puntual.
+  const [origenRetorno, setOrigenRetorno] = useState(false)
+  const [cargaClienteId, setCargaClienteId] = useState('')
+  const [confirmSalirCarga, setConfirmSalirCarga] = useState(false)
   const [historialRetorno, setHistorialRetorno] = useState([]) // feedback de lo procesado en esta sesión
   const [confirmarDevolucion, setConfirmarDevolucion] = useState(null) // tubo que figura entregado/alquilado, pendiente de confirmar
   const [procesandoDevolucion, setProcesandoDevolucion] = useState(false)
@@ -180,6 +189,10 @@ export default function CargasPage() {
     }
   }, [])
 
+  useEffect(() => {
+    api.get('/clientes').then(r => setClientes(r.data)).catch(() => {})
+  }, [])
+
   function registrarHistorialRetorno(item) {
     setHistorialRetorno(prev => [{ ...item, id: Date.now() + Math.random() }, ...prev].slice(0, 30))
   }
@@ -230,7 +243,7 @@ export default function CargasPage() {
       if (ESTADOS_CARGABLES.includes(tubo.estado)) {
         setCodigoRetorno('')
         registrarHistorialRetorno({ codigo, tipo: 'propio', mensaje: `Tubo propio (${tubo.estado}) — abriendo carga` })
-        abrirModalConTubo(tubo)
+        abrirModalConTubo(tubo, true)
         return
       }
 
@@ -247,6 +260,7 @@ export default function CargasPage() {
         setTerceroPendiente({ codigo })
         setTerceroGas('')
         setTerceroCapacidad('')
+        setTerceroClienteId('')
         setCodigoRetorno('')
       } else {
         toast(err.response?.data?.error || 'Error al buscar el código', 'error')
@@ -284,7 +298,7 @@ export default function CargasPage() {
         observaciones: null,
       }
       registrarHistorialRetorno({ codigo: tubo.id, tipo: 'propio', mensaje: 'Tubo propio devuelto — abriendo carga', retorno })
-      abrirModalConTubo({ ...tubo, estado: 'DEVUELTO', clienteId: null })
+      abrirModalConTubo({ ...tubo, estado: 'DEVUELTO', clienteId: null }, true)
     } catch (err) {
       toast(err.response?.data?.error || 'Error al registrar la devolución', 'error')
     } finally {
@@ -298,32 +312,40 @@ export default function CargasPage() {
     if (!terceroCapacidad || Number(terceroCapacidad) <= 0) return toast('Ingresá la capacidad', 'error')
 
     const esKg = ['acetileno', 'co2'].includes(terceroGas.toLowerCase())
+    const clienteElegido = terceroClienteId ? clientes.find(c => c.id === terceroClienteId) : null
     setGuardandoTercero(true)
     try {
       await api.post('/cilindros-terceros', {
         gas: terceroGas,
+        codigo: terceroPendiente.codigo,
+        clienteId: terceroClienteId || undefined,
         capacidadKg: esKg ? Number(terceroCapacidad) : undefined,
         capacidadLitros: !esKg ? Number(terceroCapacidad) : undefined,
         observaciones: `Recibido por retorno directo en Cargas. Código escaneado: ${terceroPendiente.codigo}`,
       })
-      toast('Cilindro de tercero registrado, pendiente de asignar cliente', 'success')
+      toast(
+        clienteElegido ? 'Cilindro de tercero registrado' : 'Cilindro de tercero registrado, pendiente de asignar cliente',
+        'success'
+      )
       const retorno = {
         fecha: new Date().toISOString(),
         usuario: user?.nombre || user?.username || '-',
-        cliente: null,
+        cliente: clienteElegido?.nombre || null,
         tuboId: null,
+        codigo: terceroPendiente.codigo,
         gas: terceroGas,
         // No se usa formatCapacidad acá: decide kg/litros por substring en el
         // nombre del gas ("co2"), y "Mezcla CO2/Argón" mide en m³ aunque
         // contenga "CO2" — usamos directo el mismo esKg que ya se usó al guardar.
         capacidad: `${terceroCapacidad} ${esKg ? 'kg' : 'm³'}`,
-        estado: 'Pendiente de asignar cliente',
+        estado: clienteElegido ? 'Devuelto' : 'Pendiente de asignar cliente',
         observaciones: `Código escaneado: ${terceroPendiente.codigo}`,
       }
       registrarHistorialRetorno({ codigo: terceroPendiente.codigo, tipo: 'tercero', mensaje: `Registrado como cilindro de tercero (${terceroGas})`, retorno })
       setTerceroPendiente(null)
       setTerceroGas('')
       setTerceroCapacidad('')
+      setTerceroClienteId('')
     } catch (err) {
       toast(err.response?.data?.error || 'Error al registrar el cilindro de tercero', 'error')
     } finally {
@@ -403,6 +425,7 @@ export default function CargasPage() {
           usuario: item.repartidor?.nombre || '-',
           cliente: item.cliente?.nombre || null,
           tuboId: null,
+          codigo: item.codigo || null,
           gas: item.gas,
           // No se usa formatCapacidad acá por el mismo motivo que en
           // guardarTercero: para estos registros conviene leer directo qué
@@ -420,7 +443,7 @@ export default function CargasPage() {
     }
   }
 
-  function abrirModalConTubo(tubo) {
+  function abrirModalConTubo(tubo, desdeRetorno = false) {
     const gasEnum = GAS_STRING_TO_ENUM[tubo.gas] || ''
     const capVal = tubo.capacidadKg ? Number(tubo.capacidadKg) : (tubo.capacidadLitros ? Number(tubo.capacidadLitros) : null)
     const capStr = capVal ? String(capVal) : ''
@@ -439,8 +462,25 @@ export default function CargasPage() {
     setCalcPrecio('')
     setCalcMonto('')
     setModoCalculo('PRECIO')
+    setOrigenRetorno(desdeRetorno)
+    setCargaClienteId('')
 
     setModal(true)
+  }
+
+  // Cerrar el modal de carga sin guardar. Si venía de Retorno de Cilindros,
+  // se pierde el tubo ya buscado/devuelto y hay que volver a escanear el
+  // código — por eso ahí se avisa antes de cerrar en vez de salir directo.
+  function cerrarModalCarga() {
+    setModal(false)
+    setOrigenRetorno(false)
+    setCargaClienteId('')
+    setConfirmSalirCarga(false)
+  }
+
+  function intentarCerrarModalCarga() {
+    if (origenRetorno) setConfirmSalirCarga(true)
+    else cerrarModalCarga()
   }
 
   function handleGasChange(tipoGas) {
@@ -462,6 +502,8 @@ export default function CargasPage() {
     setCalcPrecio('')
     setCalcMonto('')
     setModoCalculo('PRECIO')
+    setOrigenRetorno(false)
+    setCargaClienteId('')
 
     setModal(true)
   }
@@ -537,6 +579,7 @@ export default function CargasPage() {
   }
 
   async function guardarCarga() {
+    const clienteSeLoLleva = origenRetorno && cargaClienteId ? cargaClienteId : undefined
     setSaving(true)
     try {
       await api.post('/cargas', {
@@ -549,10 +592,18 @@ export default function CargasPage() {
         fechaCarga:    new Date(form.fechaCarga).toISOString(),
         observaciones: form.observaciones || undefined,
         metodoPago:    form.metodoPago,
+        clienteId:     clienteSeLoLleva,
       })
-      toast(tuboSeleccionado ? 'Carga registrada — tubo pasó a estado CARGADO' : 'Carga en salón registrada con éxito', 'success')
+      toast(
+        clienteSeLoLleva ? 'Carga registrada — tubo entregado al cliente'
+          : tuboSeleccionado ? 'Carga registrada — tubo pasó a estado CARGADO'
+          : 'Carga en salón registrada con éxito',
+        'success'
+      )
       setConfirmOpen(false)
       setModal(false)
+      setOrigenRetorno(false)
+      setCargaClienteId('')
       if (tab === 'pendientes') loadTubos()
       else loadHistorial()
     } catch (err) {
@@ -1003,9 +1054,15 @@ export default function CargasPage() {
                       onChange={e => setTerceroCapacidad(e.target.value)}
                     />
                   </FormGroup>
+                  <FormGroup label="Cliente (opcional)" hint="Si lo conocés, asignalo ahora — si no, se puede completar después desde Cilindros de Terceros">
+                    <select value={terceroClienteId} onChange={e => setTerceroClienteId(e.target.value)}>
+                      <option value="">Sin identificar</option>
+                      {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                    </select>
+                  </FormGroup>
                 </div>
                 <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                  <button className="btn btn-sm" onClick={() => setTerceroPendiente(null)} disabled={guardandoTercero}>
+                  <button className="btn btn-sm" onClick={() => { setTerceroPendiente(null); setTerceroClienteId('') }} disabled={guardandoTercero}>
                     Cancelar
                   </button>
                   <button className="btn btn-primary btn-sm" onClick={guardarTercero} disabled={guardandoTercero}>
@@ -1075,7 +1132,7 @@ export default function CargasPage() {
                   <span className={`badge ${item.tuboId ? 'badge-CARGADO' : 'badge-ALQUILADO'}`}>
                     {item.tuboId ? 'Propio' : 'Tercero'}
                   </span>
-                  <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{item.tuboId || item.gas}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{item.tuboId || item.codigo || item.gas}</span>
                   <span style={{ color: 'var(--text-secondary)' }}>
                     {item.cliente || 'No identificado'} · {item.estado} · {new Date(item.fecha).toLocaleString('es-PY')}
                   </span>
@@ -1107,7 +1164,7 @@ export default function CargasPage() {
             <strong>Fecha:</strong> {new Date(retornoParaImprimir.fecha).toLocaleString('es-PY')}<br />
             <strong>Registrado por:</strong> {retornoParaImprimir.usuario || '-'}<br />
             <strong>Cliente:</strong> {retornoParaImprimir.cliente || 'No identificado'}<br />
-            <strong>{retornoParaImprimir.tuboId ? 'Tubo:' : 'Cilindro de tercero:'}</strong> {retornoParaImprimir.tuboId || '(sin identificar)'}<br />
+            <strong>{retornoParaImprimir.tuboId ? 'Tubo:' : 'Cilindro de tercero:'}</strong> {retornoParaImprimir.tuboId || retornoParaImprimir.codigo || '(sin identificar)'}<br />
             <strong>Gas:</strong> {retornoParaImprimir.gas}{retornoParaImprimir.capacidad ? ` (${retornoParaImprimir.capacidad})` : ''}<br />
             <strong>Estado:</strong> {retornoParaImprimir.estado}
             {retornoParaImprimir.observaciones && <><br /><strong>Obs:</strong> {retornoParaImprimir.observaciones}</>}
@@ -1124,11 +1181,11 @@ export default function CargasPage() {
       <Modal
         open={modal}
         title={tuboSeleccionado ? `Registrar carga — ${tuboSeleccionado.id}` : 'Registrar Carga en Salón'}
-        onClose={() => setModal(false)}
+        onClose={intentarCerrarModalCarga}
         width={520}
         footer={
           <>
-            <button className="btn" onClick={() => setModal(false)}>Cancelar</button>
+            <button className="btn" onClick={intentarCerrarModalCarga}>Cancelar</button>
             <button className="btn btn-primary" onClick={handleSubmit} disabled={saving}>
               {saving ? 'Guardando...' : 'Confirmar carga'}
             </button>
@@ -1144,6 +1201,17 @@ export default function CargasPage() {
                 Serie: {tuboSeleccionado.serie} · Gas: {tuboSeleccionado.gas} · <strong>Capacidad: {formatCapacidad(tuboSeleccionado)}</strong> · <StateBadge estado={tuboSeleccionado.estado} />
               </div>
             </div>
+          </div>
+        )}
+
+        {origenRetorno && (
+          <div style={{ border: '1px dashed var(--border)', borderRadius: 8, padding: 10, marginBottom: 14 }}>
+            <FormGroup label="Cliente que se lleva el tubo ahora (opcional)" hint="Si lo elegís, el tubo queda entregado a ese cliente en vez de disponible en depósito. Dejalo vacío si el tubo se queda en el depósito.">
+              <select value={cargaClienteId} onChange={e => setCargaClienteId(e.target.value)}>
+                <option value="">Queda en depósito</option>
+                {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+              </select>
+            </FormGroup>
           </div>
         )}
 
@@ -1328,6 +1396,15 @@ export default function CargasPage() {
           />
         </FormGroup>
       </Modal>
+
+      <Confirm
+        open={confirmSalirCarga}
+        title="¿Salir sin registrar la carga?"
+        message="Si salís ahora vas a tener que buscar el código del cilindro de nuevo para volver a cargarlo."
+        onConfirm={cerrarModalCarga}
+        onCancel={() => setConfirmSalirCarga(false)}
+        danger
+      />
 
       {/* Modal de confirmación de carga */}
       <Modal

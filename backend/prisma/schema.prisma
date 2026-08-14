@@ -392,7 +392,10 @@ model Carga {
   metodoPago    String?
   createdAt     DateTime  @default(now())
 
-  // Solo se completan cuando tipoCarga = CAMION (venta fraccionada del repartidor)
+  // clienteId: se completa en venta fraccionada de camión (tipoCarga = CAMION)
+  // o cuando el cliente retira en el momento el tubo recién recargado desde
+  // Retorno de Cilindros (tipoCarga = NORMAL) — en ambos casos identifica a
+  // quién se le entregó. montoRecibido solo aplica a la venta fraccionada.
   clienteId     String?
   cliente       Cliente?  @relation(fields: [clienteId], references: [id])
   montoRecibido Decimal?  @db.Decimal(10, 2)
@@ -494,6 +497,7 @@ model Config {
 model CilindroTerceroInfo {
   id              String        @id @default(cuid())
   gas             String        // Oxígeno, CO2, etc.
+  codigo          String?       // código/serie escaneado o tipeado al recibir el cilindro, si se conoce
   capacidadLitros Decimal?      @db.Decimal(5, 2)
   capacidadKg     Decimal?      @db.Decimal(5, 2)
   estado          EstadoTercero @default(PENDIENTE)

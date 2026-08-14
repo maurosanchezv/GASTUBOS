@@ -1,8 +1,13 @@
 // gastubos/frontend/src/pages/VentaProductosPage.jsx
 import { useState, useEffect, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import api from '../services/api.js'
-import { PageHeader, Modal, Spinner, EmptyState, useToast, ObservacionCell } from '../components/ui.jsx'
+import { PageHeader, Modal, Confirm, Spinner, EmptyState, useToast, ObservacionCell } from '../components/ui.jsx'
 import { useAuthStore } from '../store/authStore.js'
+import { useConfigStore } from '../store/configStore.js'
+import { getBrandingSources } from '../utils/logosSvg.js'
+import { conectarImpresoraWebBluetooth, enviarBufferWebBluetooth, esNavegadorMovilConWebBluetooth } from '../utils/webBluetoothPrinter.js'
+import { construirBufferTicketVentaProductos } from '../utils/ticketsImpresion.js'
 
 const fmtGs = (v) => `${Number(v).toLocaleString('es-PY')} Gs.`
 
@@ -16,6 +21,8 @@ let cartKeySeq = 0
 export default function VentaProductosPage() {
   const { user } = useAuthStore()
   const { toast } = useToast()
+  const { nombre_empresa, direccion, telefono, isotipo_empresa, logo_empresa } = useConfigStore()
+  const branding = getBrandingSources(isotipo_empresa, logo_empresa)
   const [tab, setTab] = useState('nueva')
 
   const [productos, setProductos] = useState([])
@@ -34,6 +41,9 @@ export default function VentaProductosPage() {
   const [submitting, setSubmitting] = useState(false)
 
   const [detalleVenta, setDetalleVenta] = useState(null)
+  const [ventaRegistrada, setVentaRegistrada] = useState(null)
+  const [ventaParaImprimir, setVentaParaImprimir] = useState(null)
+  const [confirmVentaOpen, setConfirmVentaOpen] = useState(false)
 
   useEffect(() => {
     api.get('/productos', { params: { activo: true } }).then(r => setProductos(r.data)).catch(() => {})
@@ -65,6 +75,7 @@ export default function VentaProductosPage() {
   )
 
   const agregarProducto = (p) => {
+    setVentaRegistrada(null)
     setCarrito(prev => {
       const existente = prev.find(l => l.productoId === p.id)
       if (existente) {
@@ -87,6 +98,7 @@ export default function VentaProductosPage() {
       toast('Completá la descripción y el precio del ítem libre', 'error')
       return
     }
+    setVentaRegistrada(null)
     setCarrito(prev => [...prev, {
       key: ++cartKeySeq,
       productoId: null,
@@ -118,11 +130,15 @@ export default function VentaProductosPage() {
     setBusqueda('')
   }
 
-  const confirmarVenta = async () => {
+  const intentarRegistrarVenta = () => {
     if (carrito.length === 0) return toast('Agregá al menos un producto o ítem a la venta', 'error')
     if (!metodoPago) return toast('Seleccioná una forma de pago', 'error')
     if (carrito.some(l => !l.cantidad || l.cantidad <= 0)) return toast('Revisá las cantidades cargadas', 'error')
+    setConfirmVentaOpen(true)
+  }
 
+  const confirmarVenta = async () => {
+    setConfirmVentaOpen(false)
     setSubmitting(true)
     try {
       const payload = {
@@ -139,11 +155,41 @@ export default function VentaProductosPage() {
       const r = await api.post('/venta-productos', payload)
       toast(`Venta ${r.data.numero} registrada`, 'success')
       setVentas(prev => [r.data, ...prev])
+      setVentaRegistrada(r.data)
       resetVenta()
     } catch (err) {
       toast(err.response?.data?.error || 'Error al registrar la venta', 'error')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  // Punto único de despacho de impresión del ticket de venta, mismo patrón de
+  // dos vías que CargasPage.jsx/EntregasPage.jsx: Web Bluetooth en navegador
+  // móvil → diálogo de impresión del sistema (@media print) en escritorio.
+  const dispararImpresionVenta = (venta) => {
+    setVentaParaImprimir(venta)
+    setTimeout(() => {
+      if (esNavegadorMovilConWebBluetooth()) {
+        imprimirVentaWebBluetooth(venta)
+      } else {
+        window.print()
+      }
+    }, 150)
+  }
+
+  const imprimirVentaWebBluetooth = async (venta) => {
+    try {
+      const buffer = await construirBufferTicketVentaProductos(venta, {
+        branding, nombreEmpresa: nombre_empresa, direccion, telefono, paperWidth: 32,
+      })
+      const conexion = await conectarImpresoraWebBluetooth()
+      await enviarBufferWebBluetooth(conexion, buffer)
+      toast('Impresión enviada correctamente', 'success')
+    } catch (err) {
+      if (err?.name !== 'NotFoundError') { // el usuario cerró el picker sin elegir nada
+        toast('Error al imprimir: ' + (err?.message || String(err)), 'error')
+      }
     }
   }
 
@@ -375,9 +421,15 @@ export default function VentaProductosPage() {
                 <span style={{ fontSize: 22, fontWeight: 700 }}>{fmtGs(total)}</span>
               </div>
 
-              <button className="btn btn-primary" disabled={submitting} onClick={confirmarVenta}>
+              <button className="btn btn-primary" disabled={submitting} onClick={intentarRegistrarVenta}>
                 {submitting ? 'Registrando...' : <><i className="ti ti-check" /> Registrar Venta</>}
               </button>
+
+              {ventaRegistrada && (
+                <button className="btn" onClick={() => dispararImpresionVenta(ventaRegistrada)} style={{ justifyContent: 'center' }}>
+                  <i className="ti ti-printer" /> Imprimir Ticket (Venta {ventaRegistrada.numero})
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -487,8 +539,26 @@ export default function VentaProductosPage() {
         )}
       </div>
 
+      <Confirm
+        open={confirmVentaOpen}
+        title="¿Confirmar registro de venta?"
+        message={`Se va a registrar la venta por un total de ${fmtGs(total)}. Revisá el carrito antes de confirmar.`}
+        onConfirm={confirmarVenta}
+        onCancel={() => setConfirmVentaOpen(false)}
+      />
+
       {detalleVenta && (
-        <Modal open={true} title={`Venta ${detalleVenta.numero}`} onClose={() => setDetalleVenta(null)} width={560}>
+        <Modal
+          open={true}
+          title={`Venta ${detalleVenta.numero}`}
+          onClose={() => setDetalleVenta(null)}
+          width={560}
+          footer={
+            <button className="btn" onClick={() => dispararImpresionVenta(detalleVenta)}>
+              <i className="ti ti-printer" /> Imprimir Ticket
+            </button>
+          }
+        >
           <div style={{ display: 'grid', gap: 10, fontSize: 13 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--text-secondary)' }}>Cliente</span>
@@ -528,6 +598,75 @@ export default function VentaProductosPage() {
             )}
           </div>
         </Modal>
+      )}
+
+      {/* Ticket de venta: solo visible al imprimir (window.print) */}
+      {ventaParaImprimir && createPortal(
+        <div className="print-ticket-container">
+          <div className="ticket-header">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 15, marginBottom: 10 }}>
+              <img src={branding.isotipoSrc} alt="Isotipo" style={{ width: 40, height: 40, objectFit: 'contain' }} />
+              <img src={branding.logoSrc} alt="Logo" style={{ width: 108, height: 40, objectFit: 'contain' }} />
+            </div>
+            {direccion && <p style={{ margin: 0, fontSize: 10 }}>{direccion}</p>}
+            {telefono && <p style={{ margin: '2px 0 0', fontSize: 10 }}>Tel: {telefono}</p>}
+            <p style={{ margin: '4px 0 0', fontSize: 11, fontWeight: 'bold' }}>VENTA: {ventaParaImprimir.numero}</p>
+          </div>
+
+          <div style={{ margin: '8px 0', fontSize: 11 }}>
+            <strong>Cliente:</strong> {ventaParaImprimir.cliente?.nombre || 'Sin cliente'}<br />
+            {ventaParaImprimir.cliente && <>
+              <strong>RUC/CI:</strong> {ventaParaImprimir.cliente?.ruc || '—'}<br />
+            </>}
+            <strong>Fecha:</strong> {new Date(ventaParaImprimir.fechaVenta).toLocaleString('es-PY')}<br />
+            <strong>Vendedor:</strong> {ventaParaImprimir.usuario?.nombre || '—'}<br />
+            <strong>Forma de pago:</strong> {ventaParaImprimir.metodoPago === 'TRANSFERENCIA' ? 'Transferencia' : 'Efectivo'}
+          </div>
+
+          <table className="ticket-table">
+            <thead>
+              <tr>
+                <th style={{ textAlign: 'left' }}>Producto</th>
+                <th style={{ textAlign: 'center' }}>Cant.</th>
+                <th style={{ textAlign: 'right' }}>Subtotal</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ventaParaImprimir.detalles?.map(d => (
+                <tr key={d.id}>
+                  <td>
+                    {d.descripcion}
+                    {!d.productoId && <span style={{ fontSize: 9, color: '#555', display: 'block' }}>(ítem libre)</span>}
+                  </td>
+                  <td style={{ textAlign: 'center' }}>
+                    {Number(d.cantidad)}<br />
+                    <span style={{ fontSize: 9, color: '#888' }}>x {Number(d.precioUnitario).toLocaleString('es-PY')}</span>
+                  </td>
+                  <td style={{ textAlign: 'right', fontWeight: 500 }}>
+                    {Number(d.subtotal).toLocaleString('es-PY')} GS
+                  </td>
+                </tr>
+              ))}
+              <tr>
+                <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', fontSize: 12 }}>TOTAL:</td>
+                <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: 12, color: 'var(--blue)' }}>
+                  {Number(ventaParaImprimir.total).toLocaleString('es-PY')} GS
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          {ventaParaImprimir.observaciones && (
+            <div style={{ margin: '8px 0', fontSize: 10, fontStyle: 'italic', borderTop: '1px dashed #000', paddingTop: 4 }}>
+              <strong>Obs:</strong> {ventaParaImprimir.observaciones}
+            </div>
+          )}
+
+          <div className="ticket-footer">
+            ¡Gracias por su preferencia!
+          </div>
+        </div>,
+        document.body
       )}
     </>
   )

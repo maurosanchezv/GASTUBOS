@@ -27,6 +27,7 @@ router.get('/', async (req, res, next) => {
     if (q) {
       whereDesconocidos.OR = [
         { gas: { contains: q, mode: 'insensitive' } },
+        { codigo: { contains: q, mode: 'insensitive' } },
         { observaciones: { contains: q, mode: 'insensitive' } },
         { cliente: { nombre: { contains: q, mode: 'insensitive' } } }
       ]
@@ -122,7 +123,7 @@ router.get('/', async (req, res, next) => {
 // asociada), por ejemplo al escanear un código desconocido en Cargas.
 router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
   try {
-    const { gas, capacidadLitros, capacidadKg, observaciones } = req.body
+    const { gas, capacidadLitros, capacidadKg, observaciones, codigo, clienteId } = req.body
 
     if (!gas || !gas.trim()) {
       return res.status(400).json({ error: 'El gas es obligatorio' })
@@ -131,13 +132,19 @@ router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res,
       return res.status(400).json({ error: 'Ingresá la capacidad del cilindro' })
     }
 
+    if (clienteId) {
+      const cliente = await prisma.cliente.findUnique({ where: { id: clienteId } })
+      if (!cliente) return res.status(400).json({ error: 'Cliente no encontrado' })
+    }
+
     const registro = await prisma.cilindroTerceroInfo.create({
       data: {
         gas: gas.trim(),
+        codigo: codigo || undefined,
         capacidadLitros: capacidadLitros !== undefined && capacidadLitros !== null && capacidadLitros !== '' ? Number(capacidadLitros) : null,
         capacidadKg: capacidadKg !== undefined && capacidadKg !== null && capacidadKg !== '' ? Number(capacidadKg) : null,
         estado: 'PENDIENTE',
-        clienteId: null,
+        clienteId: clienteId || null,
         repartidorId: req.user.id,
         observaciones: observaciones || undefined,
       },

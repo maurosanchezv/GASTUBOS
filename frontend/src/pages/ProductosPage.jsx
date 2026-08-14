@@ -265,9 +265,9 @@ export default function ProductosPage() {
           </div>
 
           <div className="form-group col-span-2" style={{ borderTop: '1px solid var(--border)', paddingTop: 12, marginTop: 4 }}>
-            <label className="form-label" style={{ margin: 0, fontWeight: 700 }}>Stock (opcional, aún no se aplica)</label>
+            <label className="form-label" style={{ margin: 0, fontWeight: 700 }}>Stock (opcional)</label>
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
-              No se descuenta automáticamente al vender — es solo referencia para más adelante.
+              Si se completa, se descuenta automáticamente al vender el producto (y se repone si la venta se cancela). Dejalo vacío para no llevar control de stock de este producto.
             </div>
             <div style={{ display: 'flex', gap: 10 }}>
               <div style={{ flex: 1 }}>

@@ -575,6 +575,7 @@ router.put('/:id/confirmar', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR', 'REPA
             await tx.cilindroTerceroInfo.create({
               data: {
                 gas: parsed.gas,
+                codigo: retId,
                 capacidadLitros: parsed.capacidadLitros,
                 capacidadKg: parsed.capacidadKg,
                 estado: 'PENDIENTE',

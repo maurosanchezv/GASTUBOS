@@ -25,7 +25,7 @@ const ventaProductoSchema = z.object({
 })
 
 const includeCompleto = {
-  cliente: { select: { id: true, nombre: true } },
+  cliente: { select: { id: true, nombre: true, ruc: true } },
   usuario: { select: { id: true, nombre: true, username: true } },
   detalles: { include: { producto: { select: { id: true, codigo: true } } } },
 }
@@ -98,17 +98,34 @@ router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res,
     total = Math.round(total * 100) / 100
 
     const numero = await generarNumero('VP')
-    const venta = await prisma.ventaProducto.create({
-      data: {
-        numero,
-        clienteId: data.clienteId || null,
-        usuarioId: req.user.id,
-        metodoPago: data.metodoPago,
-        observaciones: data.observaciones,
-        total,
-        detalles: { create: detallesCreate },
-      },
-      include: includeCompleto,
+    // Registrar la venta y descontar el stock de los productos de catálogo
+    // vendidos en la misma transacción: si el descuento de stock falla, la
+    // venta tampoco debe quedar creada. Los productos con stock null no
+    // llevan control de inventario (ver ProductosPage) y se dejan sin tocar.
+    const venta = await prisma.$transaction(async (tx) => {
+      const creada = await tx.ventaProducto.create({
+        data: {
+          numero,
+          clienteId: data.clienteId || null,
+          usuarioId: req.user.id,
+          metodoPago: data.metodoPago,
+          observaciones: data.observaciones,
+          total,
+          detalles: { create: detallesCreate },
+        },
+        include: includeCompleto,
+      })
+
+      for (const d of detallesCreate) {
+        if (!d.productoId) continue
+        if (productosPorId.get(d.productoId).stock === null) continue
+        await tx.producto.update({
+          where: { id: d.productoId },
+          data: { stock: { decrement: Math.round(d.cantidad) } },
+        })
+      }
+
+      return creada
     })
     res.status(201).json(venta)
   } catch (err) {
@@ -120,14 +137,34 @@ router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res,
 // ─── PATCH /api/venta-productos/:id/cancelar ───────────────────────────────────
 router.patch('/:id/cancelar', requireRol('ADMIN', 'SUPERVISOR'), async (req, res, next) => {
   try {
-    const venta = await prisma.ventaProducto.findUnique({ where: { id: req.params.id } })
+    const venta = await prisma.ventaProducto.findUnique({
+      where: { id: req.params.id },
+      include: { detalles: true },
+    })
     if (!venta) return res.status(404).json({ error: 'Venta no encontrada' })
     if (venta.cancelada) return res.status(400).json({ error: 'La venta ya está cancelada' })
 
-    const actualizada = await prisma.ventaProducto.update({
-      where: { id: req.params.id },
-      data: { cancelada: true },
-      include: includeCompleto,
+    // Reponer el stock descontado al vender, en la misma transacción que la
+    // cancelación. Los productos con stock null nunca se descontaron (no
+    // llevan control de inventario), así que tampoco se reponen.
+    const actualizada = await prisma.$transaction(async (tx) => {
+      const upd = await tx.ventaProducto.update({
+        where: { id: req.params.id },
+        data: { cancelada: true },
+        include: includeCompleto,
+      })
+
+      for (const d of venta.detalles) {
+        if (!d.productoId) continue
+        const producto = await tx.producto.findUnique({ where: { id: d.productoId } })
+        if (!producto || producto.stock === null) continue
+        await tx.producto.update({
+          where: { id: d.productoId },
+          data: { stock: { increment: Math.round(Number(d.cantidad)) } },
+        })
+      }
+
+      return upd
     })
     res.json(actualizada)
   } catch (err) { next(err) }
