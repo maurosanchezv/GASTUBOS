@@ -170,7 +170,7 @@ export default function VentaProductosPage() {
         </div>
 
         {tab === 'nueva' && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.3fr) minmax(0, 1fr)', gap: 16, alignItems: 'start' }}>
+          <div className="venta-grid">
             {/* Columna izquierda: búsqueda + carrito */}
             <div className="card" style={{ padding: 16 }}>
               <div className="search-bar" style={{ marginBottom: 8 }}>
@@ -184,25 +184,14 @@ export default function VentaProductosPage() {
               </div>
 
               {resultadosBusqueda.length > 0 && (
-                <div style={{
-                  border: '1px solid var(--border)', borderRadius: 8, marginBottom: 12,
-                  maxHeight: 220, overflowY: 'auto',
-                }}>
+                <div className="search-results">
                   {resultadosBusqueda.map(p => (
-                    <div
-                      key={p.id}
-                      onClick={() => agregarProducto(p)}
-                      style={{
-                        padding: '8px 12px', cursor: 'pointer', fontSize: 12,
-                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                        borderBottom: '1px solid var(--border-light, #eee)',
-                      }}
-                    >
-                      <div>
+                    <div key={p.id} className="search-result-item" onClick={() => agregarProducto(p)}>
+                      <span className="search-result-name">
                         <span className="td-code" style={{ marginRight: 8 }}>{p.codigo}</span>
                         {p.nombre}
-                      </div>
-                      <strong>{fmtGs(p.precio)}</strong>
+                      </span>
+                      <span className="search-result-price">{fmtGs(p.precio)}</span>
                     </div>
                   ))}
                 </div>
@@ -242,50 +231,103 @@ export default function VentaProductosPage() {
               {carrito.length === 0 ? (
                 <EmptyState icon="ti-shopping-cart" message="Todavía no agregaste ítems" />
               ) : (
-                <table>
-                  <thead>
-                    <tr><th>Ítem</th><th style={{ width: 90 }}>Cant.</th><th style={{ width: 110 }}>P. Unit.</th><th style={{ width: 100 }}>Subtotal</th><th></th></tr>
-                  </thead>
-                  <tbody>
+                <>
+                  {/* VISTA TABLE (Desktop) */}
+                  <div className="table-wrap hide-mobile">
+                    <table>
+                      <thead>
+                        <tr><th>Ítem</th><th style={{ width: 90 }}>Cant.</th><th style={{ width: 110 }}>P. Unit.</th><th style={{ width: 100 }}>Subtotal</th><th></th></tr>
+                      </thead>
+                      <tbody>
+                        {carrito.map(l => (
+                          <tr key={l.key}>
+                            <td>
+                              {l.descripcion}
+                              {l.libre && (
+                                <span style={{
+                                  marginLeft: 6, fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 8,
+                                  background: 'var(--amber-light)', color: 'var(--amber)',
+                                }}>
+                                  ítem libre
+                                </span>
+                              )}
+                            </td>
+                            <td>
+                              <input
+                                type="number" min="0" step="1" value={l.cantidad}
+                                onChange={e => actualizarCantidad(l.key, e.target.value)}
+                                style={{ width: 70, height: 30 }}
+                              />
+                            </td>
+                            <td>
+                              {l.libre ? (
+                                <input
+                                  type="number" min="0" step="1" value={l.precioUnitario}
+                                  onChange={e => actualizarPrecioLibre(l.key, e.target.value)}
+                                  style={{ width: 90, height: 30 }}
+                                />
+                              ) : fmtGs(l.precioUnitario)}
+                            </td>
+                            <td style={{ fontWeight: 600 }}>{fmtGs((Number(l.cantidad) || 0) * (Number(l.precioUnitario) || 0))}</td>
+                            <td>
+                              <button className="btn-icon" onClick={() => quitarLinea(l.key)}>
+                                <i className="ti ti-trash" style={{ color: 'var(--red)' }} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* VISTA CARDS (Mobile) */}
+                  <div className="mobile-list">
                     {carrito.map(l => (
-                      <tr key={l.key}>
-                        <td>
-                          {l.descripcion}
-                          {l.libre && (
-                            <span style={{
-                              marginLeft: 6, fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 8,
-                              background: 'var(--amber-light)', color: 'var(--amber)',
-                            }}>
-                              ítem libre
-                            </span>
-                          )}
-                        </td>
-                        <td>
-                          <input
-                            type="number" min="0" step="1" value={l.cantidad}
-                            onChange={e => actualizarCantidad(l.key, e.target.value)}
-                            style={{ width: 70, height: 30 }}
-                          />
-                        </td>
-                        <td>
-                          {l.libre ? (
-                            <input
-                              type="number" min="0" step="1" value={l.precioUnitario}
-                              onChange={e => actualizarPrecioLibre(l.key, e.target.value)}
-                              style={{ width: 90, height: 30 }}
-                            />
-                          ) : fmtGs(l.precioUnitario)}
-                        </td>
-                        <td style={{ fontWeight: 600 }}>{fmtGs((Number(l.cantidad) || 0) * (Number(l.precioUnitario) || 0))}</td>
-                        <td>
+                      <div key={l.key} className="list-card">
+                        <div className="list-card-header">
+                          <div className="list-card-title" style={{ fontFamily: 'inherit', color: 'inherit' }}>
+                            {l.descripcion}
+                            {l.libre && (
+                              <span style={{
+                                marginLeft: 6, fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 8,
+                                background: 'var(--amber-light)', color: 'var(--amber)',
+                              }}>
+                                ítem libre
+                              </span>
+                            )}
+                          </div>
                           <button className="btn-icon" onClick={() => quitarLinea(l.key)}>
                             <i className="ti ti-trash" style={{ color: 'var(--red)' }} />
                           </button>
-                        </td>
-                      </tr>
+                        </div>
+                        <div className="list-card-body" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
+                          <div className="list-card-item">
+                            <span className="list-card-label">Cantidad</span>
+                            <input
+                              type="number" min="0" step="1" value={l.cantidad}
+                              onChange={e => actualizarCantidad(l.key, e.target.value)}
+                            />
+                          </div>
+                          <div className="list-card-item">
+                            <span className="list-card-label">P. Unit.</span>
+                            {l.libre ? (
+                              <input
+                                type="number" min="0" step="1" value={l.precioUnitario}
+                                onChange={e => actualizarPrecioLibre(l.key, e.target.value)}
+                              />
+                            ) : <span className="list-card-value">{fmtGs(l.precioUnitario)}</span>}
+                          </div>
+                          <div className="list-card-item">
+                            <span className="list-card-label">Subtotal</span>
+                            <span className="list-card-value" style={{ fontWeight: 600 }}>
+                              {fmtGs((Number(l.cantidad) || 0) * (Number(l.precioUnitario) || 0))}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
                     ))}
-                  </tbody>
-                </table>
+                  </div>
+                </>
               )}
             </div>
 
@@ -342,54 +384,105 @@ export default function VentaProductosPage() {
 
         {tab === 'historial' && (
           loadingVentas ? <Spinner /> : (
-            <div className="card table-wrap hide-mobile" style={{ padding: 0 }}>
-              {ventas.length === 0 ? <EmptyState icon="ti-receipt" message="Sin ventas registradas" /> : (
-                <table>
-                  <thead>
-                    <tr><th>Número</th><th>Fecha</th><th>Cliente</th><th>Pago</th><th>Ítems</th><th>Total</th><th>Estado</th><th></th></tr>
-                  </thead>
-                  <tbody>
-                    {ventas.map(v => (
-                      <tr key={v.id} style={{ opacity: v.cancelada ? 0.55 : 1 }}>
-                        <td className="td-code">{v.numero}</td>
-                        <td>{new Date(v.fechaVenta).toLocaleString('es-PY')}</td>
-                        <td>{v.cliente?.nombre || 'Sin cliente'}</td>
-                        <td>
-                          <span style={{
-                            fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 10,
-                            background: v.metodoPago === 'EFECTIVO' ? 'var(--green-light)' : 'var(--blue-light)',
-                            color: v.metodoPago === 'EFECTIVO' ? 'var(--green)' : 'var(--blue-dark)',
-                          }}>
-                            {v.metodoPago === 'EFECTIVO' ? 'Efectivo' : 'Transferencia'}
-                          </span>
-                        </td>
-                        <td>{v.detalles?.length ?? 0}</td>
-                        <td style={{ fontWeight: 600 }}>{fmtGs(v.total)}</td>
-                        <td>
-                          {v.cancelada && (
-                            <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 10, background: 'var(--red-light)', color: 'var(--red)' }}>
-                              Cancelada
+            <>
+              {/* VISTA TABLE (Desktop) */}
+              <div className="card table-wrap hide-mobile" style={{ padding: 0 }}>
+                {ventas.length === 0 ? <EmptyState icon="ti-receipt" message="Sin ventas registradas" /> : (
+                  <table>
+                    <thead>
+                      <tr><th>Número</th><th>Fecha</th><th>Cliente</th><th>Pago</th><th>Ítems</th><th>Total</th><th>Estado</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                      {ventas.map(v => (
+                        <tr key={v.id} style={{ opacity: v.cancelada ? 0.55 : 1 }}>
+                          <td className="td-code">{v.numero}</td>
+                          <td>{new Date(v.fechaVenta).toLocaleString('es-PY')}</td>
+                          <td>{v.cliente?.nombre || 'Sin cliente'}</td>
+                          <td>
+                            <span style={{
+                              fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 10,
+                              background: v.metodoPago === 'EFECTIVO' ? 'var(--green-light)' : 'var(--blue-light)',
+                              color: v.metodoPago === 'EFECTIVO' ? 'var(--green)' : 'var(--blue-dark)',
+                            }}>
+                              {v.metodoPago === 'EFECTIVO' ? 'Efectivo' : 'Transferencia'}
                             </span>
-                          )}
-                        </td>
-                        <td>
-                          <div style={{ display: 'flex', gap: 4 }}>
-                            <button className="btn-icon" title="Ver detalle" onClick={() => setDetalleVenta(v)}>
-                              <i className="ti ti-eye" />
-                            </button>
-                            {puedeCancelar && !v.cancelada && (
-                              <button className="btn-icon" title="Cancelar venta" onClick={() => cancelarVenta(v)}>
-                                <i className="ti ti-x" style={{ color: 'var(--red)' }} />
-                              </button>
+                          </td>
+                          <td>{v.detalles?.length ?? 0}</td>
+                          <td style={{ fontWeight: 600 }}>{fmtGs(v.total)}</td>
+                          <td>
+                            {v.cancelada && (
+                              <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 10, background: 'var(--red-light)', color: 'var(--red)' }}>
+                                Cancelada
+                              </span>
                             )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', gap: 4 }}>
+                              <button className="btn-icon" title="Ver detalle" onClick={() => setDetalleVenta(v)}>
+                                <i className="ti ti-eye" />
+                              </button>
+                              {puedeCancelar && !v.cancelada && (
+                                <button className="btn-icon" title="Cancelar venta" onClick={() => cancelarVenta(v)}>
+                                  <i className="ti ti-x" style={{ color: 'var(--red)' }} />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              {/* VISTA CARDS (Mobile) */}
+              <div className="mobile-list">
+                {ventas.length === 0 ? (
+                  <EmptyState icon="ti-receipt" message="Sin ventas registradas" />
+                ) : (
+                  ventas.map(v => (
+                    <div key={v.id} className="list-card" style={{ opacity: v.cancelada ? 0.55 : 1 }}>
+                      <div className="list-card-header">
+                        <div className="list-card-title">{v.numero}</div>
+                        {v.cancelada && (
+                          <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 10, background: 'var(--red-light)', color: 'var(--red)' }}>
+                            Cancelada
+                          </span>
+                        )}
+                      </div>
+                      <div className="list-card-body">
+                        <div className="list-card-item">
+                          <span className="list-card-label">Fecha</span>
+                          <span className="list-card-value">{new Date(v.fechaVenta).toLocaleString('es-PY')}</span>
+                        </div>
+                        <div className="list-card-item">
+                          <span className="list-card-label">Cliente</span>
+                          <span className="list-card-value">{v.cliente?.nombre || 'Sin cliente'}</span>
+                        </div>
+                        <div className="list-card-item">
+                          <span className="list-card-label">Pago</span>
+                          <span className="list-card-value">{v.metodoPago === 'EFECTIVO' ? 'Efectivo' : 'Transferencia'}</span>
+                        </div>
+                        <div className="list-card-item">
+                          <span className="list-card-label">Total</span>
+                          <span className="list-card-value" style={{ fontWeight: 600 }}>{fmtGs(v.total)}</span>
+                        </div>
+                      </div>
+                      <div className="list-card-actions">
+                        <button className="btn btn-sm" style={{ flex: 1 }} onClick={() => setDetalleVenta(v)}>
+                          <i className="ti ti-eye" /> Ver detalle
+                        </button>
+                        {puedeCancelar && !v.cancelada && (
+                          <button className="btn btn-sm" onClick={() => cancelarVenta(v)}>
+                            <i className="ti ti-x" style={{ color: 'var(--red)' }} /> Cancelar
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </>
           )
         )}
       </div>
@@ -409,19 +502,21 @@ export default function VentaProductosPage() {
               <span style={{ color: 'var(--text-secondary)' }}>Registrada por</span>
               <span style={{ fontWeight: 500 }}>{detalleVenta.usuario?.nombre || '—'}</span>
             </div>
-            <table>
-              <thead><tr><th>Ítem</th><th>Cant.</th><th>P. Unit.</th><th>Subtotal</th></tr></thead>
-              <tbody>
-                {detalleVenta.detalles?.map(d => (
-                  <tr key={d.id}>
-                    <td>{d.descripcion}{!d.productoId && <span style={{ marginLeft: 4, fontSize: 10, color: 'var(--amber)' }}>(libre)</span>}</td>
-                    <td>{Number(d.cantidad)}</td>
-                    <td>{fmtGs(d.precioUnitario)}</td>
-                    <td>{fmtGs(d.subtotal)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Ítem</th><th>Cant.</th><th>P. Unit.</th><th>Subtotal</th></tr></thead>
+                <tbody>
+                  {detalleVenta.detalles?.map(d => (
+                    <tr key={d.id}>
+                      <td>{d.descripcion}{!d.productoId && <span style={{ marginLeft: 4, fontSize: 10, color: 'var(--amber)' }}>(libre)</span>}</td>
+                      <td>{Number(d.cantidad)}</td>
+                      <td>{fmtGs(d.precioUnitario)}</td>
+                      <td>{fmtGs(d.subtotal)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border)', paddingTop: 8 }}>
               <strong>Total</strong>
               <strong>{fmtGs(detalleVenta.total)}</strong>
