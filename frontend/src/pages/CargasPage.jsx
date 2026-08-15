@@ -508,7 +508,7 @@ export default function CargasPage() {
                       {cargas.map(c => {
                         const cant = Number(c.cantidad || 0)
                         const pu = Number(c.precioUnitario || 0)
-                        const sub = cant * pu
+                        const sub = Math.round(cant * pu)
                         const uLabel = c.unidad === 'KG' ? 'kg' : 'm³'
                         return (
                           <tr key={c.id}>
@@ -564,7 +564,7 @@ export default function CargasPage() {
                   {cargas.map(c => {
                     const cant = Number(c.cantidad || 0)
                     const pu = Number(c.precioUnitario || 0)
-                    const sub = cant * pu
+                    const sub = Math.round(cant * pu)
                     const uLabel = c.unidad === 'KG' ? 'kg' : 'm³'
                     return (
                       <div key={c.id} className="list-card">

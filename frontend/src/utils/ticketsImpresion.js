@@ -262,7 +262,7 @@ export async function construirBufferTicketVentaCamion(carga, config) {
 
   const cantStr = `${formatNumberSpanish(carga.cantidad)} ${carga.unidad}`
   const precioUnitStr = Number(carga.precioUnitario).toLocaleString('es-PY')
-  const subtotal = Number(carga.cantidad) * Number(carga.precioUnitario)
+  const subtotal = Math.round(Number(carga.cantidad) * Number(carga.precioUnitario))
   const subtotalStr = subtotal.toLocaleString('es-PY') + ' GS'
 
   builder.addTextLine(`${carga.tubo?.gas || ''} (Tubo ${carga.tuboId})`.slice(0, width))

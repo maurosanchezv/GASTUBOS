@@ -9,7 +9,7 @@ import { getBrandingSources } from '../utils/logosSvg.js'
 import { conectarImpresoraWebBluetooth, enviarBufferWebBluetooth, esNavegadorMovilConWebBluetooth } from '../utils/webBluetoothPrinter.js'
 import { construirBufferTicketVentaProductos } from '../utils/ticketsImpresion.js'
 
-const fmtGs = (v) => `${Number(v).toLocaleString('es-PY')} Gs.`
+const fmtGs = (v) => `${Math.round(Number(v) || 0).toLocaleString('es-PY')} Gs.`
 
 const METODOS = [
   { value: 'EFECTIVO',     label: 'Efectivo',     icon: 'ti-cash' },

@@ -1298,7 +1298,7 @@ export default function RepartoPage() {
                 <div className="reparto-grid">
                   {historialFiltrado.map(e => {
                     if (e._tipo === 'carga_camion') {
-                      const monto = Number(e.cantidad) * Number(e.precioUnitario)
+                      const monto = Math.round(Number(e.cantidad) * Number(e.precioUnitario))
                       return (
                         <div
                           key={`carga-${e.id}`}
@@ -2226,13 +2226,13 @@ export default function RepartoPage() {
                   </span>
                 </td>
                 <td style={{ textAlign: 'right', fontWeight: '500' }}>
-                  {(Number(ventaParaImprimir.cantidad) * Number(ventaParaImprimir.precioUnitario)).toLocaleString('es-PY')} GS
+                  {Math.round(Number(ventaParaImprimir.cantidad) * Number(ventaParaImprimir.precioUnitario)).toLocaleString('es-PY')} GS
                 </td>
               </tr>
               <tr>
                 <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px', paddingTop: '6px' }}>TOTAL:</td>
                 <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px', color: 'var(--blue)', paddingTop: '6px' }}>
-                  {(Number(ventaParaImprimir.cantidad) * Number(ventaParaImprimir.precioUnitario)).toLocaleString('es-PY')} GS
+                  {Math.round(Number(ventaParaImprimir.cantidad) * Number(ventaParaImprimir.precioUnitario)).toLocaleString('es-PY')} GS
                 </td>
               </tr>
             </tbody>
@@ -2551,7 +2551,7 @@ export default function RepartoPage() {
                     {formatNumberSpanish(cargaCamionSeleccionada.cantidad)} {cargaCamionSeleccionada.unidad}
                   </td>
                   <td style={{ textAlign: 'right', paddingTop: '6px', fontWeight: 600 }}>
-                    {(Number(cargaCamionSeleccionada.cantidad) * Number(cargaCamionSeleccionada.precioUnitario)).toLocaleString('es-PY')} GS
+                    {Math.round(Number(cargaCamionSeleccionada.cantidad) * Number(cargaCamionSeleccionada.precioUnitario)).toLocaleString('es-PY')} GS
                   </td>
                 </tr>
               </tbody>
