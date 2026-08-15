@@ -186,9 +186,10 @@ router.get('/resumen', async (req, res, next) => {
 
     const ventasCamion = Object.values(ventasCamionGroupMap)
 
-    // Rendición por repartidor
+    // Rendición por repartidor (excluye canal SALON: son ventas de mostrador,
+    // no rendición de caja de un chofer en ruta)
     const repartidoresMap = {}
-    entregas.filter(e => !e.cancelada).forEach(e => {
+    entregas.filter(e => !e.cancelada && e.canal !== 'SALON').forEach(e => {
       const rId = e.repartidorId || 'SIN_ASIGNAR'
       const rNombre = e.repartidor?.nombre || e.repartidor?.username || 'Sin asignación'
       if (!repartidoresMap[rId]) {

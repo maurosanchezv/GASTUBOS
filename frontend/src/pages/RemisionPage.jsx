@@ -264,7 +264,7 @@ export default function RemisionPage() {
               <div className="card-header"><div className="card-title">Resumen</div></div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 4 }}>
-                <Linea label="Chofer" value={entrega.repartidor?.nombre || 'Sin asignar'} />
+                <Linea label={entrega.canal === 'SALON' ? 'Atendido por' : 'Chofer'} value={entrega.repartidor?.nombre || 'Sin asignar'} />
                 <Linea label="Cilindros" value={String(detalles.length)} />
                 <div style={{ borderTop: '1px solid var(--border)', margin: '2px 0' }} />
                 <Linea label="Subtotal" value={gs(subtotalTubos)} />

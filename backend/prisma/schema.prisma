@@ -56,6 +56,11 @@ enum TipoOperacion {
   VENTA            // genera registro en Venta
 }
 
+enum CanalEntrega {
+  REPARTO   // repartidor en camión, con GPS/dirección real
+  SALON     // retiro en mostrador, sin repartidor real ni geolocalización
+}
+
 enum EstadoAlquiler {
   ACTIVO
   VENCIDO
@@ -225,6 +230,7 @@ model Entrega {
   latitud         Float?
   longitud        Float?
   tipoOperacion   TipoOperacion
+  canal           CanalEntrega  @default(REPARTO)
   fechaEntrega    DateTime      @default(now())
   observaciones   String?
 

@@ -121,7 +121,8 @@ export async function construirBufferTicketEntrega(entrega, config) {
 
     builder.addTextLine('Fecha: ' + new Date(entrega.fechaEntrega).toLocaleString('es-PY'))
 
-    const choferText = 'Chofer: ' + (entrega.repartidor?.nombre || 'Sin asignar')
+    const choferLabel = entrega.canal === 'SALON' ? 'Atendido por: ' : 'Chofer: '
+    const choferText = choferLabel + (entrega.repartidor?.nombre || 'Sin asignar')
     wrapText(choferText, width).forEach(l => builder.addTextLine(l))
 
     builder.addTextLine('Tipo: ' + (entrega.tipoOperacion || '').replace('_', ' '))
@@ -185,7 +186,7 @@ export async function construirBufferTicketEntrega(entrega, config) {
     const spacesBetweenLines = width - (lineLength * 2)
     builder.addTextLine(leftLine + ' '.repeat(spacesBetweenLines) + rightLine)
 
-    const labelLeft = 'Firma Chofer'
+    const labelLeft = entrega.canal === 'SALON' ? 'Firma Operador' : 'Firma Chofer'
     const labelRight = 'Firma Cliente'
     const padLeft = Math.max(0, Math.floor((lineLength - labelLeft.length) / 2))
     const padRight = Math.max(0, Math.floor((lineLength - labelRight.length) / 2))

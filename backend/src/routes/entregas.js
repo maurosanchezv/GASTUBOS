@@ -70,6 +70,7 @@ const entregaSchema = z.object({
   latitud:          z.number().optional(),
   longitud:         z.number().optional(),
   tipoOperacion:    z.enum(['ENTREGA_SIMPLE', 'ALQUILER', 'VENTA']),
+  canal:            z.enum(['REPARTO', 'SALON']).optional().default('REPARTO'),
   repartidorId:     z.string().min(1, 'repartidorId es requerido'),
   observaciones:    z.string().optional(),
   tubosIds:         z.array(z.string()).min(1, 'Debe incluir al menos un tubo'),
@@ -90,9 +91,10 @@ const entregaSchema = z.object({
 // ─── GET /api/entregas ────────────────────────────────────────────────────────
 router.get('/', async (req, res, next) => {
   try {
-    const { clienteId, repartidorId, confirmada, cancelada, desde, hasta, page = 1, limit = 30 } = req.query
+    const { clienteId, repartidorId, canal, confirmada, cancelada, desde, hasta, page = 1, limit = 30 } = req.query
     const where = {}
     if (clienteId) where.clienteId = clienteId
+    if (canal) where.canal = canal
     if (repartidorId) where.repartidorId = repartidorId
     
     if (confirmada !== undefined) {
@@ -161,6 +163,10 @@ router.get('/numero/:numero', async (req, res, next) => {
 router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
   try {
     const data = entregaSchema.parse(req.body)
+
+    // En salón, el "repartidor" es en realidad quien atiende el mostrador —
+    // se fuerza al usuario logueado sin confiar en lo que mande el frontend.
+    const repartidorId = data.canal === 'SALON' ? req.user.id : data.repartidorId
 
     // Validar que todos los tubos existen y están en estado permitido
     const tubos = await prisma.tubo.findMany({
@@ -265,7 +271,8 @@ router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res,
           latitud:          data.latitud,
           longitud:         data.longitud,
           tipoOperacion:    data.tipoOperacion,
-          repartidorId:     data.repartidorId,
+          canal:            data.canal,
+          repartidorId,
           observaciones:    data.observaciones,
           creadoPorId:      req.user.id,
           costoDelivery:    data.costoDelivery,
