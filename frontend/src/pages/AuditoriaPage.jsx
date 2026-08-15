@@ -1,7 +1,7 @@
 // gastubos/frontend/src/pages/AuditoriaPage.jsx
 import { useState, useEffect, useCallback } from 'react'
 import api from '../services/api.js'
-import { PageHeader, StateBadge, Spinner, EmptyState } from '../components/ui.jsx'
+import { PageHeader, StateBadge, Spinner, EmptyState, ObservacionCell } from '../components/ui.jsx'
 
 export default function AuditoriaPage() {
   const [registros, setRegistros] = useState([])
@@ -105,7 +105,9 @@ export default function AuditoriaPage() {
                       {a.observaciones && (
                         <div className="list-card-item col-span-2">
                           <span className="list-card-label">Obs.</span>
-                          <span className="list-card-value" style={{ whiteSpace: 'normal', fontSize: 11 }}>{a.observaciones}</span>
+                          <span className="list-card-value" style={{ fontSize: 11 }}>
+                            <ObservacionCell texto={a.observaciones} titulo="Observación de auditoría" maxWidth={220} />
+                          </span>
                         </div>
                       )}
                     </div>

@@ -180,6 +180,37 @@ router.post('/:id/asignar', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async
   }
 })
 
+// ─── POST /api/camiones/:id/seleccionar ───────────────────────────────────────
+// El repartidor marca "este es el camión que voy a usar hoy". Habilita al
+// backend a validar, en la venta desde camión, que el repartidor efectivamente
+// tiene ese camión en mano (ver POST /api/cargas/venta-camion).
+router.post('/:id/seleccionar', requireRol('REPARTIDOR'), async (req, res, next) => {
+  try {
+    const { id } = req.params
+    const camion = await prisma.camion.findUnique({ where: { id } })
+    if (!camion) return res.status(404).json({ error: 'Camión no encontrado' })
+    if (!camion.activo) return res.status(400).json({ error: 'El camión no está activo' })
+
+    const actualizado = await prisma.camion.update({
+      where: { id },
+      data: { repartidorActualId: req.user.id }
+    })
+    res.json(actualizado)
+  } catch (err) { next(err) }
+})
+
+// ─── DELETE /api/camiones/seleccion ───────────────────────────────────────────
+// El repartidor "suelta" el camión que tenía seleccionado (si lo tenía).
+router.delete('/seleccion', requireRol('REPARTIDOR'), async (req, res, next) => {
+  try {
+    await prisma.camion.updateMany({
+      where: { repartidorActualId: req.user.id },
+      data: { repartidorActualId: null }
+    })
+    res.json({ success: true })
+  } catch (err) { next(err) }
+})
+
 // ─── POST /api/camiones/:id/liberar ───────────────────────────────────────────
 const liberarSchema = z.object({
   tubosIds: z.array(z.string()).min(1, 'Debe incluir al menos un tubo'),

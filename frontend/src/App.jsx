@@ -19,6 +19,7 @@ import DevolucionesPage from './pages/DevolucionesPage.jsx'
 import AlquileresPage  from './pages/AlquileresPage.jsx'
 import VentasPage      from './pages/VentasPage.jsx'
 import ReportesPage    from './pages/ReportesPage.jsx'
+import MovimientoDineroPage from './pages/MovimientoDineroPage.jsx'
 import AuditoriaPage   from './pages/AuditoriaPage.jsx'
 import PerfilPage      from './pages/PerfilPage.jsx'
 import UsuariosPage    from './pages/UsuariosPage.jsx'
@@ -28,7 +29,10 @@ import RepartoPage     from './pages/RepartoPage.jsx'
 import RemisionPage    from './pages/RemisionPage.jsx'
 import CamionesPage    from './pages/CamionesPage.jsx'
 import TuboPublicoPage from './pages/TuboPublicoPage.jsx'  // sin auth
+import DiagnosticoBluetoothPage from './pages/DiagnosticoBluetoothPage.jsx'  // sin auth, herramienta interna
 import CilindrosTercerosPage from './pages/CilindrosTercerosPage.jsx'
+import ProductosPage      from './pages/ProductosPage.jsx'
+import VentaProductosPage from './pages/VentaProductosPage.jsx'
 
 // El REPARTIDOR no debe ver el Dashboard administrativo; lo desviamos
 // directo a su hoja de ruta. El resto de los roles entra al Dashboard.
@@ -63,6 +67,9 @@ export default function App() {
         {/* Pública: página de tubo al escanear QR */}
         <Route path="/tubos/:id" element={<TuboPublicoPage />} />
 
+        {/* Pública: diagnóstico interno de Web Bluetooth (no se linkea desde ningún menú) */}
+        <Route path="/diagnostico-bluetooth" element={<DiagnosticoBluetoothPage />} />
+
         {/* Auth */}
         <Route path="/login" element={<LoginPage />} />
 
@@ -90,6 +97,12 @@ export default function App() {
           <Route path="devoluciones" element={
             <PrivateRoute roles={['ADMIN', 'SUPERVISOR', 'OPERADOR', 'REPARTIDOR']}><DevolucionesPage /></PrivateRoute>
           } />
+          <Route path="productos" element={
+            <PrivateRoute roles={['ADMIN', 'SUPERVISOR', 'OPERADOR']}><ProductosPage /></PrivateRoute>
+          } />
+          <Route path="venta-productos" element={
+            <PrivateRoute roles={['ADMIN', 'SUPERVISOR', 'OPERADOR']}><VentaProductosPage /></PrivateRoute>
+          } />
           {/* Rutas temporalmente deshabilitadas
           <Route path="alquileres" element={
             <PrivateRoute roles={['ADMIN', 'SUPERVISOR', 'OPERADOR']}><AlquileresPage /></PrivateRoute>
@@ -99,6 +112,9 @@ export default function App() {
           } /> */}
           <Route path="reportes" element={
             <PrivateRoute roles={['ADMIN', 'SUPERVISOR']}><ReportesPage /></PrivateRoute>
+          } />
+          <Route path="movimiento-dinero" element={
+            <PrivateRoute roles={['ADMIN', 'SUPERVISOR']}><MovimientoDineroPage /></PrivateRoute>
           } />
           <Route path="auditoria" element={
             <PrivateRoute roles={['ADMIN', 'SUPERVISOR']}><AuditoriaPage /></PrivateRoute>

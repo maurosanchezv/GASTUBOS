@@ -45,9 +45,17 @@ const NAV = [
     ],
   },
   {
+    group: 'VENTAS',
+    items: [
+      { to: '/venta-productos', icon: 'ti-shopping-cart', label: 'Venta de Productos', restrictedTo: OFICINA },
+      { to: '/productos',       icon: 'ti-package',        label: 'Productos',          restrictedTo: OFICINA },
+    ],
+  },
+  {
     group: 'ADMINISTRACIÓN',
     items: [
       { to: '/reportes',      icon: 'ti-chart-bar', label: 'Reportes',      restrictedTo: ['ADMIN', 'SUPERVISOR'] },
+      { to: '/movimiento-dinero', icon: 'ti-cash-banknote', label: 'Movimiento de Dinero', restrictedTo: ['ADMIN', 'SUPERVISOR'] },
       { to: '/auditoria',     icon: 'ti-file-text', label: 'Auditoría',     restrictedTo: ['ADMIN', 'SUPERVISOR'] },
       { to: '/usuarios',      icon: 'ti-user-cog',  label: 'Usuarios',      restrictedTo: ['ADMIN', 'SUPERVISOR'] },
       { to: '/configuracion', icon: 'ti-settings',  label: 'Configuración', restrictedTo: ['ADMIN'] },
@@ -294,6 +302,7 @@ export default function Layout() {
                   else if (item.to === '/entregas' || item.to === '/camiones') { borderCol = 'var(--teal)'; iconClass = 'launcher-icon-teal'; }
                   else if (item.to === '/cargas' || item.to === '/devoluciones') { borderCol = 'var(--coral)'; iconClass = 'launcher-icon-coral'; }
                   else if (item.to === '/alquileres' || item.to === '/ventas') { borderCol = 'var(--purple)'; iconClass = 'launcher-icon-purple'; }
+                  else if (item.to === '/venta-productos' || item.to === '/productos') { borderCol = 'var(--purple)'; iconClass = 'launcher-icon-purple'; }
                   else if (item.to === '/clientes') { borderCol = 'var(--amber)'; iconClass = 'launcher-icon-amber'; }
                   else if (item.to === '/reportes' || item.to === '/auditoria') { borderCol = 'var(--purple)'; iconClass = 'launcher-icon-purple'; }
 

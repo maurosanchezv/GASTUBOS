@@ -11,6 +11,7 @@ import {
   FormGroup,
   Spinner,
   formatCapacidad,
+  ObservacionCell,
 } from "../components/ui.jsx";
 import { useConfigStore } from "../store/configStore.js";
 import { useToast } from "../components/ui.jsx";
@@ -28,6 +29,9 @@ const GAS_LABELS = {
 };
 
 const GASES = ['CO2', 'Oxígeno', 'Argón', 'Nitrógeno', 'Aire comprimido', 'Acetileno', 'Mezcla Ar+CO2', 'Mezcla especial'];
+
+const TIPO_CARGA_LABEL = { NORMAL: 'Normal', SALON: 'Salón', CAMION: 'En camión' };
+const TIPO_CARGA_BADGE = { NORMAL: 'badge-CARGADO', SALON: 'badge-REPARTIDOR', CAMION: 'badge-ALQUILADO' };
 
 export default function TuboDetallePage() {
   const { nombre_empresa, telefono, isotipo_empresa, logo_empresa, fetchConfig } = useConfigStore();
@@ -542,10 +546,10 @@ export default function TuboDetallePage() {
                             </td>
                             <td>
                               <span
-                                className={`badge ${c.tipoCarga === 'SALON' ? 'badge-REPARTIDOR' : 'badge-CARGADO'}`}
+                                className={`badge ${TIPO_CARGA_BADGE[c.tipoCarga] || 'badge-CARGADO'}`}
                                 style={{ fontSize: 10 }}
                               >
-                                {c.tipoCarga === 'SALON' ? 'Salón' : 'Normal'}
+                                {TIPO_CARGA_LABEL[c.tipoCarga] || 'Normal'}
                               </span>
                             </td>
                             <td>{GAS_LABELS[c.tipoGas] || c.tipoGas}</td>
@@ -566,17 +570,8 @@ export default function TuboDetallePage() {
                             >
                               {c.operador?.nombre || c.operador?.username}
                             </td>
-                            <td
-                              style={{
-                                color: "var(--text-secondary)",
-                                fontSize: 11,
-                                maxWidth: 120,
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap",
-                              }}
-                            >
-                              {c.observaciones || "—"}
+                            <td style={{ fontSize: 11 }}>
+                              <ObservacionCell texto={c.observaciones} titulo="Observaciones de la carga" maxWidth={120} />
                             </td>
                           </tr>
                         );
@@ -625,10 +620,10 @@ export default function TuboDetallePage() {
                               {GAS_LABELS[c.tipoGas] || c.tipoGas}
                             </strong>
                             <span
-                              className={`badge ${c.tipoCarga === 'SALON' ? 'badge-REPARTIDOR' : 'badge-CARGADO'}`}
+                              className={`badge ${TIPO_CARGA_BADGE[c.tipoCarga] || 'badge-CARGADO'}`}
                               style={{ fontSize: 9, padding: '1px 5px' }}
                             >
-                              {c.tipoCarga === 'SALON' ? 'Salón' : 'Normal'}
+                              {TIPO_CARGA_LABEL[c.tipoCarga] || 'Normal'}
                             </span>
                           </div>
                           <span
@@ -678,8 +673,8 @@ export default function TuboDetallePage() {
                         </div>
 
                         {c.observaciones && (
-                          <div style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                            Obs: {c.observaciones}
+                          <div style={{ fontSize: 11 }}>
+                            Obs: <ObservacionCell texto={c.observaciones} titulo="Observaciones de la carga" maxWidth={200} />
                           </div>
                         )}
                       </div>
@@ -776,17 +771,8 @@ export default function TuboDetallePage() {
                                 "—"
                               )}
                             </td>
-                            <td
-                              style={{
-                                color: "var(--text-secondary)",
-                                fontSize: 11,
-                                maxWidth: 120,
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap",
-                              }}
-                            >
-                              {a.observaciones || "—"}
+                            <td style={{ fontSize: 11 }}>
+                              <ObservacionCell texto={a.observaciones} titulo="Observación del movimiento" maxWidth={120} />
                             </td>
                           </tr>
                         ))}
@@ -907,13 +893,11 @@ export default function TuboDetallePage() {
                           <div
                             style={{
                               fontSize: 10,
-                              fontStyle: "italic",
-                              color: "var(--text-muted)",
                               borderTop: "0.5px solid var(--border)",
                               paddingTop: 4,
                             }}
                           >
-                            {a.observaciones}
+                            <ObservacionCell texto={a.observaciones} titulo="Observación del movimiento" maxWidth={220} />
                           </div>
                         )}
                       </div>

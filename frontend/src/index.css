@@ -381,6 +381,16 @@ tr:last-child td { border-bottom: none; }
 tr:hover td { background: var(--surface-2); }
 .td-code { font-family: var(--font-mono); font-size: 11px; font-weight: 500; color: var(--blue); }
 
+.obs-cell {
+  display: inline-flex; align-items: center; gap: 4px; max-width: 100%;
+  cursor: pointer; color: var(--text-secondary);
+  border-bottom: 1px dotted var(--border-mid);
+}
+.obs-cell:hover { color: var(--blue); border-bottom-color: var(--blue); }
+.obs-cell i { font-size: 13px; flex-shrink: 0; }
+.obs-cell span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.obs-modal-text { white-space: pre-wrap; line-height: 1.6; margin: 0; font-size: 13px; }
+
 /* ── Form ────────────────────────────────────────────────────── */
 .form-grid     { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .form-grid-3   { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
@@ -443,6 +453,29 @@ textarea { resize: vertical; min-height: 72px; }
 }
 .search-bar i  { color: var(--text-muted); font-size: 17px; flex-shrink: 0; }
 .search-bar input { border: none; background: transparent; outline: none; font-size: 14px; flex: 1; }
+
+.search-results {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  margin-bottom: 12px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.search-result-item {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  padding: 8px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-light, #eee);
+  min-height: 44px;
+}
+.search-result-item:last-child { border-bottom: none; }
+.search-result-item:hover { background: var(--surface-2); }
+.search-result-name { display: flex; align-items: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.search-result-price { flex-shrink: 0; font-weight: 600; margin-left: 8px; }
+@media (max-width: 1024px) {
+  .search-result-item { padding: 10px 12px; font-size: 13px; }
+}
 
 /* ── Modal ───────────────────────────────────────────────────── */
 .modal-overlay {
@@ -716,6 +749,12 @@ textarea { resize: vertical; min-height: 72px; }
 .responsive-grid > * {
   min-width: 0;
 }
+.venta-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
 @media (max-width: 1024px) {
   .entregas-grid { grid-template-columns: 1fr; }
   .responsive-grid {
@@ -723,6 +762,7 @@ textarea { resize: vertical; min-height: 72px; }
     flex-direction: column-reverse;
     gap: 16px;
   }
+  .venta-grid { grid-template-columns: 1fr; }
 }
 
 /* ── Estilos de Impresión para Remisión Térmica (80mm) ───────────────── */

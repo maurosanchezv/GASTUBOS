@@ -31,7 +31,7 @@ export async function generarIdTubo(tx = prisma) {
 export async function generarNumero(prefijo, tx = prisma) {
   const anio = new Date().getFullYear()
   const key  = `${prefijo}-${anio}`
-  
+
   const counter = await tx.counter.upsert({
     where: { key },
     update: { value: { increment: 1 } },
@@ -40,4 +40,20 @@ export async function generarNumero(prefijo, tx = prisma) {
 
   const num = String(counter.value).padStart(3, '0')
   return `${prefijo}-${anio}-${num}`
+}
+
+/**
+ * Mapea el campo libre Tubo.gas (string) al enum TipoGas.
+ */
+export function mapTuboGasToTipoGas(tuboGas) {
+  if (!tuboGas) return 'CO2'
+  const norm = tuboGas.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+  if (norm.includes('co2')) return 'CO2'
+  if (norm.includes('oxigeno')) return 'OXIGENO'
+  if (norm.includes('argon')) return 'ARGON'
+  if (norm.includes('nitrogeno')) return 'NITROGENO'
+  if (norm.includes('aire')) return 'AIRE_COMPRIMIDO'
+  if (norm.includes('mezcla')) return 'MEZCLA_CO2_ARGON'
+  if (norm.includes('acetileno')) return 'ACETILENO'
+  return 'CO2'
 }

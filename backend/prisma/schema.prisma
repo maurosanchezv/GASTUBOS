@@ -47,12 +47,18 @@ enum TipoPropietario {
 enum TipoCarga {
   NORMAL
   SALON
+  CAMION
 }
 
 enum TipoOperacion {
   ENTREGA_SIMPLE   // entrega sin alquiler formal
   ALQUILER         // genera registro en Alquiler
   VENTA            // genera registro en Venta
+}
+
+enum CanalEntrega {
+  REPARTO   // repartidor en camión, con GPS/dirección real
+  SALON     // retiro en mostrador, sin repartidor real ni geolocalización
 }
 
 enum EstadoAlquiler {
@@ -83,6 +89,11 @@ enum UnidadGas {
   M3
 }
 
+enum MetodoPago {
+  EFECTIVO
+  TRANSFERENCIA
+}
+
 // ─── USUARIOS ─────────────────────────────────────────────────────────────────
 
 model Usuario {
@@ -103,6 +114,8 @@ model Usuario {
   entregasRepartidor         Entrega[]   @relation("EntregaRepartidor")
   cargas                     Carga[]
   cilindrosTercerosRecibidos CilindroTerceroInfo[]
+  camionesEnUso              Camion[]    @relation("CamionRepartidorActual")
+  ventasProductos            VentaProducto[]
 
   @@map("usuarios")
 }
@@ -128,8 +141,10 @@ model Cliente {
   ventas      Venta[]
   entregas    Entrega[]
   recambios   Recambio[]
+  cargas      Carga[]     // ventas fraccionadas de gas desde camión
   cilindrosTerceros CilindroTerceroInfo[]
   sucursales  SucursalCliente[]
+  ventasProductos VentaProducto[]
 
   @@map("clientes")
 }
@@ -175,6 +190,10 @@ model Tubo {
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
 
+  // Gas restante en el tubo (usado por ventas fraccionadas desde camión).
+  // Se setea al cargar el tubo y se va descontando hasta llegar a 0.
+  cantidadActual  Decimal?        @db.Decimal(10, 3)
+
   // cliente actualmente asignado (null si está en depósito)
   clienteId       String?
   cliente         Cliente?        @relation(fields: [clienteId], references: [id])
@@ -211,6 +230,7 @@ model Entrega {
   latitud         Float?
   longitud        Float?
   tipoOperacion   TipoOperacion
+  canal           CanalEntrega  @default(REPARTO)
   fechaEntrega    DateTime      @default(now())
   observaciones   String?
 
@@ -295,6 +315,70 @@ model Venta {
   @@map("ventas")
 }
 
+// ─── PRODUCTOS Y VENTA DE PRODUCTOS ────────────────────────────────────────────
+// Maestro de productos/accesorios (independiente de los cilindros/Tubo) y sus
+// ventas. Separado del flujo de venta de cilindros (Venta, arriba) porque no
+// hay un Tubo físico involucrado.
+
+model Producto {
+  id              String   @id @default(cuid())
+  codigo          String   @unique
+  nombre          String
+  descripcion     String?
+  categoria       String                     // slug libre, ej. "soldadura-tig"
+  categoriaNombre String?
+  precio          Decimal  @db.Decimal(10, 2)
+  unidad          String   @default("unidades")
+  stock           Int?     // reservado para control de stock futuro, sin lógica aplicada aún
+  stockMinimo     Int?
+  activo          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  detalles        DetalleVentaProducto[]
+
+  @@index([categoria])
+  @@map("productos")
+}
+
+model VentaProducto {
+  id            String     @id @default(cuid())
+  numero        String     @unique  // VP-2026-001
+  clienteId     String?
+  cliente       Cliente?   @relation(fields: [clienteId], references: [id])
+  usuarioId     String
+  usuario       Usuario    @relation(fields: [usuarioId], references: [id])
+  metodoPago    MetodoPago
+  total         Decimal    @db.Decimal(10, 2)
+  observaciones String?
+  cancelada     Boolean    @default(false)
+  fechaVenta    DateTime   @default(now())
+  createdAt     DateTime   @default(now())
+
+  detalles      DetalleVentaProducto[]
+
+  @@index([clienteId])
+  @@index([usuarioId])
+  @@index([fechaVenta])
+  @@map("ventas_productos")
+}
+
+model DetalleVentaProducto {
+  id              String        @id @default(cuid())
+  ventaProductoId String
+  ventaProducto   VentaProducto @relation(fields: [ventaProductoId], references: [id])
+  productoId      String?                        // null = ítem libre, no catalogado
+  producto        Producto?     @relation(fields: [productoId], references: [id])
+  descripcion     String                          // snapshot del nombre (o texto libre tipeado)
+  cantidad        Decimal       @db.Decimal(10, 3) @default(1.000)
+  precioUnitario  Decimal       @db.Decimal(10, 2) // snapshot, no se recalcula si el maestro cambia después
+  subtotal        Decimal       @db.Decimal(10, 2) // cantidad × precioUnitario, calculado server-side
+
+  @@index([ventaProductoId])
+  @@index([productoId])
+  @@map("detalles_venta_productos")
+}
+
 // ─── CARGAS ───────────────────────────────────────────────────────────────────
 
 model Carga {
@@ -311,11 +395,21 @@ model Carga {
   operadorId    String
   operador      Usuario   @relation(fields: [operadorId], references: [id])
   observaciones String?
+  metodoPago    String?
   createdAt     DateTime  @default(now())
+
+  // clienteId: se completa en venta fraccionada de camión (tipoCarga = CAMION)
+  // o cuando el cliente retira en el momento el tubo recién recargado desde
+  // Retorno de Cilindros (tipoCarga = NORMAL) — en ambos casos identifica a
+  // quién se le entregó. montoRecibido solo aplica a la venta fraccionada.
+  clienteId     String?
+  cliente       Cliente?  @relation(fields: [clienteId], references: [id])
+  montoRecibido Decimal?  @db.Decimal(10, 2)
 
   @@index([tuboId])
   @@index([operadorId])
   @@index([fechaCarga])
+  @@index([clienteId])
   @@map("cargas")
 }
 
@@ -388,6 +482,10 @@ model Camion {
 
   tubos        Tubo[]
 
+  // Repartidor que tiene este camión seleccionado ahora mismo (null = nadie lo tiene)
+  repartidorActualId String?
+  repartidorActual   Usuario? @relation("CamionRepartidorActual", fields: [repartidorActualId], references: [id])
+
   @@map("camiones")
 }
 
@@ -405,13 +503,16 @@ model Config {
 model CilindroTerceroInfo {
   id              String        @id @default(cuid())
   gas             String        // Oxígeno, CO2, etc.
+  codigo          String?       // código/serie escaneado o tipeado al recibir el cilindro, si se conoce
   capacidadLitros Decimal?      @db.Decimal(5, 2)
   capacidadKg     Decimal?      @db.Decimal(5, 2)
   estado          EstadoTercero @default(PENDIENTE)
   observaciones   String?
 
-  clienteId       String
-  cliente         Cliente       @relation(fields: [clienteId], references: [id])
+  // Opcional: los recibidos por retorno directo en Cargas quedan sin cliente
+  // hasta completarse después desde esta misma pantalla.
+  clienteId       String?
+  cliente         Cliente?      @relation(fields: [clienteId], references: [id])
 
   entregaId       String?
   entrega         Entrega?      @relation(fields: [entregaId], references: [id])

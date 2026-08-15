@@ -27,6 +27,7 @@ router.get('/', async (req, res, next) => {
     if (q) {
       whereDesconocidos.OR = [
         { gas: { contains: q, mode: 'insensitive' } },
+        { codigo: { contains: q, mode: 'insensitive' } },
         { observaciones: { contains: q, mode: 'insensitive' } },
         { cliente: { nombre: { contains: q, mode: 'insensitive' } } }
       ]

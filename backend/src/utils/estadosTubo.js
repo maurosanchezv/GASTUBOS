@@ -16,7 +16,8 @@ export const TRANSICIONES_VALIDAS = {
   ENTREGADO:   ['DEVUELTO', 'EN_REVISION', 'PERDIDO', 'DE_BAJA'],
   ALQUILADO:   ['DEVUELTO', 'EN_REVISION', 'PERDIDO', 'DE_BAJA'],
   VENDIDO:     [],   // estado final
-  RESERVADO:   ['DISPONIBLE', 'CARGADO', 'ENTREGADO', 'ALQUILADO'],
+  // VACIO: venta desde camión que agota el gas de un tubo asignado (ver POST /api/cargas/venta-camion)
+  RESERVADO:   ['DISPONIBLE', 'CARGADO', 'ENTREGADO', 'ALQUILADO', 'VACIO'],
   PERDIDO:     ['EN_REVISION', 'DE_BAJA'],
   DEVUELTO:    ['DISPONIBLE', 'VACIO', 'EN_REVISION', 'CARGADO', 'DE_BAJA'],
   EN_REVISION: ['DISPONIBLE', 'VACIO', 'CARGADO', 'DE_BAJA'],

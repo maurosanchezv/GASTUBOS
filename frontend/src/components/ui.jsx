@@ -91,6 +91,30 @@ export function Modal({ open, title, onClose, children, footer, width = 540, clo
   )
 }
 
+// ── Observación clickeable con popup de detalle ────────────────
+export function ObservacionCell({ texto, titulo = 'Observaciones', maxWidth = 160 }) {
+  const [open, setOpen] = useState(false)
+
+  if (!texto) return <span style={{ color: 'var(--text-muted)' }}>—</span>
+
+  return (
+    <>
+      <span
+        className="obs-cell"
+        style={{ maxWidth }}
+        title="Ver observación completa"
+        onClick={e => { e.stopPropagation(); setOpen(true) }}
+      >
+        <i className="ti ti-notes" />
+        <span>{texto}</span>
+      </span>
+      <Modal open={open} title={titulo} onClose={() => setOpen(false)} width={480} closeOnOverlayClick>
+        <p className="obs-modal-text">{texto}</p>
+      </Modal>
+    </>
+  )
+}
+
 // ── Confirm dialog ─────────────────────────────────────────────
 export function Confirm({ open, title, message, onConfirm, onCancel, danger = false }) {
   if (!open) return null
@@ -166,6 +190,13 @@ export function formatCapacidad(tubo) {
   }
   const val = tubo.capacidadLitros !== undefined && tubo.capacidadLitros !== null ? tubo.capacidadLitros : (tubo.capacidadKg || 0)
   return `${Number(val)} m³`
+}
+
+// ── Format gas unit of measure helper ──────────────────────────
+export function formatUnidadGas(gas) {
+  const g = (gas || '').toLowerCase()
+  if (g.includes('co2') || g.includes('acetileno')) return 'kg'
+  return 'm³'
 }
 
 // ── Toast notification ─────────────────────────────────────────

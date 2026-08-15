@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import api from '../services/api.js'
-import { PageHeader, Spinner, GasDot, EmptyState, formatCapacidad } from '../components/ui.jsx'
+import { PageHeader, Spinner, GasDot, EmptyState, formatCapacidad, ObservacionCell } from '../components/ui.jsx'
 
 const gs = (v) => `${Number(v || 0).toLocaleString('es-PY')} Gs`
 const cap = (t) => formatCapacidad(t)
@@ -140,7 +140,13 @@ export default function RemisionPage() {
                 <Campo label="Teléfono" value={entrega.cliente?.telefono || '—'} mono />
                 <Campo label="Tipo de operación" value={TIPO_LABEL[entrega.tipoOperacion] || entrega.tipoOperacion} />
                 <Campo label="Dirección" value={entrega.direccionEntrega || '—'} span />
-                {getObservacionesLimpias(entrega, detalles) && <Campo label="Observaciones" value={getObservacionesLimpias(entrega, detalles)} span />}
+                {getObservacionesLimpias(entrega, detalles) && (
+                  <Campo
+                    label="Observaciones"
+                    value={<ObservacionCell texto={getObservacionesLimpias(entrega, detalles)} titulo="Observaciones" maxWidth={400} />}
+                    span
+                  />
+                )}
               </div>
             </div>
 
@@ -258,7 +264,7 @@ export default function RemisionPage() {
               <div className="card-header"><div className="card-title">Resumen</div></div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 4 }}>
-                <Linea label="Chofer" value={entrega.repartidor?.nombre || 'Sin asignar'} />
+                <Linea label={entrega.canal === 'SALON' ? 'Atendido por' : 'Chofer'} value={entrega.repartidor?.nombre || 'Sin asignar'} />
                 <Linea label="Cilindros" value={String(detalles.length)} />
                 <div style={{ borderTop: '1px solid var(--border)', margin: '2px 0' }} />
                 <Linea label="Subtotal" value={gs(subtotalTubos)} />

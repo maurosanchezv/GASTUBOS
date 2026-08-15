@@ -1,7 +1,7 @@
 // gastubos/frontend/src/pages/CargasPage.jsx
 import { useState, useEffect, useCallback } from 'react'
 import api from '../services/api.js'
-import { PageHeader, Modal, FormGroup, Spinner, EmptyState, GasDot, StateBadge, useToast, formatCapacidad } from '../components/ui.jsx'
+import { PageHeader, Modal, FormGroup, Spinner, EmptyState, GasDot, StateBadge, useToast, formatCapacidad, ObservacionCell } from '../components/ui.jsx'
 import { useAuthStore } from '../store/authStore.js'
 
 const TIPO_GAS_LABEL = {
@@ -12,6 +12,18 @@ const TIPO_GAS_LABEL = {
   AIRE_COMPRIMIDO: 'Aire comprimido',
   MEZCLA_CO2_ARGON:'Mezcla 80% CO₂ / 20% Argón',
   ACETILENO:       'Acetileno',
+}
+
+const TIPO_CARGA_LABEL = {
+  NORMAL: 'Normal',
+  SALON:  'Salón',
+  CAMION: 'En camión',
+}
+
+const TIPO_CARGA_BADGE = {
+  NORMAL: 'badge-CARGADO',
+  SALON:  'badge-REPARTIDOR',
+  CAMION: 'badge-ALQUILADO',
 }
 
 const TIPO_GAS_UNIDAD = {
@@ -26,6 +38,7 @@ const GAS_STRING_TO_ENUM = {
   'Nitrógeno': 'NITROGENO', 'Nitrogeno': 'NITROGENO',
   'Aire comprimido': 'AIRE_COMPRIMIDO',
   'Mezcla': 'MEZCLA_CO2_ARGON',
+  'Mezcla especial': 'MEZCLA_CO2_ARGON',
   'Acetileno': 'ACETILENO',
 }
 
@@ -43,7 +56,7 @@ const formatNumberSpanish = (val) => {
 
 const FORM_INICIAL = {
   tuboId: '', tipoGas: '', unidad: '', tipoCarga: 'NORMAL', cantidad: '',
-  fechaCarga: new Date().toISOString().slice(0, 16), observaciones: '',
+  fechaCarga: new Date().toISOString().slice(0, 16), observaciones: '', metodoPago: '',
 }
 
 export default function CargasPage() {
@@ -67,6 +80,7 @@ export default function CargasPage() {
   const [filtroHasta, setFiltroHasta] = useState('')
   const [calcPrecio, setCalcPrecio] = useState('')       // SIEMPRE manual, nunca se recalcula
   const [calcMonto, setCalcMonto] = useState('')
+  const [modoCalculo, setModoCalculo] = useState('PRECIO') // 'PRECIO' | 'MONTO' — cuál de los dos es editable
 
   const limit = 50
 
@@ -145,6 +159,7 @@ export default function CargasPage() {
 
     setCalcPrecio('')
     setCalcMonto('')
+    setModoCalculo('PRECIO')
 
     setModal(true)
   }
@@ -167,24 +182,34 @@ export default function CargasPage() {
 
     setCalcPrecio('')
     setCalcMonto('')
+    setModoCalculo('PRECIO')
 
     setModal(true)
   }
 
-  // 1. Cambia Cantidad -> recalcula Monto (T = Q × U).
+  // 1. Cambia Cantidad -> recalcula Monto (T = Q × U) en modo PRECIO, o el Precio (U = T / Q) en modo MONTO.
   const handleCantidadChange = (cantidad) => {
     setForm(prev => ({ ...prev, cantidad }))
     const q = Number(cantidad)
-    const u = Number(calcPrecio)
 
-    if (!isNaN(q) && cantidad !== '' && q >= 0 && u > 0) {
-      setCalcMonto(Math.round(q * u).toString())
+    if (modoCalculo === 'MONTO') {
+      const m = Number(calcMonto)
+      if (!isNaN(q) && cantidad !== '' && q > 0 && m > 0) {
+        setCalcPrecio(Math.round(m / q).toString())
+      } else {
+        setCalcPrecio('')
+      }
     } else {
-      setCalcMonto('')
+      const u = Number(calcPrecio)
+      if (!isNaN(q) && cantidad !== '' && q >= 0 && u > 0) {
+        setCalcMonto(Math.round(q * u).toString())
+      } else {
+        setCalcMonto('')
+      }
     }
   }
 
-  // 2. Cambia Precio -> recalcula Monto (T = Q × U).
+  // 2. Cambia Precio -> recalcula Monto (T = Q × U). Solo aplica en modo PRECIO.
   const handleCalcPrecioChange = (precio) => {
     setCalcPrecio(precio)
     const u = Number(precio)
@@ -197,6 +222,25 @@ export default function CargasPage() {
     }
   }
 
+  // 3. Cambia Monto -> recalcula Precio unitario (U = T / Q). Solo aplica en modo MONTO.
+  const handleCalcMontoChange = (monto) => {
+    setCalcMonto(monto)
+    const m = Number(monto)
+    const q = Number(form.cantidad)
+
+    if (!isNaN(m) && monto !== '' && m >= 0 && q > 0) {
+      setCalcPrecio(Math.round(m / q).toString())
+    } else {
+      setCalcPrecio('')
+    }
+  }
+
+  function cambiarModoCalculo(modo) {
+    setModoCalculo(modo)
+    setCalcPrecio('')
+    setCalcMonto('')
+  }
+
   function handleSubmit() {
     if (tuboSeleccionado && !form.tuboId) {
       toast('Completá los campos obligatorios', 'error')
@@ -204,6 +248,10 @@ export default function CargasPage() {
     }
     if (!form.tipoGas || !form.cantidad || !form.fechaCarga) {
       toast('Completá los campos obligatorios', 'error')
+      return
+    }
+    if (!form.metodoPago) {
+      toast('Seleccioná la forma de pago', 'error')
       return
     }
     setConfirmOpen(true)
@@ -221,8 +269,12 @@ export default function CargasPage() {
         precioUnitario: Number(calcPrecio) || 0,
         fechaCarga:    new Date(form.fechaCarga).toISOString(),
         observaciones: form.observaciones || undefined,
+        metodoPago:    form.metodoPago,
       })
-      toast(tuboSeleccionado ? 'Carga registrada — tubo pasó a estado CARGADO' : 'Carga en salón registrada con éxito', 'success')
+      toast(
+        tuboSeleccionado ? 'Carga registrada — tubo pasó a estado CARGADO' : 'Carga en salón registrada con éxito',
+        'success'
+      )
       setConfirmOpen(false)
       setModal(false)
       if (tab === 'pendientes') loadTubos()
@@ -462,8 +514,8 @@ export default function CargasPage() {
                           <tr key={c.id}>
                             <td style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{c.numero}</td>
                             <td>
-                              <span className={`badge ${c.tipoCarga === 'SALON' ? 'badge-REPARTIDOR' : 'badge-CARGADO'}`} style={{ fontSize: 10 }}>
-                                {c.tipoCarga === 'SALON' ? 'Salón' : 'Normal'}
+                              <span className={`badge ${TIPO_CARGA_BADGE[c.tipoCarga] || 'badge-CARGADO'}`} style={{ fontSize: 10 }}>
+                                {TIPO_CARGA_LABEL[c.tipoCarga] || 'Normal'}
                               </span>
                             </td>
                             <td>
@@ -497,8 +549,8 @@ export default function CargasPage() {
                             <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
                               {c.operador?.nombre || c.operador?.username}
                             </td>
-                            <td style={{ fontSize: 11, color: 'var(--text-secondary)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {c.observaciones || '—'}
+                            <td style={{ fontSize: 11 }}>
+                              <ObservacionCell texto={c.observaciones} titulo="Observaciones de la carga" />
                             </td>
                           </tr>
                         )
@@ -523,6 +575,12 @@ export default function CargasPage() {
                           </div>
                         </div>
                         <div className="list-card-body">
+                          <div className="list-card-item">
+                            <span className="list-card-label">Tipo</span>
+                            <span className={`badge ${TIPO_CARGA_BADGE[c.tipoCarga] || 'badge-CARGADO'}`} style={{ fontSize: 10 }}>
+                              {TIPO_CARGA_LABEL[c.tipoCarga] || 'Normal'}
+                            </span>
+                          </div>
                           <div className="list-card-item">
                             <span className="list-card-label">Tubo</span>
                             <span className="list-card-value">{c.tubo?.id || 'Carga en salón'}</span>
@@ -556,7 +614,9 @@ export default function CargasPage() {
                           {c.observaciones && (
                             <div className="list-card-item col-span-2">
                               <span className="list-card-label">Obs.</span>
-                              <span className="list-card-value" style={{ whiteSpace: 'normal', fontSize: 11 }}>{c.observaciones}</span>
+                              <span className="list-card-value" style={{ fontSize: 11 }}>
+                                <ObservacionCell texto={c.observaciones} titulo="Observaciones de la carga" maxWidth={220} />
+                              </span>
                             </div>
                           )}
                         </div>
@@ -575,6 +635,7 @@ export default function CargasPage() {
             )}
           </>
         )}
+
       </div>
 
       {/* Modal de carga */}
@@ -649,55 +710,132 @@ export default function CargasPage() {
           marginBottom: 16, 
           background: 'var(--bg-subtle)'
         }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: 4 }}>
-            <i className="ti ti-calculator" /> Asistente de cobro (Opcional)
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <i className="ti ti-calculator" /> Asistente de cobro (Opcional)
+            </div>
+            <div style={{ display: 'flex', border: '1px solid var(--border-mid)', borderRadius: 6, overflow: 'hidden' }}>
+              <button
+                type="button"
+                onClick={() => cambiarModoCalculo('PRECIO')}
+                style={{
+                  padding: '4px 10px', fontSize: 11, fontWeight: 600, border: 'none', cursor: 'pointer',
+                  background: modoCalculo === 'PRECIO' ? 'var(--blue)' : 'transparent',
+                  color: modoCalculo === 'PRECIO' ? '#fff' : 'var(--text-secondary)',
+                }}
+              >
+                Por precio unitario
+              </button>
+              <button
+                type="button"
+                onClick={() => cambiarModoCalculo('MONTO')}
+                style={{
+                  padding: '4px 10px', fontSize: 11, fontWeight: 600, border: 'none', cursor: 'pointer',
+                  background: modoCalculo === 'MONTO' ? 'var(--blue)' : 'transparent',
+                  color: modoCalculo === 'MONTO' ? '#fff' : 'var(--text-secondary)',
+                }}
+              >
+                Por monto total
+              </button>
+            </div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <FormGroup label="Precio unitario (Gs.)">
-              <input
-                type="number"
-                min="0"
-                placeholder="ej: 10000"
-                value={calcPrecio}
-                onChange={e => handleCalcPrecioChange(e.target.value)}
-              />
+              {modoCalculo === 'PRECIO' ? (
+                <input
+                  type="number"
+                  min="0"
+                  placeholder="ej: 10000"
+                  value={calcPrecio}
+                  onChange={e => handleCalcPrecioChange(e.target.value)}
+                />
+              ) : (
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="text"
+                    readOnly
+                    placeholder="Cálculo automático"
+                    value={calcPrecio ? `${Number(calcPrecio).toLocaleString('es-PY')} Gs.` : ''}
+                    style={{
+                      background: 'var(--bg-subtle, #f1f5f9)',
+                      cursor: 'not-allowed',
+                      color: 'var(--text-secondary)',
+                      fontWeight: 600,
+                      paddingRight: 32
+                    }}
+                  />
+                  <i className="ti ti-lock" style={{
+                    position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
+                    color: 'var(--text-muted)', fontSize: 14
+                  }} />
+                </div>
+              )}
             </FormGroup>
             <FormGroup label="Monto total (Gs.)">
-              <div style={{ position: 'relative' }}>
+              {modoCalculo === 'MONTO' ? (
                 <input
-                  type="text"
-                  readOnly
-                  placeholder="Cálculo automático"
-                  value={calcMonto ? `${Number(calcMonto).toLocaleString('es-PY')} Gs.` : ''}
-                  style={{
-                    background: 'var(--bg-subtle, #f1f5f9)',
-                    cursor: 'not-allowed',
-                    color: 'var(--text-secondary)',
-                    fontWeight: 600,
-                    paddingRight: 32
-                  }}
+                  type="number"
+                  min="0"
+                  placeholder="ej: 250000"
+                  value={calcMonto}
+                  onChange={e => handleCalcMontoChange(e.target.value)}
                 />
-                <i className="ti ti-lock" style={{
-                  position: 'absolute',
-                  right: 10,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  color: 'var(--text-muted)',
-                  fontSize: 14
-                }} />
-              </div>
+              ) : (
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="text"
+                    readOnly
+                    placeholder="Cálculo automático"
+                    value={calcMonto ? `${Number(calcMonto).toLocaleString('es-PY')} Gs.` : ''}
+                    style={{
+                      background: 'var(--bg-subtle, #f1f5f9)',
+                      cursor: 'not-allowed',
+                      color: 'var(--text-secondary)',
+                      fontWeight: 600,
+                      paddingRight: 32
+                    }}
+                  />
+                  <i className="ti ti-lock" style={{
+                    position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
+                    color: 'var(--text-muted)', fontSize: 14
+                  }} />
+                </div>
+              )}
             </FormGroup>
           </div>
-          {!calcPrecio || Number(calcPrecio) <= 0 ? (
-            <div style={{ fontSize: 11, color: 'var(--amber, #d97706)', marginTop: 6, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
-              <i className="ti ti-info-circle" /> Ingresá el precio unitario para calcular el monto total
-            </div>
-          ) : Number(form.cantidad) > 0 && calcMonto !== '' ? (
-            <div style={{ fontSize: 11, color: 'var(--blue)', marginTop: 6, fontWeight: 600 }}>
-              Cálculo: {formatNumberSpanish(Number(form.cantidad))} {form.unidad || 'unidad'} × {Number(calcPrecio).toLocaleString('es-PY')} Gs./{form.unidad || 'unidad'} = {Number(calcMonto).toLocaleString('es-PY')} Gs.
-            </div>
-          ) : null}
+          {modoCalculo === 'PRECIO' ? (
+            !calcPrecio || Number(calcPrecio) <= 0 ? (
+              <div style={{ fontSize: 11, color: 'var(--amber, #d97706)', marginTop: 6, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <i className="ti ti-info-circle" /> Ingresá el precio unitario para calcular el monto total
+              </div>
+            ) : Number(form.cantidad) > 0 && calcMonto !== '' ? (
+              <div style={{ fontSize: 11, color: 'var(--blue)', marginTop: 6, fontWeight: 600 }}>
+                Cálculo: {formatNumberSpanish(Number(form.cantidad))} {form.unidad || 'unidad'} × {Number(calcPrecio).toLocaleString('es-PY')} Gs./{form.unidad || 'unidad'} = {Number(calcMonto).toLocaleString('es-PY')} Gs.
+              </div>
+            ) : null
+          ) : (
+            !calcMonto || Number(calcMonto) <= 0 ? (
+              <div style={{ fontSize: 11, color: 'var(--amber, #d97706)', marginTop: 6, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <i className="ti ti-info-circle" /> Ingresá el monto total para calcular el precio unitario
+              </div>
+            ) : Number(form.cantidad) > 0 && calcPrecio !== '' ? (
+              <div style={{ fontSize: 11, color: 'var(--blue)', marginTop: 6, fontWeight: 600 }}>
+                Cálculo: {Number(calcMonto).toLocaleString('es-PY')} Gs. ÷ {formatNumberSpanish(Number(form.cantidad))} {form.unidad || 'unidad'} = {Number(calcPrecio).toLocaleString('es-PY')} Gs./{form.unidad || 'unidad'}
+              </div>
+            ) : null
+          )}
         </div>
+
+        <FormGroup label="Forma de pago" required>
+          <select
+            value={form.metodoPago}
+            onChange={e => setForm(prev => ({ ...prev, metodoPago: e.target.value }))}
+          >
+            <option value="">Seleccioná...</option>
+            <option value="EFECTIVO">Efectivo</option>
+            <option value="TRANSFERENCIA">Transferencia</option>
+          </select>
+        </FormGroup>
 
         <FormGroup label="Observaciones">
           <textarea
@@ -753,7 +891,12 @@ export default function CargasPage() {
                 {Number(calcPrecio || 0).toLocaleString('es-PY')} GS / {form.unidad === 'KG' ? 'kg' : 'm³'}
               </span>
             </div>
-            
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+              <span style={{ color: 'var(--text-muted)' }}>Forma de pago:</span>
+              <span style={{ fontWeight: 600 }}>{form.metodoPago === 'TRANSFERENCIA' ? 'Transferencia' : 'Efectivo'}</span>
+            </div>
+
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
               <span style={{ fontWeight: 600 }}>Monto Total:</span>
               <span style={{ fontWeight: 800, fontSize: 15, color: 'var(--green)' }}>

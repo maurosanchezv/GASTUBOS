@@ -10,7 +10,7 @@ import { z } from 'zod'
 import { prisma } from '../utils/prisma.js'
 import { requireAuth, requireRol } from '../middleware/auth.js'
 import { registrarAuditoria } from '../utils/auditoria.js'
-import { generarNumero } from '../utils/helpers.js'
+import { generarNumero, mapTuboGasToTipoGas } from '../utils/helpers.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -70,10 +70,12 @@ const entregaSchema = z.object({
   latitud:          z.number().optional(),
   longitud:         z.number().optional(),
   tipoOperacion:    z.enum(['ENTREGA_SIMPLE', 'ALQUILER', 'VENTA']),
+  canal:            z.enum(['REPARTO', 'SALON']).optional().default('REPARTO'),
   repartidorId:     z.string().min(1, 'repartidorId es requerido'),
   observaciones:    z.string().optional(),
   tubosIds:         z.array(z.string()).min(1, 'Debe incluir al menos un tubo'),
   costoDelivery:    z.coerce.number().optional().default(0),
+  metodoPago:       z.enum(['EFECTIVO', 'TRANSFERENCIA']),
   tubosDetalles:    z.array(z.object({
     tuboId:         z.string(),
     cantidadGas:    z.coerce.number().optional(),
@@ -86,26 +88,13 @@ const entregaSchema = z.object({
   referencia:       z.string().optional(),
 })
 
-// Helper para mapear el gas del tubo (string) al enum de TipoGas
-function mapTuboGasToTipoGas(tuboGas) {
-  if (!tuboGas) return 'CO2'
-  const norm = tuboGas.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-  if (norm.includes('co2')) return 'CO2'
-  if (norm.includes('oxigeno')) return 'OXIGENO'
-  if (norm.includes('argon')) return 'ARGON'
-  if (norm.includes('nitrogeno')) return 'NITROGENO'
-  if (norm.includes('aire')) return 'AIRE_COMPRIMIDO'
-  if (norm.includes('mezcla')) return 'MEZCLA_CO2_ARGON'
-  if (norm.includes('acetileno')) return 'ACETILENO'
-  return 'CO2'
-}
-
 // ─── GET /api/entregas ────────────────────────────────────────────────────────
 router.get('/', async (req, res, next) => {
   try {
-    const { clienteId, repartidorId, confirmada, cancelada, desde, hasta, page = 1, limit = 30 } = req.query
+    const { clienteId, repartidorId, canal, confirmada, cancelada, desde, hasta, page = 1, limit = 30 } = req.query
     const where = {}
     if (clienteId) where.clienteId = clienteId
+    if (canal) where.canal = canal
     if (repartidorId) where.repartidorId = repartidorId
     
     if (confirmada !== undefined) {
@@ -174,6 +163,10 @@ router.get('/numero/:numero', async (req, res, next) => {
 router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
   try {
     const data = entregaSchema.parse(req.body)
+
+    // En salón, el "repartidor" es en realidad quien atiende el mostrador —
+    // se fuerza al usuario logueado sin confiar en lo que mande el frontend.
+    const repartidorId = data.canal === 'SALON' ? req.user.id : data.repartidorId
 
     // Validar que todos los tubos existen y están en estado permitido
     const tubos = await prisma.tubo.findMany({
@@ -278,10 +271,12 @@ router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res,
           latitud:          data.latitud,
           longitud:         data.longitud,
           tipoOperacion:    data.tipoOperacion,
-          repartidorId:     data.repartidorId,
+          canal:            data.canal,
+          repartidorId,
           observaciones:    data.observaciones,
           creadoPorId:      req.user.id,
           costoDelivery:    data.costoDelivery,
+          metodoPago:       data.metodoPago,
           detalles: {
             create: detallesAInsertar,
           },
@@ -399,7 +394,9 @@ router.put('/:id/confirmar', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR', 'REPA
         where: { id },
         data: {
           confirmada: true,
-          metodoPago: metodoPago || null,
+          // La forma de pago ya se elige al crear la entrega; solo se pisa acá
+          // si explícitamente viene una nueva (compatibilidad hacia atrás).
+          metodoPago: metodoPago || entrega.metodoPago || null,
           montoRecibido: montoRecibido !== undefined ? montoRecibido : null,
           observaciones: observacionesActualizadas || null,
         },
@@ -585,6 +582,7 @@ router.put('/:id/confirmar', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR', 'REPA
             await tx.cilindroTerceroInfo.create({
               data: {
                 gas: parsed.gas,
+                codigo: retId,
                 capacidadLitros: parsed.capacidadLitros,
                 capacidadKg: parsed.capacidadKg,
                 estado: 'PENDIENTE',

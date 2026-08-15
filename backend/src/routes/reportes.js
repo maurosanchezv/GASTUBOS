@@ -69,7 +69,8 @@ router.get('/resumen', async (req, res, next) => {
         },
         include: {
           operador: { select: { id: true, nombre: true, username: true } },
-          tubo: { select: { id: true, gas: true } }
+          tubo: { select: { id: true, gas: true } },
+          cliente: { select: { id: true, nombre: true } }
         },
         orderBy: { fechaCarga: 'desc' }
       }),
@@ -137,11 +138,9 @@ router.get('/resumen', async (req, res, next) => {
       }
     })
 
-    const saldoPendiente = Math.max(0, totalFacturado - montoRecibido)
-
-    // Agrupación de Cargas por Tipo de Gas y Unidad
+    // Agrupación de Cargas (entradas de stock: NORMAL/SALON) por Tipo de Gas y Unidad
     const cargasGroupMap = {}
-    cargas.forEach(c => {
+    cargas.filter(c => c.tipoCarga !== 'CAMION').forEach(c => {
       const key = `${c.tipoGas}_${c.unidad}`
       if (!cargasGroupMap[key]) {
         cargasGroupMap[key] = {
@@ -164,9 +163,33 @@ router.get('/resumen', async (req, res, next) => {
       promedioCarga: g.conteo > 0 ? (g.cantidadTotal / g.conteo) : 0
     }))
 
-    // Rendición por repartidor
+    // Ventas fraccionadas desde camión (tipoCarga=CAMION), agrupadas igual que cargasPorGas
+    const ventasCamionGroupMap = {}
+    const cargasCamion = cargas.filter(c => c.tipoCarga === 'CAMION')
+    cargasCamion.forEach(c => {
+      const key = `${c.tipoGas}_${c.unidad}`
+      if (!ventasCamionGroupMap[key]) {
+        ventasCamionGroupMap[key] = {
+          tipoGas: c.tipoGas,
+          unidad: c.unidad,
+          conteo: 0,
+          cantidadTotal: 0,
+          valorTotal: 0
+        }
+      }
+      const cant = Number(c.cantidad || 0)
+      const prec = Number(c.precioUnitario || 0)
+      ventasCamionGroupMap[key].conteo += 1
+      ventasCamionGroupMap[key].cantidadTotal += cant
+      ventasCamionGroupMap[key].valorTotal += cant * prec
+    })
+
+    const ventasCamion = Object.values(ventasCamionGroupMap)
+
+    // Rendición por repartidor (excluye canal SALON: son ventas de mostrador,
+    // no rendición de caja de un chofer en ruta)
     const repartidoresMap = {}
-    entregas.filter(e => !e.cancelada).forEach(e => {
+    entregas.filter(e => !e.cancelada && e.canal !== 'SALON').forEach(e => {
       const rId = e.repartidorId || 'SIN_ASIGNAR'
       const rNombre = e.repartidor?.nombre || e.repartidor?.username || 'Sin asignación'
       if (!repartidoresMap[rId]) {
@@ -202,7 +225,45 @@ router.get('/resumen', async (req, res, next) => {
       repartidoresMap[rId].saldoPendiente += Math.max(0, totalOperacion - recibido)
     })
 
+    // Sumar ventas fraccionadas desde camión a la misma rendición por repartidor
+    cargasCamion.forEach(c => {
+      const rId = c.operadorId || 'SIN_ASIGNAR'
+      const rNombre = c.operador?.nombre || c.operador?.username || 'Sin asignación'
+      if (!repartidoresMap[rId]) {
+        repartidoresMap[rId] = {
+          repartidorId: rId,
+          repartidorNombre: rNombre,
+          entregasCount: 0,
+          totalFacturado: 0,
+          montoRecibido: 0,
+          efectivo: 0,
+          transferencia: 0,
+          otrosMetodos: 0,
+          saldoPendiente: 0
+        }
+      }
+      const totalOperacion = Number(c.cantidad || 0) * Number(c.precioUnitario || 0)
+      const recibido = Number(c.montoRecibido || 0)
+      const metodo = (c.metodoPago || '').toUpperCase()
+
+      repartidoresMap[rId].totalFacturado += totalOperacion
+      repartidoresMap[rId].montoRecibido += recibido
+
+      if (metodo.includes('EFECTIVO')) {
+        repartidoresMap[rId].efectivo += recibido
+      } else if (metodo.includes('TRANSFERENCIA') || metodo.includes('BANCO')) {
+        repartidoresMap[rId].transferencia += recibido
+      } else {
+        repartidoresMap[rId].otrosMetodos += recibido
+      }
+
+      repartidoresMap[rId].saldoPendiente += Math.max(0, totalOperacion - recibido)
+      totalFacturado += totalOperacion
+      montoRecibido += recibido
+    })
+
     const rendicionRepartidores = Object.values(repartidoresMap)
+    const saldoPendiente = Math.max(0, totalFacturado - montoRecibido)
 
     const estadosMap = Object.fromEntries(
       porEstado.map(r => [r.estado, r._count.estado])
@@ -217,10 +278,12 @@ router.get('/resumen', async (req, res, next) => {
         saldoPendiente,
         entregasConcretadas,
         entregasCanceladas,
-        cargasRealizadas: cargas.length
+        cargasRealizadas: cargas.length - cargasCamion.length,
+        ventasCamionRealizadas: cargasCamion.length
       },
       ventasYCobros: entregasProcesadas,
       cargasPorGas,
+      ventasCamion,
       rendicionRepartidores,
       inventario: {
         porEstado: estadosMap,

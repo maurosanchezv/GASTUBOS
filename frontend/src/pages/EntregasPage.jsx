@@ -9,10 +9,14 @@ import iconUrl from 'leaflet/dist/images/marker-icon.png'
 import iconRetinaUrl from 'leaflet/dist/images/marker-icon-2x.png'
 import shadowUrl from 'leaflet/dist/images/marker-shadow.png'
 import api from '../services/api.js'
-import { PageHeader, StateBadge, Spinner, GasDot, EmptyState, Modal, formatCapacidad } from '../components/ui.jsx'
+import { PageHeader, StateBadge, Spinner, GasDot, EmptyState, Modal, formatCapacidad, ObservacionCell } from '../components/ui.jsx'
 import { useToast } from '../components/ui.jsx'
 import { useConfigStore } from '../store/configStore.js'
 import { LOGO_TUBOS_SVG, LOGO_PMS_SVG, getBrandingSources } from '../utils/logosSvg.js'
+import { construirBufferTicketEntrega, construirBufferTicketRemisionInicial } from '../utils/ticketsImpresion.js'
+import { conectarImpresoraWebBluetooth, enviarBufferWebBluetooth, esNavegadorMovilConWebBluetooth } from '../utils/webBluetoothPrinter.js'
+import TuboChip from '../components/TuboChip.jsx'
+import EntregaSalonTab from './entregas/EntregaSalonTab.jsx'
 
 // ... (EMPTY y fixes de Leaflet se mantienen arriba)
 delete L.Icon.Default.prototype._getIconUrl
@@ -25,6 +29,7 @@ const EMPTY = {
   fechaVencimiento: '', referencia: '',
   latitud: null, longitud: null,
   costoDelivery: '',
+  metodoPago: '',
 }
 
 const GAS_STRING_TO_ENUM = {
@@ -177,9 +182,23 @@ export default function EntregasPage() {
 
   const verDetalle = (entrega) => {
     setEntregaSeleccionada(entrega)
-    setTicketTab('remision')
+    // Una entrega de salón no tiene "Remisión Inicial" (no hay despacho
+    // previo separado de la confirmación) — se abre directo el comprobante.
+    setTicketTab(entrega.canal === 'SALON' ? 'comprobante' : 'remision')
     setModalDetalle(true)
     setMapaHistAbierto(false)
+  }
+
+  // Al terminar el wizard de EntregaSalonTab (ya confirmada), abrimos el
+  // modal de detalle directo en el comprobante para que el operador
+  // imprima con el botón que ya existe ahí. No se llama a la impresión acá
+  // porque los setState de React no son síncronos: el estado recién seteado
+  // no está disponible todavía dentro de esta misma función.
+  const finalizarEntregaSalon = (entregaCompleta) => {
+    setEntregaSeleccionada(entregaCompleta)
+    setTicketTab('comprobante')
+    setModalDetalle(true)
+    loadEntregas()
   }
 
   const getRecambiosRecibidos = (e) => {
@@ -200,8 +219,35 @@ export default function EntregasPage() {
     return [...recsPropios, ...recsTerceros]
   }
 
+  // Punto único de despacho de impresión, igual que en RepartoPage.jsx: app
+  // nativa (Bluetooth clásico) → Web Bluetooth (navegador Android) → diálogo
+  // de impresión del sistema como último recurso.
+  const imprimirTicketWebBluetooth = async () => {
+    try {
+      const config = { branding, nombreEmpresa: nombre_empresa, direccion, telefono, paperWidth: 32 }
+      const buffer = ticketTab === 'remision'
+        ? await construirBufferTicketRemisionInicial(entregaSeleccionada, config)
+        : await construirBufferTicketEntrega(entregaSeleccionada, { ...config, duplicarTicket: false, recambios: getRecambiosRecibidos(entregaSeleccionada) })
+      const conexion = await conectarImpresoraWebBluetooth()
+      await enviarBufferWebBluetooth(conexion, buffer)
+      toast('Impresión enviada correctamente', 'success')
+    } catch (err) {
+      if (err?.name !== 'NotFoundError') { // el usuario cerró el picker sin elegir nada
+        toast('Error al imprimir: ' + (err?.message || String(err)), 'error')
+      }
+    }
+  }
+
   const handlePrintTicket = () => {
-    window.print()
+    // navigator.bluetooth también existe en Chrome/Edge de escritorio, así
+    // que hay que confirmar que además sea un teléfono — si no, esto
+    // rompía la impresión de PC (sin Bluetooth, requestDevice() rechaza en
+    // silencio y no pasaba nada al hacer clic en "Imprimir").
+    if (esNavegadorMovilConWebBluetooth()) {
+      imprimirTicketWebBluetooth()
+    } else {
+      window.print()
+    }
   }
 
   useEffect(() => {
@@ -583,6 +629,7 @@ export default function EntregasPage() {
     if (form.tipoOperacion === 'ALQUILER' && !form.fechaVencimiento) {
       return toast('Ingresá la fecha de vencimiento del alquiler', 'error')
     }
+    if (!form.metodoPago) return toast('Seleccioná la forma de pago', 'error')
     setSaving(true)
     try {
       await api.post('/entregas', {
@@ -677,6 +724,7 @@ export default function EntregasPage() {
       <div className="app-content">
         <div className="tabs">
           <div className={`tab ${tab === 'nueva' ? 'active' : ''}`}     onClick={() => setTab('nueva')}>Nueva Entrega</div>
+          <div className={`tab ${tab === 'salon' ? 'active' : ''}`}     onClick={() => setTab('salon')}>Entrega en Salón</div>
           <div className={`tab ${tab === 'historial' ? 'active' : ''}`} onClick={() => setTab('historial')}>Historial</div>
         </div>
 
@@ -860,6 +908,14 @@ export default function EntregasPage() {
                     <div className="form-group">
                       <label className="form-label">Costo de Delivery (GS)</label>
                       <input type="number" min="0" value={form.costoDelivery} onChange={f('costoDelivery')} placeholder="0" />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Forma de pago <span className="form-required">*</span></label>
+                      <select value={form.metodoPago} onChange={f('metodoPago')} required>
+                        <option value="">Seleccioná...</option>
+                        <option value="EFECTIVO">Efectivo</option>
+                        <option value="TRANSFERENCIA">Transferencia</option>
+                      </select>
                     </div>
                     {form.tipoOperacion === 'ALQUILER' && (
                       <div className="form-group">
@@ -1066,6 +1122,11 @@ export default function EntregasPage() {
           </form>
         )}
 
+        {/* ── ENTREGA EN SALÓN ──────────────────────────────────────────────── */}
+        {tab === 'salon' && (
+          <EntregaSalonTab toast={toast} onFinish={finalizarEntregaSalon} />
+        )}
+
         {/* ── HISTORIAL ─────────────────────────────────────────────────────── */}
         {tab === 'historial' && (
           loadingH ? <Spinner /> : (
@@ -1153,7 +1214,12 @@ export default function EntregasPage() {
                                 )}
                               </td>
                               <td>{e.detalles?.length ?? 0}</td>
-                              <td style={{ color: 'var(--text-secondary)' }}>{e.repartidor?.nombre || '—'}</td>
+                              <td style={{ color: 'var(--text-secondary)' }}>
+                                {e.repartidor?.nombre || '—'}
+                                {e.canal === 'SALON' && (
+                                  <span style={{ display: 'block', fontSize: 9, fontWeight: 600, color: 'var(--blue)' }}>🏢 Salón</span>
+                                )}
+                              </td>
                               <td style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
                                 {new Date(e.fechaEntrega).toLocaleDateString('es-PY')}
                               </td>
@@ -1239,6 +1305,12 @@ export default function EntregasPage() {
                           <span className="list-card-label">Tubos</span>
                           <span className="list-card-value">{e.detalles?.length ?? 0}</span>
                         </div>
+                        {e.canal === 'SALON' && (
+                          <div className="list-card-item">
+                            <span className="list-card-label">Canal</span>
+                            <span className="list-card-value" style={{ color: 'var(--blue)', fontWeight: 600 }}>🏢 Salón</span>
+                          </div>
+                        )}
                       </div>
 
                       <div className="list-card-actions" style={{ justifyContent: 'flex-end', gap: 16, paddingTop: 12 }}>
@@ -1299,25 +1371,29 @@ export default function EntregasPage() {
       >
         {entregaSeleccionada && (
           <div>
-            {/* Pestañas de Comprobantes */}
-            <div style={{ display: 'flex', gap: 6, marginBottom: 12, borderBottom: '1px solid var(--border)', paddingBottom: 8 }}>
-              <button
-                type="button"
-                className={`btn btn-sm ${ticketTab === 'remision' ? 'btn-primary' : ''}`}
-                onClick={() => setTicketTab('remision')}
-                style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 11 }}
-              >
-                <i className="ti ti-file-text" /> 1. Remisión Inicial
-              </button>
-              <button
-                type="button"
-                className={`btn btn-sm ${ticketTab === 'comprobante' ? 'btn-primary' : ''}`}
-                onClick={() => setTicketTab('comprobante')}
-                style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 11 }}
-              >
-                <i className="ti ti-receipt" /> 2. Comprobante Repartidor
-              </button>
-            </div>
+            {/* Pestañas de Comprobantes — una entrega de salón no tiene
+                "Remisión Inicial" (no hay despacho previo separado de la
+                confirmación), así que solo se muestra el comprobante */}
+            {entregaSeleccionada.canal !== 'SALON' && (
+              <div style={{ display: 'flex', gap: 6, marginBottom: 12, borderBottom: '1px solid var(--border)', paddingBottom: 8 }}>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${ticketTab === 'remision' ? 'btn-primary' : ''}`}
+                  onClick={() => setTicketTab('remision')}
+                  style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 11 }}
+                >
+                  <i className="ti ti-file-text" /> 1. Remisión Inicial
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${ticketTab === 'comprobante' ? 'btn-primary' : ''}`}
+                  onClick={() => setTicketTab('comprobante')}
+                  style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 11 }}
+                >
+                  <i className="ti ti-receipt" /> 2. Comprobante Repartidor
+                </button>
+              </div>
+            )}
 
             {/* CONTENIDO PESTAÑA 1: REMISIÓN INICIAL */}
             {ticketTab === 'remision' && (
@@ -1338,7 +1414,8 @@ export default function EntregasPage() {
                   <strong>Dirección:</strong> {entregaSeleccionada.direccionEntrega}<br />
                   <strong>Fecha de Orden:</strong> {new Date(entregaSeleccionada.fechaEntrega).toLocaleString('es-PY')}<br />
                   <strong>Chofer Asignado:</strong> {entregaSeleccionada.repartidor?.nombre || 'Sin asignar'}<br />
-                  <strong>Tipo Operación:</strong> {entregaSeleccionada.tipoOperacion.replace('_', ' ')}
+                  <strong>Tipo Operación:</strong> {entregaSeleccionada.tipoOperacion.replace('_', ' ')}<br />
+                  <strong>Forma de pago:</strong> {entregaSeleccionada.metodoPago === 'TRANSFERENCIA' ? 'Transferencia' : 'Efectivo'}
                 </div>
                 
                 <table className="ticket-table">
@@ -1449,10 +1526,10 @@ export default function EntregasPage() {
                     <strong>RUC/CI:</strong> {entregaSeleccionada.cliente?.ruc || '—'}<br />
                     <strong>Dirección:</strong> {entregaSeleccionada.direccionEntrega}<br />
                     <strong>Fecha Entrega:</strong> {new Date(entregaSeleccionada.fechaEntrega).toLocaleString('es-PY')}<br />
-                    <strong>Repartidor:</strong> {entregaSeleccionada.repartidor?.nombre || '—'}<br />
+                    <strong>{entregaSeleccionada.canal === 'SALON' ? 'Atendido por:' : 'Repartidor:'}</strong> {entregaSeleccionada.repartidor?.nombre || '—'}<br />
                     <strong>Método Pago:</strong> {entregaSeleccionada.metodoPago || 'Efectivo'} {entregaSeleccionada.montoRecibido ? `(${Number(entregaSeleccionada.montoRecibido).toLocaleString('es-PY')} GS)` : ''}
                   </div>
-                  
+
                   {/* Secc 1: Tubos Entregados */}
                   <div style={{ fontSize: 11, fontWeight: 700, margin: '8px 0 4px', color: 'var(--blue)' }}>
                     CILINDROS ENTREGADOS:
@@ -1540,12 +1617,12 @@ export default function EntregasPage() {
 
                   {entregaSeleccionada.observaciones && (
                     <div style={{ margin: '8px 0', fontSize: '10px', fontStyle: 'italic', borderTop: '1px dashed #ddd', paddingTop: '6px', color: '#555' }}>
-                      <strong>Obs Repartidor:</strong> {entregaSeleccionada.observaciones}
+                      <strong>{entregaSeleccionada.canal === 'SALON' ? 'Obs:' : 'Obs Repartidor:'}</strong> {entregaSeleccionada.observaciones}
                     </div>
                   )}
                   
                   <div className="ticket-signatures">
-                    <div className="signature-line">Firma Repartidor</div>
+                    <div className="signature-line">{entregaSeleccionada.canal === 'SALON' ? 'Firma Operador' : 'Firma Repartidor'}</div>
                     <div className="signature-line">Firma Cliente (Conforme)</div>
                   </div>
                 </div>
@@ -1598,10 +1675,8 @@ export default function EntregasPage() {
             <strong>RUC/CI:</strong> {entregaSeleccionada.cliente?.ruc || '—'}<br />
             <strong>Dirección:</strong> {entregaSeleccionada.direccionEntrega}<br />
             <strong>Fecha:</strong> {new Date(entregaSeleccionada.fechaEntrega).toLocaleString('es-PY')}<br />
-            <strong>Chofer/Repartidor:</strong> {entregaSeleccionada.repartidor?.nombre || 'Sin asignar'}<br />
-            {ticketTab === 'comprobante' && entregaSeleccionada.metodoPago && (
-              <><strong>Pago:</strong> {entregaSeleccionada.metodoPago}<br /></>
-            )}
+            <strong>{entregaSeleccionada.canal === 'SALON' ? 'Atendido por:' : 'Chofer/Repartidor:'}</strong> {entregaSeleccionada.repartidor?.nombre || 'Sin asignar'}<br />
+            <strong>Forma de pago:</strong> {entregaSeleccionada.metodoPago === 'TRANSFERENCIA' ? 'Transferencia' : 'Efectivo'}<br />
             <strong>Tipo:</strong> {entregaSeleccionada.tipoOperacion.replace('_', ' ')}
           </div>
           
@@ -1694,7 +1769,7 @@ export default function EntregasPage() {
           )}
           
           <div className="ticket-signatures">
-            <div className="signature-line">{ticketTab === 'remision' ? 'Firma Despacho' : 'Firma Repartidor'}</div>
+            <div className="signature-line">{ticketTab === 'remision' ? 'Firma Despacho' : (entregaSeleccionada.canal === 'SALON' ? 'Firma Operador' : 'Firma Repartidor')}</div>
             <div className="signature-line">{ticketTab === 'remision' ? 'Firma Chofer' : 'Firma Cliente (Acuse)'}</div>
           </div>
           
@@ -1708,135 +1783,3 @@ export default function EntregasPage() {
   )
 }
 
-function TuboChip({ tuboId, detail, onChange, onRemove }) {
-  const [tubo, setTubo] = useState(null)
-  useEffect(() => {
-    api.get(`/tubos/${tuboId}`).then(r => setTubo(r.data)).catch(() => {})
-  }, [tuboId])
-
-  const esPrecioEditable = tubo?.estado === 'DISPONIBLE'
-  const cant = Number(detail?.cantidadGas || 0)
-  const prec = Number(detail?.precioUnitario || 0)
-  const subtotal = cant > 0 ? (cant * prec) : prec
-
-  return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 8,
-      padding: '12px 14px',
-      background: 'var(--surface-2)',
-      borderRadius: 8,
-      marginBottom: 8,
-      fontSize: 12,
-      border: '1px solid var(--border)',
-      boxSizing: 'border-box',
-      width: '100%',
-      overflow: 'hidden'
-    }}>
-      {/* Encabezado: ID + Gas + Estado + Botón Quitar */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
-          {tubo && <GasDot gas={tubo.gas} />}
-          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--blue)', fontSize: 13 }}>{tuboId}</span>
-          {tubo && (
-            <>
-              <span style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>{tubo.gas}</span>
-              <StateBadge estado={tubo.estado} />
-              {tubo.camion && (
-                <span className="badge badge-orange" style={{ fontWeight: 500 }} title={`En camión ${tubo.camion.placa}`}>
-                  🚚 {tubo.camion.placa}
-                </span>
-              )}
-            </>
-          )}
-        </div>
-        <button type="button" className="btn-icon" onClick={() => onRemove(tuboId)} title="Quitar tubo" style={{ flexShrink: 0 }}>
-          <i className="ti ti-x" />
-        </button>
-      </div>
-
-      {/* Fila Inferior: Cantidad, Unidad, Precio y Subtotal en Flex Responsive */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        flexWrap: 'wrap',
-        gap: 8,
-        paddingTop: 8,
-        borderTop: '1px dashed var(--border)',
-      }}>
-        {/* Cantidad + Unidad */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <label style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>CANT:</label>
-          <input 
-            type="number" 
-            value={detail?.cantidadGas ?? ''} 
-            disabled
-            title="Cantidad fija según la carga o capacidad del tubo"
-            style={{ 
-              width: 65, 
-              minHeight: 30, 
-              padding: '2px 6px', 
-              fontSize: 12,
-              cursor: 'not-allowed',
-              opacity: 0.75,
-              background: 'var(--surface-3, #f5f5f5)',
-              textAlign: 'center'
-            }}
-          />
-          <select 
-            value={detail?.unidadGas ?? 'KG'} 
-            disabled
-            title="Unidad predeterminada según el tipo de gas"
-            style={{ 
-              width: 58, 
-              minHeight: 30, 
-              padding: '2px 4px', 
-              fontSize: 12,
-              cursor: 'not-allowed',
-              opacity: 0.75,
-              background: 'var(--surface-3, #f5f5f5)'
-            }}
-          >
-            <option value="KG">KG</option>
-            <option value="M3">M³</option>
-          </select>
-        </div>
-
-        {/* Precio Unitario */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <label style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>PRECIO (Gs):</label>
-          <input 
-            type="number"
-            min="0"
-            step="1"
-            placeholder="0"
-            value={detail?.precioUnitario ?? ''} 
-            onChange={e => onChange(tuboId, 'precioUnitario', e.target.value)}
-            disabled={!esPrecioEditable}
-            title={!esPrecioEditable ? `Precio fijo precalculado para tubo ${tubo?.estado}` : 'Precio unitario editable'}
-            style={{ 
-              width: 90, 
-              minHeight: 30, 
-              padding: '2px 6px', 
-              fontSize: 12, 
-              fontFamily: 'var(--font-mono)',
-              cursor: !esPrecioEditable ? 'not-allowed' : 'text',
-              opacity: !esPrecioEditable ? 0.75 : 1,
-              background: !esPrecioEditable ? 'var(--surface-3, #f5f5f5)' : undefined,
-            }}
-          />
-        </div>
-
-        {/* Subtotal */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>SUBTOTAL:</span>
-          <span style={{ fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--blue)' }}>
-            {subtotal.toLocaleString('es-PY')} Gs
-          </span>
-        </div>
-      </div>
-    </div>
-  )
-}
