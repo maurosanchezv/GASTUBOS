@@ -267,11 +267,10 @@ export default function CilindrosTercerosPage() {
                 <table>
                   <thead>
                     <tr>
-                      <th>Código</th>
                       <th>Gas</th>
                       <th>Capacidad</th>
                       <th>Cliente de Origen</th>
-                      <th>Origen</th>
+                      <th>Entrega / Repartidor</th>
                       <th>Fecha Recepción</th>
                       <th>Estado</th>
                       <th>Tubo Adquirido</th>
@@ -282,7 +281,6 @@ export default function CilindrosTercerosPage() {
                     {items.map(item => {
                       return (
                         <tr key={item.id}>
-                          <td className="td-code">{item.esRegistrado ? item.tuboAdquirido?.id : (item.codigo || '-')}</td>
                           <td>
                             <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{item.gas}</span>
                           </td>
@@ -291,24 +289,13 @@ export default function CilindrosTercerosPage() {
                             <span style={{ fontWeight: 600, color: 'var(--blue)' }}>{item.cliente?.nombre || 'Cliente Desconocido'}</span>
                           </td>
                           <td>
-                            {item.entrega ? (
-                              <>
-                                <div style={{ fontSize: 13 }}>Entrega #{item.entrega.numero}</div>
-                                {item.repartidor && (
-                                  <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-                                    Chofer: {item.repartidor.nombre}
-                                  </div>
-                                )}
-                              </>
-                            ) : item.repartidor ? (
-                              <>
-                                <div style={{ fontSize: 13 }}>Recibido en oficina</div>
-                                <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-                                  Operador: {item.repartidor.nombre}
-                                </div>
-                              </>
-                            ) : (
-                              <div style={{ fontSize: 13 }}>Sin entrega directa</div>
+                            <div style={{ fontSize: 13 }}>
+                              {item.entrega ? `Entrega #${item.entrega.numero}` : 'Sin entrega directa'}
+                            </div>
+                            {item.repartidor && (
+                              <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                                Chofer: {item.repartidor.nombre}
+                              </div>
                             )}
                           </td>
                           <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>

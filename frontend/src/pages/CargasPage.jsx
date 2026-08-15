@@ -1,16 +1,8 @@
 // gastubos/frontend/src/pages/CargasPage.jsx
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { createPortal } from 'react-dom'
-import { Html5Qrcode } from 'html5-qrcode'
+import { useState, useEffect, useCallback } from 'react'
 import api from '../services/api.js'
-import { PageHeader, Modal, Confirm, FormGroup, Spinner, EmptyState, GasDot, StateBadge, useToast, formatCapacidad, ObservacionCell } from '../components/ui.jsx'
+import { PageHeader, Modal, FormGroup, Spinner, EmptyState, GasDot, StateBadge, useToast, formatCapacidad, ObservacionCell } from '../components/ui.jsx'
 import { useAuthStore } from '../store/authStore.js'
-import { useConfigStore } from '../store/configStore.js'
-import { getBrandingSources } from '../utils/logosSvg.js'
-import { construirBufferTicketRetorno } from '../utils/ticketsImpresion.js'
-import { conectarImpresoraWebBluetooth, enviarBufferWebBluetooth, esNavegadorMovilConWebBluetooth } from '../utils/webBluetoothPrinter.js'
-
-const SCANNER_RETORNO_ID = 'cargas-retorno-qr-reader'
 
 const TIPO_GAS_LABEL = {
   CO2:             'CO₂',
@@ -51,28 +43,6 @@ const GAS_STRING_TO_ENUM = {
 }
 
 const ESTADOS_CARGABLES = ['VACIO', 'DEVUELTO', 'DISPONIBLE']
-const ESTADOS_CON_CLIENTE = ['ENTREGADO', 'ALQUILADO']
-// Mismo listado de gases y presets de capacidad que usa el selector del
-// Repartidor (RepartoPage.jsx) al registrar un retorno, para que ambos
-// canales pidan exactamente los mismos datos de la misma forma.
-const GASES_TERCERO = ['CO2', 'Oxígeno', 'Argón', 'Nitrógeno', 'Aire comprimido', 'Acetileno', 'Mezcla Ar+CO2', 'Mezcla especial']
-const CAPACIDADES_TERCERO = {
-  Acetileno: ['1 kg', '1.2 kg', '1.5 kg', '2 kg', '2.5 kg', '3 kg', '3.5 kg', '4 kg', '4.5 kg', '5 kg', '5.5 kg', '6 kg', '7 kg', '8 kg'],
-  CO2:       ['1 kg', '2 kg', '3 kg', '4 kg', '5 kg', '6 kg', '7 kg', '8 kg', '10 kg', '13 kg', '15 kg', '20 kg', '25 kg', '30 kg'],
-  DEFAULT:   ['1 m³', '1.5 m³', '2.5 m³', '3 m³', '4 m³', '5 m³', '6 m³', '6.5 m³', '7 m³', '7.15 m³', '7.5 m³', '8.5 m³'],
-}
-const capacidadesParaGasTercero = (gas) => {
-  const gLower = (gas || '').toLowerCase()
-  if (gLower === 'acetileno') return CAPACIDADES_TERCERO.Acetileno
-  if (gLower === 'co2') return CAPACIDADES_TERCERO.CO2
-  return CAPACIDADES_TERCERO.DEFAULT
-}
-const capacidadPorDefectoParaGasTercero = (gas) => {
-  const gLower = (gas || '').toLowerCase()
-  if (gLower === 'acetileno') return '6 kg'
-  if (gLower === 'co2') return '25 kg'
-  return '6 m³'
-}
 
 const formatNumberSpanish = (val) => {
   const num = Number(val)
@@ -92,8 +62,6 @@ const FORM_INICIAL = {
 export default function CargasPage() {
   const { user } = useAuthStore()
   const { toast } = useToast()
-  const { nombre_empresa, direccion, telefono, isotipo_empresa, logo_empresa } = useConfigStore()
-  const branding = getBrandingSources(isotipo_empresa, logo_empresa)
 
   const [q,        setQ]        = useState('')
   const [tab,      setTab]      = useState('pendientes') // 'pendientes' | 'historial'
@@ -113,33 +81,6 @@ export default function CargasPage() {
   const [calcPrecio, setCalcPrecio] = useState('')       // SIEMPRE manual, nunca se recalcula
   const [calcMonto, setCalcMonto] = useState('')
   const [modoCalculo, setModoCalculo] = useState('PRECIO') // 'PRECIO' | 'MONTO' — cuál de los dos es editable
-
-  // Retorno de cilindros: escaneo/tipeo de código, reconoce propio vs tercero
-  const [codigoRetorno, setCodigoRetorno] = useState('')
-  const [buscandoRetorno, setBuscandoRetorno] = useState(false)
-  const [terceroPendiente, setTerceroPendiente] = useState(null) // { codigo } cuando el código no matchea ningún tubo
-  const [terceroGas, setTerceroGas] = useState('Oxígeno')
-  const [terceroCapacidad, setTerceroCapacidad] = useState('6 m³')
-  const [terceroClienteId, setTerceroClienteId] = useState('')
-  const [guardandoTercero, setGuardandoTercero] = useState(false)
-  const [clientes, setClientes] = useState([])
-
-  // Carga desde Retorno de Cilindros: si el cliente se lleva el tubo recién
-  // recargado en el momento (no queda disponible en depósito), se le asigna
-  // acá — solo aplica cuando la carga se dispara desde ese flujo puntual.
-  const [origenRetorno, setOrigenRetorno] = useState(false)
-  const [cargaClienteId, setCargaClienteId] = useState('')
-  const [confirmSalirCarga, setConfirmSalirCarga] = useState(false)
-  const [historialRetorno, setHistorialRetorno] = useState([]) // feedback de lo procesado en esta sesión
-  const [confirmarDevolucion, setConfirmarDevolucion] = useState(null) // tubo que figura entregado/alquilado, pendiente de confirmar
-  const [procesandoDevolucion, setProcesandoDevolucion] = useState(false)
-  const [escaneandoRetorno, setEscaneandoRetorno] = useState(false)
-  const scannerRetornoRef = useRef(null)
-
-  // Ticket de retorno de cilindro: impresión y reimpresión (persistida, ver tab 'retornosHistorial')
-  const [retornoParaImprimir, setRetornoParaImprimir] = useState(null)
-  const [retornosHistorial, setRetornosHistorial] = useState([])
-  const [loadingRetornosHistorial, setLoadingRetornosHistorial] = useState(false)
 
   const limit = 50
 
@@ -197,270 +138,10 @@ export default function CargasPage() {
 
   useEffect(() => {
     if (tab === 'pendientes') loadTubos()
-    else if (tab === 'historial') loadHistorial()
-    else if (tab === 'retornosHistorial') loadRetornosHistorial()
+    else loadHistorial()
   }, [tab, loadTubos, loadHistorial])
 
-  useEffect(() => {
-    return () => {
-      if (scannerRetornoRef.current) {
-        scannerRetornoRef.current.stop().catch(() => {})
-      }
-    }
-  }, [])
-
-  useEffect(() => {
-    api.get('/clientes').then(r => setClientes(r.data)).catch(() => {})
-  }, [])
-
-  function registrarHistorialRetorno(item) {
-    setHistorialRetorno(prev => [{ ...item, id: Date.now() + Math.random() }, ...prev].slice(0, 30))
-  }
-
-  const startScannerRetorno = () => {
-    setEscaneandoRetorno(true)
-    setTimeout(() => {
-      const scanner = new Html5Qrcode(SCANNER_RETORNO_ID)
-      scannerRetornoRef.current = scanner
-      scanner.start(
-        { facingMode: 'environment' },
-        { fps: 10, qrbox: { width: 250, height: 250 } },
-        (text) => {
-          let id = text.trim()
-          if (id.includes('/tubos/')) {
-            id = id.split('/tubos/')[1].split('?')[0].split('/')[0]
-          }
-          stopScannerRetorno()
-          buscarRetorno(id)
-        },
-        () => {}
-      ).catch(() => {
-        toast('No se pudo acceder a la cámara', 'error')
-        setEscaneandoRetorno(false)
-      })
-    }, 250)
-  }
-
-  const stopScannerRetorno = async () => {
-    if (scannerRetornoRef.current) {
-      try {
-        await scannerRetornoRef.current.stop()
-        scannerRetornoRef.current = null
-      } catch (err) {
-        console.error('Error al apagar el escáner', err)
-      }
-    }
-    setEscaneandoRetorno(false)
-  }
-
-  async function buscarRetorno(codigoRaw) {
-    const codigo = (codigoRaw || '').trim().toUpperCase()
-    if (!codigo || buscandoRetorno) return
-    setBuscandoRetorno(true)
-    try {
-      const { data: tubo } = await api.get(`/tubos/${encodeURIComponent(codigo)}`)
-
-      if (ESTADOS_CARGABLES.includes(tubo.estado)) {
-        setCodigoRetorno('')
-        registrarHistorialRetorno({ codigo, tipo: 'propio', mensaje: `Tubo propio (${tubo.estado}) — abriendo carga` })
-        abrirModalConTubo(tubo, true)
-        return
-      }
-
-      if (ESTADOS_CON_CLIENTE.includes(tubo.estado)) {
-        setCodigoRetorno('')
-        setConfirmarDevolucion(tubo)
-        return
-      }
-
-      toast(`El tubo ${codigo} está en estado ${tubo.estado}, no se puede procesar como retorno`, 'error')
-      registrarHistorialRetorno({ codigo, tipo: 'error', mensaje: `Estado ${tubo.estado}, no se procesó` })
-    } catch (err) {
-      if (err.response?.status === 404) {
-        setTerceroPendiente({ codigo })
-        setTerceroGas('Oxígeno')
-        setTerceroCapacidad('6 m³')
-        setTerceroClienteId('')
-        setCodigoRetorno('')
-      } else {
-        toast(err.response?.data?.error || 'Error al buscar el código', 'error')
-      }
-    } finally {
-      setBuscandoRetorno(false)
-    }
-  }
-
-  function cancelarConfirmarDevolucion() {
-    registrarHistorialRetorno({ codigo: confirmarDevolucion.id, tipo: 'error', mensaje: 'Cancelado — no se registró ningún cambio' })
-    setConfirmarDevolucion(null)
-  }
-
-  async function confirmarDevolucionYCargar() {
-    if (!confirmarDevolucion) return
-    const tubo = confirmarDevolucion
-    setProcesandoDevolucion(true)
-    try {
-      // El nombre del cliente se guarda como texto en observaciones porque
-      // Auditoria no tiene un campo estructurado para eso y el tubo pierde
-      // la relación con el cliente apenas se marca como devuelto — sin esto
-      // no habría forma de recuperar el dato al reimprimir más adelante.
-      const clienteNombre = tubo.cliente?.nombre || null
-      await api.post('/devoluciones', { tuboId: tubo.id, observaciones: `Cliente: ${clienteNombre || 'Sin identificar'}` })
-      setConfirmarDevolucion(null)
-      const retorno = {
-        fecha: new Date().toISOString(),
-        usuario: user?.nombre || user?.username || '-',
-        cliente: clienteNombre,
-        tuboId: tubo.id,
-        gas: tubo.gas,
-        capacidad: formatCapacidad(tubo),
-        estado: 'Devuelto',
-        observaciones: null,
-      }
-      registrarHistorialRetorno({ codigo: tubo.id, tipo: 'propio', mensaje: 'Tubo propio devuelto — abriendo carga', retorno })
-      abrirModalConTubo({ ...tubo, estado: 'DEVUELTO', clienteId: null }, true)
-    } catch (err) {
-      toast(err.response?.data?.error || 'Error al registrar la devolución', 'error')
-    } finally {
-      setProcesandoDevolucion(false)
-    }
-  }
-
-  async function guardarTercero() {
-    if (!terceroPendiente) return
-    if (!terceroGas || !terceroCapacidad) return toast('Seleccioná el gas y la capacidad', 'error')
-
-    const esKg = ['acetileno', 'co2'].includes(terceroGas.toLowerCase())
-    const capacidadNum = parseFloat(terceroCapacidad)
-    const clienteElegido = terceroClienteId ? clientes.find(c => c.id === terceroClienteId) : null
-    setGuardandoTercero(true)
-    try {
-      await api.post('/cilindros-terceros', {
-        gas: terceroGas,
-        codigo: terceroPendiente.codigo,
-        clienteId: terceroClienteId || undefined,
-        capacidadKg: esKg ? capacidadNum : undefined,
-        capacidadLitros: !esKg ? capacidadNum : undefined,
-        observaciones: `Recibido por retorno directo en Cargas. Código escaneado: ${terceroPendiente.codigo}`,
-      })
-      toast(
-        clienteElegido ? 'Cilindro de tercero registrado' : 'Cilindro de tercero registrado, pendiente de asignar cliente',
-        'success'
-      )
-      const retorno = {
-        fecha: new Date().toISOString(),
-        usuario: user?.nombre || user?.username || '-',
-        cliente: clienteElegido?.nombre || null,
-        tuboId: null,
-        codigo: terceroPendiente.codigo,
-        gas: terceroGas,
-        capacidad: terceroCapacidad,
-        estado: clienteElegido ? 'Devuelto' : 'Pendiente de asignar cliente',
-        observaciones: `Código escaneado: ${terceroPendiente.codigo}`,
-      }
-      registrarHistorialRetorno({ codigo: terceroPendiente.codigo, tipo: 'tercero', mensaje: `Registrado como cilindro de tercero (${terceroGas})`, retorno })
-      setTerceroPendiente(null)
-      setTerceroGas('Oxígeno')
-      setTerceroCapacidad('6 m³')
-      setTerceroClienteId('')
-    } catch (err) {
-      toast(err.response?.data?.error || 'Error al registrar el cilindro de tercero', 'error')
-    } finally {
-      setGuardandoTercero(false)
-    }
-  }
-
-  // Punto único de despacho de impresión del ticket de retorno, mismo patrón
-  // de tres vías que RepartoPage.jsx/EntregasPage.jsx: nativo (Bluetooth
-  // clásico) → Web Bluetooth en navegador móvil → diálogo del sistema.
-  const dispararImpresionRetorno = (retorno) => {
-    setRetornoParaImprimir(retorno)
-    setTimeout(() => {
-      if (esNavegadorMovilConWebBluetooth()) {
-        imprimirRetornoWebBluetooth(retorno)
-      } else {
-        window.print()
-      }
-    }, 150)
-  }
-
-  const imprimirRetornoWebBluetooth = async (retorno) => {
-    try {
-      const buffer = await construirBufferTicketRetorno(retorno, {
-        branding, nombreEmpresa: nombre_empresa, direccion, telefono, paperWidth: 32,
-      })
-      const conexion = await conectarImpresoraWebBluetooth()
-      await enviarBufferWebBluetooth(conexion, buffer)
-      toast('Impresión enviada correctamente', 'success')
-    } catch (err) {
-      if (err?.name !== 'NotFoundError') { // el usuario cerró el picker sin elegir nada
-        toast('Error al imprimir: ' + (err?.message || String(err)), 'error')
-      }
-    }
-  }
-
-  // "Cliente: X" es el formato que confirmarDevolucionYCargar guarda en las
-  // observaciones de Auditoria (no hay campo estructurado para el cliente en
-  // una devolución). Los registros previos a este cambio no van a matchear
-  // y van a mostrar "No identificado" — no hay forma de recuperar ese dato.
-  function extraerClienteDeObservaciones(obs) {
-    if (!obs) return null
-    const match = obs.match(/Cliente:\s*([^|]+)/)
-    if (!match) return null
-    const nombre = match[1].trim()
-    return nombre && nombre !== 'Sin identificar' ? nombre : null
-  }
-
-  async function loadRetornosHistorial() {
-    setLoadingRetornosHistorial(true)
-    try {
-      const [devRes, terRes] = await Promise.all([
-        api.get('/devoluciones', { params: { limit: 100 } }),
-        api.get('/cilindros-terceros', { params: { limit: 200 } }),
-      ])
-
-      const devoluciones = (devRes.data.registros || []).map(r => ({
-        id: `devolucion:${r.id}`,
-        fecha: r.createdAt,
-        usuario: r.usuario?.nombre || r.usuario?.username || '-',
-        cliente: extraerClienteDeObservaciones(r.observaciones),
-        tuboId: r.tuboId,
-        gas: r.tubo?.gas || '-',
-        capacidad: null,
-        estado: r.estadoNuevo === 'DEVUELTO' ? 'Devuelto' : r.estadoNuevo === 'VACIO' ? 'Vacío' : r.estadoNuevo === 'EN_REVISION' ? 'En revisión' : r.estadoNuevo,
-        observaciones: null,
-      }))
-
-      // Solo los registrados sin entrega asociada: los que trae un
-      // repartidor durante una entrega tienen entregaId y son un flujo
-      // distinto (recambios de la app), no un retorno directo en Cargas.
-      const terceros = (terRes.data.items || [])
-        .filter(item => !item.esRegistrado && item.entregaId == null)
-        .map(item => ({
-          id: `tercero:${item.id}`,
-          fecha: item.createdAt,
-          usuario: item.repartidor?.nombre || '-',
-          cliente: item.cliente?.nombre || null,
-          tuboId: null,
-          codigo: item.codigo || null,
-          gas: item.gas,
-          // No se usa formatCapacidad acá por el mismo motivo que en
-          // guardarTercero: para estos registros conviene leer directo qué
-          // campo quedó cargado en vez de inferir la unidad por el nombre del gas.
-          capacidad: item.capacidadKg != null ? `${item.capacidadKg} kg` : item.capacidadLitros != null ? `${item.capacidadLitros} m³` : null,
-          estado: item.estado === 'PENDIENTE' ? 'Pendiente de asignar cliente' : item.estado,
-          observaciones: item.observaciones,
-        }))
-
-      setRetornosHistorial([...devoluciones, ...terceros].sort((a, b) => new Date(b.fecha) - new Date(a.fecha)))
-    } catch (err) {
-      toast(err.response?.data?.error || 'Error al cargar el historial de retornos', 'error')
-    } finally {
-      setLoadingRetornosHistorial(false)
-    }
-  }
-
-  function abrirModalConTubo(tubo, desdeRetorno = false) {
+  function abrirModalConTubo(tubo) {
     const gasEnum = GAS_STRING_TO_ENUM[tubo.gas] || ''
     const capVal = tubo.capacidadKg ? Number(tubo.capacidadKg) : (tubo.capacidadLitros ? Number(tubo.capacidadLitros) : null)
     const capStr = capVal ? String(capVal) : ''
@@ -479,25 +160,8 @@ export default function CargasPage() {
     setCalcPrecio('')
     setCalcMonto('')
     setModoCalculo('PRECIO')
-    setOrigenRetorno(desdeRetorno)
-    setCargaClienteId('')
 
     setModal(true)
-  }
-
-  // Cerrar el modal de carga sin guardar. Si venía de Retorno de Cilindros,
-  // se pierde el tubo ya buscado/devuelto y hay que volver a escanear el
-  // código — por eso ahí se avisa antes de cerrar en vez de salir directo.
-  function cerrarModalCarga() {
-    setModal(false)
-    setOrigenRetorno(false)
-    setCargaClienteId('')
-    setConfirmSalirCarga(false)
-  }
-
-  function intentarCerrarModalCarga() {
-    if (origenRetorno) setConfirmSalirCarga(true)
-    else cerrarModalCarga()
   }
 
   function handleGasChange(tipoGas) {
@@ -519,8 +183,6 @@ export default function CargasPage() {
     setCalcPrecio('')
     setCalcMonto('')
     setModoCalculo('PRECIO')
-    setOrigenRetorno(false)
-    setCargaClienteId('')
 
     setModal(true)
   }
@@ -596,7 +258,6 @@ export default function CargasPage() {
   }
 
   async function guardarCarga() {
-    const clienteSeLoLleva = origenRetorno && cargaClienteId ? cargaClienteId : undefined
     setSaving(true)
     try {
       await api.post('/cargas', {
@@ -609,18 +270,13 @@ export default function CargasPage() {
         fechaCarga:    new Date(form.fechaCarga).toISOString(),
         observaciones: form.observaciones || undefined,
         metodoPago:    form.metodoPago,
-        clienteId:     clienteSeLoLleva,
       })
       toast(
-        clienteSeLoLleva ? 'Carga registrada — tubo entregado al cliente'
-          : tuboSeleccionado ? 'Carga registrada — tubo pasó a estado CARGADO'
-          : 'Carga en salón registrada con éxito',
+        tuboSeleccionado ? 'Carga registrada — tubo pasó a estado CARGADO' : 'Carga en salón registrada con éxito',
         'success'
       )
       setConfirmOpen(false)
       setModal(false)
-      setOrigenRetorno(false)
-      setCargaClienteId('')
       if (tab === 'pendientes') loadTubos()
       else loadHistorial()
     } catch (err) {
@@ -634,25 +290,20 @@ export default function CargasPage() {
     <>
       <PageHeader
         title="Cargas y Recargas"
-        subtitle={
-          tab === 'pendientes' ? `${tubos.length} tubo${tubos.length !== 1 ? 's' : ''} para cargar`
-          : tab === 'retorno' ? 'Escaneá o escribí el código del cilindro que vuelve'
-          : tab === 'retornosHistorial' ? `${retornosHistorial.length} retorno${retornosHistorial.length !== 1 ? 's' : ''} registrado${retornosHistorial.length !== 1 ? 's' : ''}`
-          : `${total} registro${total !== 1 ? 's' : ''} en historial`
-        }
+        subtitle={tab === 'pendientes'
+          ? `${tubos.length} tubo${tubos.length !== 1 ? 's' : ''} para cargar`
+          : `${total} registro${total !== 1 ? 's' : ''} en historial`}
         actions={
           <>
-            {tab !== 'retorno' && (
-              <button
-                className="btn btn-sm"
-                onClick={tab === 'pendientes' ? loadTubos : tab === 'retornosHistorial' ? loadRetornosHistorial : loadHistorial}
-                disabled={loading || loadingRetornosHistorial}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-              >
-                <i className={`ti ti-refresh ${(loading || loadingRetornosHistorial) ? 'ti-spin' : ''}`} />
-                Actualizar
-              </button>
-            )}
+            <button
+              className="btn btn-sm"
+              onClick={tab === 'pendientes' ? loadTubos : loadHistorial}
+              disabled={loading}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              <i className={`ti ti-refresh ${loading ? 'ti-spin' : ''}`} />
+              Actualizar
+            </button>
             {(user?.rol === 'ADMIN' || user?.rol === 'SUPERVISOR' || user?.rol === 'OPERADOR') && (
               <button className="btn btn-primary btn-sm" onClick={abrirModalSalon}>
                 <i className="ti ti-plus" /> Carga en salón
@@ -667,8 +318,6 @@ export default function CargasPage() {
         <div style={{ display: 'flex', gap: 4, marginBottom: 16, borderBottom: '1px solid var(--border)', paddingBottom: 0 }}>
           {[
             { key: 'pendientes', label: 'Tubos para cargar', icon: 'ti-cylinder' },
-            { key: 'retorno',    label: 'Retorno de Cilindros', icon: 'ti-arrow-back-up' },
-            { key: 'retornosHistorial', label: 'Historial de Retornos', icon: 'ti-receipt-2' },
             { key: 'historial',  label: 'Historial de cargas', icon: 'ti-history' },
           ].map(t => (
             <button
@@ -987,260 +636,17 @@ export default function CargasPage() {
           </>
         )}
 
-        {/* TAB: Retorno de Cilindros */}
-        {tab === 'retorno' && (
-          <>
-            <div className="card" style={{ padding: 16, marginBottom: 16 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
-                Código del cilindro
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input
-                  autoFocus
-                  placeholder="Escaneá o escribí el código y presioná Enter..."
-                  value={codigoRetorno}
-                  onChange={e => setCodigoRetorno(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); buscarRetorno(codigoRetorno) } }}
-                  disabled={buscandoRetorno}
-                  style={{ flex: 1, height: 42, fontSize: 14 }}
-                />
-                <button
-                  className="btn btn-primary"
-                  onClick={() => buscarRetorno(codigoRetorno)}
-                  disabled={buscandoRetorno || !codigoRetorno.trim()}
-                  style={{ height: 42 }}
-                >
-                  {buscandoRetorno ? <Spinner size={16} /> : <><i className="ti ti-search" /> Buscar</>}
-                </button>
-                <button
-                  className="btn btn-secondary"
-                  onClick={startScannerRetorno}
-                  disabled={buscandoRetorno}
-                  title="Escanear con la cámara"
-                  style={{ height: 42, display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                >
-                  <i className="ti ti-qrcode" /> Escanear
-                </button>
-              </div>
-              <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '8px 0 0' }}>
-                Si el código corresponde a un tubo propio, se abre directo el formulario de carga.
-                Si no existe en el sistema, se pide gas y capacidad para registrarlo como cilindro de tercero.
-              </p>
-            </div>
-
-            {confirmarDevolucion && (
-              <div className="card" style={{ padding: 16, marginBottom: 16, border: '1px solid var(--amber, #d97706)' }}>
-                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>
-                  <i className="ti ti-alert-triangle" style={{ color: 'var(--amber, #d97706)' }} /> Tubo {confirmarDevolucion.id} figura entregado
-                </div>
-                <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '0 0 12px' }}>
-                  Según el sistema, este tubo está {confirmarDevolucion.estado === 'ALQUILADO' ? 'alquilado a' : 'entregado a'}{' '}
-                  <strong>{confirmarDevolucion.cliente?.nombre || 'un cliente'}</strong>. ¿Confirmás que volvió físicamente y continuar a cargarlo?
-                  Si escaneaste el código equivocado, cancelá y no se va a modificar nada.
-                </p>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="btn btn-sm" onClick={cancelarConfirmarDevolucion} disabled={procesandoDevolucion}>
-                    Cancelar
-                  </button>
-                  <button className="btn btn-primary btn-sm" onClick={confirmarDevolucionYCargar} disabled={procesandoDevolucion}>
-                    {procesandoDevolucion ? 'Procesando...' : 'Sí, volvió — continuar a cargar'}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {terceroPendiente && (
-              <div className="card" style={{ padding: 16, marginBottom: 16, border: '1px solid var(--amber, #d97706)' }}>
-                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>
-                  <i className="ti ti-alert-triangle" style={{ color: 'var(--amber, #d97706)' }} /> Código no encontrado: {terceroPendiente.codigo}
-                </div>
-                <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '0 0 12px' }}>
-                  No hay ningún tubo registrado con ese código. Completá los datos para registrarlo como cilindro de tercero pendiente.
-                </p>
-                <div style={{
-                  background: 'var(--blue-light)', borderRadius: 6,
-                  padding: '10px 12px', marginBottom: 12, display: 'flex',
-                  justifyContent: 'space-between', alignItems: 'center',
-                }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--blue-dark)' }}>SELECCIÓN:</span>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--blue-dark)' }}>{terceroGas} {terceroCapacidad}</span>
-                </div>
-
-                <div style={{ marginBottom: 10 }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>1. Seleccionar Gas</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
-                    {GASES_TERCERO.map(g => (
-                      <button
-                        key={g}
-                        type="button"
-                        onClick={() => { setTerceroGas(g); setTerceroCapacidad(capacidadPorDefectoParaGasTercero(g)) }}
-                        style={{
-                          padding: '8px 4px', fontSize: 11, fontWeight: terceroGas === g ? 700 : 500,
-                          background: terceroGas === g ? 'var(--blue)' : 'var(--surface-2)',
-                          color: terceroGas === g ? '#fff' : 'var(--text-secondary)',
-                          border: `1px solid ${terceroGas === g ? 'var(--blue)' : 'var(--border)'}`,
-                          borderRadius: 6, cursor: 'pointer', transition: 'all .15s ease',
-                        }}
-                      >
-                        {g}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div style={{ marginBottom: 12 }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>2. Seleccionar Capacidad</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
-                    {capacidadesParaGasTercero(terceroGas).map(c => (
-                      <button
-                        key={c}
-                        type="button"
-                        onClick={() => setTerceroCapacidad(c)}
-                        style={{
-                          padding: '8px 4px', fontSize: 11, fontWeight: terceroCapacidad === c ? 700 : 500,
-                          background: terceroCapacidad === c ? 'var(--blue-mid)' : 'var(--surface-2)',
-                          color: terceroCapacidad === c ? '#fff' : 'var(--text-secondary)',
-                          border: `1px solid ${terceroCapacidad === c ? 'var(--blue-mid)' : 'var(--border)'}`,
-                          borderRadius: 6, cursor: 'pointer', transition: 'all .15s ease',
-                        }}
-                      >
-                        {c}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <FormGroup label="Cliente (opcional)" hint="Si lo conocés, asignalo ahora — si no, se puede completar después desde Cilindros de Terceros">
-                  <select value={terceroClienteId} onChange={e => setTerceroClienteId(e.target.value)}>
-                    <option value="">Sin identificar</option>
-                    {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-                  </select>
-                </FormGroup>
-                <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                  <button className="btn btn-sm" onClick={() => { setTerceroPendiente(null); setTerceroClienteId('') }} disabled={guardandoTercero}>
-                    Cancelar
-                  </button>
-                  <button className="btn btn-primary btn-sm" onClick={guardarTercero} disabled={guardandoTercero}>
-                    {guardandoTercero ? 'Guardando...' : 'Registrar cilindro de tercero'}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {escaneandoRetorno && (
-              <Modal
-                open={escaneandoRetorno}
-                title="Escanear Cilindro"
-                onClose={stopScannerRetorno}
-                width={400}
-              >
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 15, alignItems: 'center', background: '#000', padding: 12, borderRadius: 8 }}>
-                  <div id={SCANNER_RETORNO_ID} style={{ width: '100%', maxWidth: '320px', overflow: 'hidden' }} />
-                  <button className="btn btn-danger" onClick={stopScannerRetorno} style={{ width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, height: 42 }}>
-                    <i className="ti ti-player-stop" style={{ fontSize: 16 }} /> Apagar Cámara / Cancelar
-                  </button>
-                </div>
-              </Modal>
-            )}
-
-            {historialRetorno.length === 0 ? (
-              <EmptyState icon="ti-arrow-back-up" message="Todavía no escaneaste ningún cilindro en esta sesión" />
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {historialRetorno.map(item => (
-                  <div
-                    key={item.id}
-                    className="card"
-                    style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}
-                  >
-                    <span className={`badge ${item.tipo === 'propio' ? 'badge-CARGADO' : item.tipo === 'tercero' ? 'badge-ALQUILADO' : 'badge-DE_BAJA'}`}>
-                      {item.tipo === 'propio' ? 'Propio' : item.tipo === 'tercero' ? 'Tercero' : 'Error'}
-                    </span>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{item.codigo}</span>
-                    <span style={{ color: 'var(--text-secondary)', flex: 1 }}>{item.mensaje}</span>
-                    {item.retorno && (
-                      <button className="btn btn-sm" onClick={() => dispararImpresionRetorno(item.retorno)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-                        <i className="ti ti-printer" /> Imprimir ticket
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </>
-        )}
-
-        {/* TAB: Historial de Retornos (persistido, para reimprimir días después) */}
-        {tab === 'retornosHistorial' && (
-          loadingRetornosHistorial ? (
-            <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}><Spinner /></div>
-          ) : retornosHistorial.length === 0 ? (
-            <EmptyState icon="ti-receipt-2" message="Todavía no hay retornos registrados" />
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {retornosHistorial.map(item => (
-                <div
-                  key={item.id}
-                  className="card"
-                  style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, flexWrap: 'wrap' }}
-                >
-                  <span className={`badge ${item.tuboId ? 'badge-CARGADO' : 'badge-ALQUILADO'}`}>
-                    {item.tuboId ? 'Propio' : 'Tercero'}
-                  </span>
-                  <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{item.tuboId || item.codigo || item.gas}</span>
-                  <span style={{ color: 'var(--text-secondary)' }}>
-                    {item.cliente || 'No identificado'} · {item.estado} · {new Date(item.fecha).toLocaleString('es-PY')}
-                  </span>
-                  <span style={{ flex: 1 }} />
-                  <button className="btn btn-sm" onClick={() => dispararImpresionRetorno(item)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-                    <i className="ti ti-printer" /> Reimprimir ticket
-                  </button>
-                </div>
-              ))}
-            </div>
-          )
-        )}
       </div>
-
-      {/* Ticket de retorno: solo visible al imprimir (window.print) */}
-      {retornoParaImprimir && createPortal(
-        <div className="print-ticket-container">
-          <div className="ticket-header">
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 15, marginBottom: 10 }}>
-              <img src={branding.isotipoSrc} alt="Isotipo" style={{ width: 40, height: 40, objectFit: 'contain' }} />
-              <img src={branding.logoSrc} alt="Logo" style={{ width: 108, height: 40, objectFit: 'contain' }} />
-            </div>
-            {direccion && <p style={{ margin: 0, fontSize: 10 }}>{direccion}</p>}
-            {telefono && <p style={{ margin: '2px 0 0', fontSize: 10 }}>Tel: {telefono}</p>}
-            <p style={{ margin: '4px 0 0', fontSize: 11, fontWeight: 'bold' }}>COMPROBANTE DE RETORNO DE CILINDRO</p>
-          </div>
-
-          <div style={{ margin: '8px 0', fontSize: 11 }}>
-            <strong>Fecha:</strong> {new Date(retornoParaImprimir.fecha).toLocaleString('es-PY')}<br />
-            <strong>Registrado por:</strong> {retornoParaImprimir.usuario || '-'}<br />
-            <strong>Cliente:</strong> {retornoParaImprimir.cliente || 'No identificado'}<br />
-            <strong>{retornoParaImprimir.tuboId ? 'Tubo:' : 'Cilindro de tercero:'}</strong> {retornoParaImprimir.tuboId || retornoParaImprimir.codigo || '(sin identificar)'}<br />
-            <strong>Gas:</strong> {retornoParaImprimir.gas}{retornoParaImprimir.capacidad ? ` (${retornoParaImprimir.capacidad})` : ''}<br />
-            <strong>Estado:</strong> {retornoParaImprimir.estado}
-            {retornoParaImprimir.observaciones && <><br /><strong>Obs:</strong> {retornoParaImprimir.observaciones}</>}
-          </div>
-
-          <div className="ticket-signatures">
-            <div className="signature-line">Firma Cliente</div>
-          </div>
-        </div>,
-        document.body
-      )}
 
       {/* Modal de carga */}
       <Modal
         open={modal}
         title={tuboSeleccionado ? `Registrar carga — ${tuboSeleccionado.id}` : 'Registrar Carga en Salón'}
-        onClose={intentarCerrarModalCarga}
+        onClose={() => setModal(false)}
         width={520}
         footer={
           <>
-            <button className="btn" onClick={intentarCerrarModalCarga}>Cancelar</button>
+            <button className="btn" onClick={() => setModal(false)}>Cancelar</button>
             <button className="btn btn-primary" onClick={handleSubmit} disabled={saving}>
               {saving ? 'Guardando...' : 'Confirmar carga'}
             </button>
@@ -1256,17 +662,6 @@ export default function CargasPage() {
                 Serie: {tuboSeleccionado.serie} · Gas: {tuboSeleccionado.gas} · <strong>Capacidad: {formatCapacidad(tuboSeleccionado)}</strong> · <StateBadge estado={tuboSeleccionado.estado} />
               </div>
             </div>
-          </div>
-        )}
-
-        {origenRetorno && (
-          <div style={{ border: '1px dashed var(--border)', borderRadius: 8, padding: 10, marginBottom: 14 }}>
-            <FormGroup label="Cliente que se lleva el tubo ahora (opcional)" hint="Si lo elegís, el tubo queda entregado a ese cliente en vez de disponible en depósito. Dejalo vacío si el tubo se queda en el depósito.">
-              <select value={cargaClienteId} onChange={e => setCargaClienteId(e.target.value)}>
-                <option value="">Queda en depósito</option>
-                {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-              </select>
-            </FormGroup>
           </div>
         )}
 
@@ -1451,15 +846,6 @@ export default function CargasPage() {
           />
         </FormGroup>
       </Modal>
-
-      <Confirm
-        open={confirmSalirCarga}
-        title="¿Salir sin registrar la carga?"
-        message="Si salís ahora vas a tener que buscar el código del cilindro de nuevo para volver a cargarlo."
-        onConfirm={cerrarModalCarga}
-        onCancel={() => setConfirmSalirCarga(false)}
-        danger
-      />
 
       {/* Modal de confirmación de carga */}
       <Modal
