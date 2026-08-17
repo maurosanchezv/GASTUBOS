@@ -18,7 +18,7 @@ export default function CamionesPage() {
   // Datos para formularios/acciones
   const [selectedCamion, setSelectedCamion] = useState(null)
   const [form, setForm] = useState({ id: '', placa: '', capacidadMax: 10, activo: true })
-  
+
   // Detalle de stock
   const [stockTubos, setStockTubos] = useState([])
   const [loadingStock, setLoadingStock] = useState(false)
@@ -28,6 +28,7 @@ export default function CamionesPage() {
   const [tubosDisponibles, setTubosDisponibles] = useState([])
   const [loadingDisponibles, setLoadingDisponibles] = useState(false)
   const [selectedDisponiblesIds, setSelectedDisponiblesIds] = useState([])
+  const [buscarDisponibles, setBuscarDisponibles] = useState('')
 
   const loadCamiones = useCallback(async () => {
     setLoading(true)
@@ -101,7 +102,7 @@ export default function CamionesPage() {
   };
 
   const handleToggleStockSelect = (tuboId) => {
-    setSelectedStockIds(prev => 
+    setSelectedStockIds(prev =>
       prev.includes(tuboId) ? prev.filter(id => id !== tuboId) : [...prev, tuboId]
     )
   }
@@ -112,7 +113,7 @@ export default function CamionesPage() {
     try {
       await api.post(`/camiones/${selectedCamion.id}/liberar`, { tubosIds: selectedStockIds })
       toast(`Se descargaron ${selectedStockIds.length} tubos del camión`, 'success')
-      
+
       // Recargar stock y lista general
       setSelectedStockIds([])
       const res = await api.get(`/camiones/${selectedCamion.id}/stock`)
@@ -126,15 +127,14 @@ export default function CamionesPage() {
   }
 
   // Cargar / Asignar Tubos al Camión
-  const handleOpenCargar = async (camion) => {
-    setSelectedCamion(camion)
-    setTubosDisponibles([])
-    setSelectedDisponiblesIds([])
-    setModalCargar(true)
+  const fetchTubosDisponibles = useCallback(async (q) => {
     setLoadingDisponibles(true)
     try {
-      // Obtener tubos que están en depósito/disponibles (no asignados a camiones y no entregados)
-      const res = await api.get('/tubos', { params: { limit: 100 } })
+      // Obtener tubos que están en depósito/disponibles (no asignados a camiones y no entregados).
+      // Se pasa `q` al backend para poder encontrar cualquier código aunque el depósito tenga
+      // más tubos que el límite de la página (si no, el código puede quedar fuera del límite
+      // y nunca listarse, sin ninguna forma de buscarlo).
+      const res = await api.get('/tubos', { params: { q: q || undefined, limit: 100 } })
       // Filtrar tubos elegibles: activos, sin camionId, y estados correspondientes
       const elegibles = res.data.tubos.filter(t =>
         t.activo &&
@@ -149,17 +149,30 @@ export default function CamionesPage() {
     } finally {
       setLoadingDisponibles(false)
     }
+  }, [])
+
+  const handleOpenCargar = (camion) => {
+    setSelectedCamion(camion)
+    setTubosDisponibles([])
+    setSelectedDisponiblesIds([])
+    setBuscarDisponibles('')
+    setModalCargar(true)
   }
 
+  useEffect(() => {
+    if (!modalCargar) return
+    fetchTubosDisponibles(buscarDisponibles)
+  }, [modalCargar, buscarDisponibles])
+
   const handleToggleDisponibleSelect = (tuboId) => {
-    setSelectedDisponiblesIds(prev => 
+    setSelectedDisponiblesIds(prev =>
       prev.includes(tuboId) ? prev.filter(id => id !== tuboId) : [...prev, tuboId]
     )
   }
 
   const handleAsignarTubos = async () => {
     if (selectedDisponiblesIds.length === 0) return toast('Selecciona al menos un tubo para cargar', 'error')
-    
+
     const capacidadDisponible = selectedCamion.capacidadMax - (selectedCamion._count?.tubos || 0)
     if (selectedDisponiblesIds.length > capacidadDisponible) {
       return toast(`No podés cargar más de la capacidad disponible (${capacidadDisponible} libres)`, 'error')
@@ -416,9 +429,9 @@ export default function CamionesPage() {
                 <thead>
                   <tr>
                     <th style={{ width: 40 }}>
-                      <input 
-                        type="checkbox" 
-                        checked={selectedStockIds.length === stockTubos.length} 
+                      <input
+                        type="checkbox"
+                        checked={selectedStockIds.length === stockTubos.length}
                         onChange={() => {
                           if (selectedStockIds.length === stockTubos.length) {
                             setSelectedStockIds([])
@@ -476,32 +489,43 @@ export default function CamionesPage() {
           </>
         }
       >
-        {loadingDisponibles ? (
-          <Spinner />
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {selectedCamion && (
-              <div style={{ background: 'var(--bg-secondary)', padding: '10px 14px', borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 13, fontWeight: 500 }}>Capacidad del Camión:</span>
-                <span style={{ fontSize: 13, fontWeight: 'bold' }}>
-                  {(selectedCamion._count?.tubos || 0) + selectedDisponiblesIds.length} / {selectedCamion.capacidadMax} cilindros
-                </span>
-              </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {selectedCamion && (
+            <div style={{ background: 'var(--bg-secondary)', padding: '10px 14px', borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: 13, fontWeight: 500 }}>Capacidad del Camión:</span>
+              <span style={{ fontSize: 13, fontWeight: 'bold' }}>
+                {(selectedCamion._count?.tubos || 0) + selectedDisponiblesIds.length} / {selectedCamion.capacidadMax} cilindros
+              </span>
+            </div>
+          )}
+
+          {selectedCamion && (selectedCamion._count?.tubos || 0) + selectedDisponiblesIds.length > selectedCamion.capacidadMax && (
+            <div style={{ background: 'var(--red-light)', color: 'var(--red)', padding: '8px 12px', borderRadius: 8, fontSize: 12, fontWeight: 500 }}>
+              ⚠️ Has seleccionado más cilindros de la capacidad que le queda al camión. Por favor, desmarca algunos.
+            </div>
+          )}
+
+          <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+            Seleccioná los cilindros disponibles en el depósito para subirlos al stock de este camión:
+          </p>
+
+          <div className="search-bar" style={{ marginBottom: 0 }}>
+            <i className="ti ti-search" />
+            <input
+              placeholder="Buscar por código, serie o gas..."
+              value={buscarDisponibles}
+              onChange={e => setBuscarDisponibles(e.target.value)}
+            />
+            {buscarDisponibles && (
+              <button className="btn-icon" onClick={() => setBuscarDisponibles('')}><i className="ti ti-x" /></button>
             )}
+          </div>
 
-            {selectedCamion && (selectedCamion._count?.tubos || 0) + selectedDisponiblesIds.length > selectedCamion.capacidadMax && (
-              <div style={{ background: 'var(--red-light)', color: 'var(--red)', padding: '8px 12px', borderRadius: 8, fontSize: 12, fontWeight: 500 }}>
-                ⚠️ Has seleccionado más cilindros de la capacidad que le queda al camión. Por favor, desmarca algunos.
-              </div>
-            )}
-
-            <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-              Seleccioná los cilindros disponibles en el depósito para subirlos al stock de este camión:
-            </p>
-
-            {tubosDisponibles.length === 0 ? (
-              <EmptyState icon="ti-cylinder" message="No hay tubos libres cargados o disponibles en el depósito" />
-            ) : (
+          {loadingDisponibles ? (
+            <Spinner />
+          ) : tubosDisponibles.length === 0 ? (
+            <EmptyState icon="ti-cylinder" message={buscarDisponibles ? 'Ningún tubo elegible coincide con la búsqueda' : 'No hay tubos libres cargados o disponibles en el depósito'} />
+          ) : (
               <div className="table-wrap" style={{ padding: 0, maxHeight: 300, overflowY: 'auto' }}>
                 <table>
                   <thead>
@@ -520,9 +544,9 @@ export default function CamionesPage() {
                       const ocupacionFutura = (selectedCamion?._count?.tubos || 0) + selectedDisponiblesIds.length
                       const superariaCapacidad = !isChecked && (ocupacionFutura >= (selectedCamion?.capacidadMax || 0))
                       return (
-                        <tr 
-                          key={t.id} 
-                          style={{ cursor: superariaCapacidad ? 'not-allowed' : 'pointer', opacity: superariaCapacidad ? 0.6 : 1 }} 
+                        <tr
+                          key={t.id}
+                          style={{ cursor: superariaCapacidad ? 'not-allowed' : 'pointer', opacity: superariaCapacidad ? 0.6 : 1 }}
                           onClick={() => {
                             if (!superariaCapacidad || isChecked) {
                               handleToggleDisponibleSelect(t.id)
@@ -554,7 +578,6 @@ export default function CamionesPage() {
               </div>
             )}
           </div>
-        )}
       </Modal>
     </>
   )
