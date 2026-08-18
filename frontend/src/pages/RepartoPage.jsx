@@ -333,8 +333,11 @@ export default function RepartoPage() {
   const [ventaClienteSeleccionado, setVentaClienteSeleccionado] = useState(null)
   const [ventaCantidad, setVentaCantidad] = useState('')
   const [ventaPrecio, setVentaPrecio] = useState('')
+  const [ventaMontoCalc, setVentaMontoCalc] = useState('')
+  const [ventaModoCalculo, setVentaModoCalculo] = useState('PRECIO') // 'PRECIO' | 'MONTO' — cuál de los dos es editable
   const [ventaMetodoPago, setVentaMetodoPago] = useState('EFECTIVO')
   const [ventaMontoRecibido, setVentaMontoRecibido] = useState('')
+  const [ventaConfirmOpen, setVentaConfirmOpen] = useState(false)
   const [ventaGuardando, setVentaGuardando] = useState(false)
   const [ventaParaImprimir, setVentaParaImprimir] = useState(null)
   const [cargaCamionSeleccionada, setCargaCamionSeleccionada] = useState(null)
@@ -693,9 +696,67 @@ export default function RepartoPage() {
     setVentaClienteSeleccionado(null)
     setVentaCantidad('')
     setVentaPrecio('')
+    setVentaMontoCalc('')
+    setVentaModoCalculo('PRECIO')
     setVentaMetodoPago('EFECTIVO')
     setVentaMontoRecibido('')
+    setVentaConfirmOpen(false)
     setVentaModalOpen(true)
+  }
+
+  // Mismo asistente de cálculo por dinero que "Carga en Salón" (CargasPage.jsx):
+  // 1. Cambia Cantidad -> recalcula Monto (T = Q × U) en modo PRECIO, o el Precio (U = T / Q) en modo MONTO.
+  const handleVentaCantidadChange = (cantidad) => {
+    setVentaCantidad(cantidad)
+    const q = Number(cantidad)
+
+    if (ventaModoCalculo === 'MONTO') {
+      const m = Number(ventaMontoCalc)
+      if (!isNaN(q) && cantidad !== '' && q > 0 && m > 0) {
+        setVentaPrecio(Math.round(m / q).toString())
+      } else {
+        setVentaPrecio('')
+      }
+    } else {
+      const u = Number(ventaPrecio)
+      if (!isNaN(q) && cantidad !== '' && q >= 0 && u > 0) {
+        setVentaMontoCalc(Math.round(q * u).toString())
+      } else {
+        setVentaMontoCalc('')
+      }
+    }
+  }
+
+  // 2. Cambia Precio -> recalcula Monto (T = Q × U). Solo aplica en modo PRECIO.
+  const handleVentaPrecioChange = (precio) => {
+    setVentaPrecio(precio)
+    const u = Number(precio)
+    const q = Number(ventaCantidad)
+
+    if (!isNaN(u) && precio !== '' && u >= 0 && q > 0) {
+      setVentaMontoCalc(Math.round(q * u).toString())
+    } else {
+      setVentaMontoCalc('')
+    }
+  }
+
+  // 3. Cambia Monto -> recalcula Precio unitario (U = T / Q). Solo aplica en modo MONTO.
+  const handleVentaMontoCalcChange = (monto) => {
+    setVentaMontoCalc(monto)
+    const m = Number(monto)
+    const q = Number(ventaCantidad)
+
+    if (!isNaN(m) && monto !== '' && m >= 0 && q > 0) {
+      setVentaPrecio(Math.round(m / q).toString())
+    } else {
+      setVentaPrecio('')
+    }
+  }
+
+  function cambiarVentaModoCalculo(modo) {
+    setVentaModoCalculo(modo)
+    setVentaPrecio('')
+    setVentaMontoCalc('')
   }
 
   const buscarClientesVenta = async (q) => {
@@ -713,26 +774,36 @@ export default function RepartoPage() {
     }
   }
 
-  const confirmarVenta = async () => {
-    if (!tuboVenta) return
+  const validarVenta = () => {
+    if (!tuboVenta) return false
     if (!ventaClienteSeleccionado) {
       toast('Selecciona un cliente', 'warning')
-      return
+      return false
     }
     const restante = Number(tuboVenta.cantidadActual || 0)
     const cant = Number(ventaCantidad)
     if (!cant || cant <= 0) {
       toast('Ingresa una cantidad válida', 'warning')
-      return
+      return false
     }
     if (cant > restante) {
       toast(`Solo quedan ${formatNumberSpanish(restante)} disponibles en este tubo`, 'warning')
-      return
+      return false
     }
     if (ventaPrecio === '' || Number(ventaPrecio) < 0) {
       toast('Ingresa el precio de venta', 'warning')
-      return
+      return false
     }
+    return true
+  }
+
+  const abrirConfirmacionVenta = () => {
+    if (validarVenta()) setVentaConfirmOpen(true)
+  }
+
+  const confirmarVenta = async () => {
+    if (!validarVenta()) { setVentaConfirmOpen(false); return }
+    const cant = Number(ventaCantidad)
     const precio = Number(ventaPrecio)
 
     setVentaGuardando(true)
@@ -746,6 +817,7 @@ export default function RepartoPage() {
         montoRecibido: ventaMontoRecibido === '' ? cant * precio : Number(ventaMontoRecibido),
       })
       toast('Venta registrada', 'success')
+      setVentaConfirmOpen(false)
       setVentaModalOpen(false)
       setEntregaParaImprimir(null)
       setVentaParaImprimir(res.data)
@@ -2527,6 +2599,16 @@ export default function RepartoPage() {
       >
         {cargaCamionSeleccionada && (
           <div className="ticket-preview">
+            <div className="ticket-header">
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', marginBottom: '10px' }}>
+                <img src={branding.isotipoSrc} alt="Isotipo" style={{ width: '40px', height: '40px', objectFit: 'contain' }} />
+                <img src={branding.logoSrc} alt="Logo" style={{ width: '108px', height: '40px', objectFit: 'contain' }} />
+              </div>
+              {direccion ? <p style={{ margin: 0, fontSize: '10px', color: '#666' }}>{direccion}</p> : <p style={{ margin: 0, fontSize: '10px', color: '#666' }}>Gestión de Gases Industriales</p>}
+              {telefono && <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#666' }}>Tel: {telefono}</p>}
+              <p style={{ margin: '6px 0 0', fontSize: '11px', fontWeight: 'bold' }}>VENTA CAMION: {cargaCamionSeleccionada.numero}</p>
+            </div>
+
             <div style={{ margin: '4px 0 10px', fontSize: '11px' }}>
               <strong>Cliente:</strong> {cargaCamionSeleccionada.cliente?.nombre}<br />
               <strong>Fecha:</strong> {new Date(cargaCamionSeleccionada.fechaCarga).toLocaleString('es-PY')}<br />
@@ -2563,10 +2645,14 @@ export default function RepartoPage() {
             </div>
 
             {cargaCamionSeleccionada.observaciones && (
-              <div style={{ fontSize: 11, borderTop: '1px dashed #ddd', paddingTop: 6 }}>
+              <div style={{ fontSize: 11, borderTop: '1px dashed #ddd', paddingTop: 6, marginBottom: 10 }}>
                 <strong>Obs:</strong> <ObservacionCell texto={cargaCamionSeleccionada.observaciones} titulo="Observaciones de la venta" maxWidth={280} />
               </div>
             )}
+
+            <div className="ticket-signatures">
+              <div className="signature-line">Firma Cliente</div>
+            </div>
           </div>
         )}
       </Modal>
@@ -2697,11 +2783,10 @@ export default function RepartoPage() {
             <button
               className="btn btn-primary"
               style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
-              onClick={confirmarVenta}
-              disabled={ventaGuardando}
+              onClick={abrirConfirmacionVenta}
             >
-              {ventaGuardando ? <Spinner size="sm" /> : <i className="ti ti-cash" />}
-              Confirmar Venta
+              <i className="ti ti-cash" />
+              Revisar Venta
             </button>
           </div>
         }
@@ -2752,29 +2837,125 @@ export default function RepartoPage() {
               )}
             </div>
 
-            <div style={{ display: 'flex', gap: 10 }}>
-              <div style={{ flex: 1 }}>
-                <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Cantidad</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.001"
-                  value={ventaCantidad}
-                  onChange={e => setVentaCantidad(e.target.value)}
-                  style={{ width: '100%', height: 40 }}
-                />
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Cantidad</label>
+              <input
+                type="number"
+                min="0"
+                step="0.001"
+                placeholder="0"
+                value={ventaCantidad}
+                onChange={e => handleVentaCantidadChange(e.target.value)}
+                style={{ width: '100%', height: 40 }}
+              />
+            </div>
+
+            {/* Asistente de cálculo por dinero — mismo patrón que "Carga en Salón" */}
+            <div style={{
+              border: '1px dashed var(--border-mid)', borderRadius: 8, padding: '12px 14px', background: 'var(--bg-subtle)',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <i className="ti ti-calculator" /> Asistente de cobro
+                </div>
+                <div style={{ display: 'flex', border: '1px solid var(--border-mid)', borderRadius: 6, overflow: 'hidden' }}>
+                  <button
+                    type="button"
+                    onClick={() => cambiarVentaModoCalculo('PRECIO')}
+                    style={{
+                      padding: '4px 10px', fontSize: 11, fontWeight: 600, border: 'none', cursor: 'pointer',
+                      background: ventaModoCalculo === 'PRECIO' ? 'var(--blue)' : 'transparent',
+                      color: ventaModoCalculo === 'PRECIO' ? '#fff' : 'var(--text-secondary)',
+                    }}
+                  >
+                    Por precio unitario
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => cambiarVentaModoCalculo('MONTO')}
+                    style={{
+                      padding: '4px 10px', fontSize: 11, fontWeight: 600, border: 'none', cursor: 'pointer',
+                      background: ventaModoCalculo === 'MONTO' ? 'var(--blue)' : 'transparent',
+                      color: ventaModoCalculo === 'MONTO' ? '#fff' : 'var(--text-secondary)',
+                    }}
+                  >
+                    Por monto total
+                  </button>
+                </div>
               </div>
-              <div style={{ flex: 1 }}>
-                <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Precio unitario</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={ventaPrecio}
-                  onChange={e => setVentaPrecio(e.target.value)}
-                  style={{ width: '100%', height: 40 }}
-                />
+
+              <div style={{ display: 'flex', gap: 10 }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Precio unitario (Gs.)</label>
+                  {ventaModoCalculo === 'PRECIO' ? (
+                    <input
+                      type="number"
+                      min="0"
+                      placeholder="ej: 10000"
+                      value={ventaPrecio}
+                      onChange={e => handleVentaPrecioChange(e.target.value)}
+                      style={{ width: '100%', height: 40 }}
+                    />
+                  ) : (
+                    <div style={{ position: 'relative' }}>
+                      <input
+                        type="text"
+                        readOnly
+                        placeholder="Cálculo automático"
+                        value={ventaPrecio ? `${Number(ventaPrecio).toLocaleString('es-PY')} Gs.` : ''}
+                        style={{ width: '100%', height: 40, background: 'var(--bg-subtle, #f1f5f9)', cursor: 'not-allowed', color: 'var(--text-secondary)', fontWeight: 600, paddingRight: 32 }}
+                      />
+                      <i className="ti ti-lock" style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', fontSize: 14 }} />
+                    </div>
+                  )}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Monto total (Gs.)</label>
+                  {ventaModoCalculo === 'MONTO' ? (
+                    <input
+                      type="number"
+                      min="0"
+                      placeholder="ej: 250000"
+                      value={ventaMontoCalc}
+                      onChange={e => handleVentaMontoCalcChange(e.target.value)}
+                      style={{ width: '100%', height: 40 }}
+                    />
+                  ) : (
+                    <div style={{ position: 'relative' }}>
+                      <input
+                        type="text"
+                        readOnly
+                        placeholder="Cálculo automático"
+                        value={ventaMontoCalc ? `${Number(ventaMontoCalc).toLocaleString('es-PY')} Gs.` : ''}
+                        style={{ width: '100%', height: 40, background: 'var(--bg-subtle, #f1f5f9)', cursor: 'not-allowed', color: 'var(--text-secondary)', fontWeight: 600, paddingRight: 32 }}
+                      />
+                      <i className="ti ti-lock" style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', fontSize: 14 }} />
+                    </div>
+                  )}
+                </div>
               </div>
+
+              {ventaModoCalculo === 'PRECIO' ? (
+                !ventaPrecio || Number(ventaPrecio) <= 0 ? (
+                  <div style={{ fontSize: 11, color: 'var(--amber, #d97706)', marginTop: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <i className="ti ti-info-circle" /> Ingresá el precio unitario para calcular el monto total
+                  </div>
+                ) : Number(ventaCantidad) > 0 && ventaMontoCalc !== '' ? (
+                  <div style={{ fontSize: 11, color: 'var(--blue)', marginTop: 8, fontWeight: 600 }}>
+                    Cálculo: {formatNumberSpanish(ventaCantidad)} {formatUnidadGas(tuboVenta.gas)} × {Number(ventaPrecio).toLocaleString('es-PY')} Gs. = {Number(ventaMontoCalc).toLocaleString('es-PY')} Gs.
+                  </div>
+                ) : null
+              ) : (
+                !ventaMontoCalc || Number(ventaMontoCalc) <= 0 ? (
+                  <div style={{ fontSize: 11, color: 'var(--amber, #d97706)', marginTop: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <i className="ti ti-info-circle" /> Ingresá el monto total para calcular el precio unitario
+                  </div>
+                ) : Number(ventaCantidad) > 0 && ventaPrecio !== '' ? (
+                  <div style={{ fontSize: 11, color: 'var(--blue)', marginTop: 8, fontWeight: 600 }}>
+                    Cálculo: {Number(ventaMontoCalc).toLocaleString('es-PY')} Gs. ÷ {formatNumberSpanish(ventaCantidad)} {formatUnidadGas(tuboVenta.gas)} = {Number(ventaPrecio).toLocaleString('es-PY')} Gs./{formatUnidadGas(tuboVenta.gas)}
+                  </div>
+                ) : null
+              )}
             </div>
 
             <div style={{ display: 'flex', gap: 10 }}>
@@ -2792,11 +2973,71 @@ export default function RepartoPage() {
                   type="number"
                   min="0"
                   step="1"
-                  placeholder={ventaCantidad && ventaPrecio ? String(Number(ventaCantidad) * Number(ventaPrecio)) : ''}
+                  placeholder={ventaMontoCalc ? Number(ventaMontoCalc).toLocaleString('es-PY') : '0'}
                   value={ventaMontoRecibido}
                   onChange={e => setVentaMontoRecibido(e.target.value)}
                   style={{ width: '100%', height: 40 }}
                 />
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Modal de confirmación de Venta de Gas desde el Camión */}
+      <Modal
+        open={ventaConfirmOpen}
+        title="¿Confirmar Venta?"
+        onClose={() => setVentaConfirmOpen(false)}
+        footer={
+          <div style={{ display: 'flex', gap: 10, width: '100%' }}>
+            <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setVentaConfirmOpen(false)} disabled={ventaGuardando}>
+              Atrás
+            </button>
+            <button
+              className="btn btn-primary"
+              style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+              onClick={confirmarVenta}
+              disabled={ventaGuardando}
+            >
+              {ventaGuardando ? <Spinner size="sm" /> : <i className="ti ti-check" />}
+              {ventaGuardando ? 'Registrando...' : 'Sí, Registrar Venta'}
+            </button>
+          </div>
+        }
+      >
+        {tuboVenta && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}>
+              Por favor, verificá que los datos ingresados sean correctos antes de guardar:
+            </p>
+
+            <div style={{ background: 'var(--bg-subtle)', borderRadius: 8, padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                <span style={{ color: 'var(--text-muted)' }}>Cliente:</span>
+                <span style={{ fontWeight: 600 }}>{ventaClienteSeleccionado?.nombre}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                <span style={{ color: 'var(--text-muted)' }}>Gas:</span>
+                <span style={{ fontWeight: 600 }}>{tuboVenta.gas}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, borderBottom: '1px dashed var(--border)', paddingBottom: 8 }}>
+                <span style={{ color: 'var(--text-muted)' }}>Cantidad:</span>
+                <span style={{ fontWeight: 700, color: 'var(--blue)' }}>{formatNumberSpanish(ventaCantidad)} {formatUnidadGas(tuboVenta.gas)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, paddingTop: 4 }}>
+                <span style={{ color: 'var(--text-muted)' }}>Precio Unitario:</span>
+                <span style={{ fontWeight: 600 }}>{Number(ventaPrecio || 0).toLocaleString('es-PY')} Gs.</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                <span style={{ color: 'var(--text-muted)' }}>Forma de pago:</span>
+                <span style={{ fontWeight: 600 }}>{ventaMetodoPago === 'TRANSFERENCIA' ? 'Transferencia' : ventaMetodoPago === 'OTRO' ? 'Otro' : 'Efectivo'}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+                <span style={{ fontWeight: 600 }}>Monto a cobrar:</span>
+                <span style={{ fontWeight: 800, fontSize: 15, color: 'var(--green)' }}>
+                  {Math.round(ventaMontoRecibido === '' ? Number(ventaCantidad) * Number(ventaPrecio) : Number(ventaMontoRecibido)).toLocaleString('es-PY')} Gs.
+                </span>
               </div>
             </div>
           </div>
