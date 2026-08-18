@@ -1,8 +1,14 @@
 // gastubos/frontend/src/pages/CargasPage.jsx
 import { useState, useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import api from '../services/api.js'
 import { PageHeader, Modal, FormGroup, Spinner, EmptyState, GasDot, StateBadge, useToast, formatCapacidad, ObservacionCell } from '../components/ui.jsx'
 import { useAuthStore } from '../store/authStore.js'
+import { useConfigStore } from '../store/configStore.js'
+import { getBrandingSources } from '../utils/logosSvg.js'
+import ClienteAutocomplete from '../components/ClienteAutocomplete.jsx'
+import { construirBufferTicketCargaSalon } from '../utils/ticketsImpresion.js'
+import { conectarImpresoraWebBluetooth, enviarBufferWebBluetooth, esNavegadorMovilConWebBluetooth } from '../utils/webBluetoothPrinter.js'
 
 const TIPO_GAS_LABEL = {
   CO2:             'CO₂',
@@ -56,15 +62,18 @@ const formatNumberSpanish = (val) => {
 
 const FORM_INICIAL = {
   tuboId: '', tipoGas: '', unidad: '', tipoCarga: 'NORMAL', cantidad: '',
-  fechaCarga: new Date().toISOString().slice(0, 16), observaciones: '', metodoPago: '',
+  fechaCarga: new Date().toISOString().slice(0, 16), observaciones: '',
 }
 
 export default function CargasPage() {
   const { user } = useAuthStore()
   const { toast } = useToast()
+  const { nombre_empresa, direccion, telefono, isotipo_empresa, logo_empresa } = useConfigStore()
+  const branding = getBrandingSources(isotipo_empresa, logo_empresa)
+  const puedeCargar = user?.rol === 'ADMIN' || user?.rol === 'SUPERVISOR' || user?.rol === 'OPERADOR'
 
   const [q,        setQ]        = useState('')
-  const [tab,      setTab]      = useState('pendientes') // 'pendientes' | 'historial'
+  const [tab,      setTab]      = useState('pendientes') // 'pendientes' | 'historial' | 'salon'
   const [tubos,    setTubos]    = useState([])
   const [cargas,   setCargas]   = useState([])
   const [total,    setTotal]    = useState(0)
@@ -81,6 +90,14 @@ export default function CargasPage() {
   const [calcPrecio, setCalcPrecio] = useState('')       // SIEMPRE manual, nunca se recalcula
   const [calcMonto, setCalcMonto] = useState('')
   const [modoCalculo, setModoCalculo] = useState('PRECIO') // 'PRECIO' | 'MONTO' — cuál de los dos es editable
+
+  // Solo para Carga en Salón (único tipoCarga que cobra y emite ticket)
+  const [metodoPago, setMetodoPago] = useState('')
+  const [clienteCarga, setClienteCarga] = useState(null)
+  const [clienteEstado, setClienteEstado] = useState('PENDIENTE') // 'PENDIENTE' | 'CON_CLIENTE' | 'SIN_CLIENTE'
+  const [cargaTicket, setCargaTicket] = useState(null)
+  const [ticketModalOpen, setTicketModalOpen] = useState(false)
+  const [connectingPrinter, setConnectingPrinter] = useState(false)
 
   const limit = 50
 
@@ -138,7 +155,7 @@ export default function CargasPage() {
 
   useEffect(() => {
     if (tab === 'pendientes') loadTubos()
-    else loadHistorial()
+    else if (tab === 'historial') loadHistorial()
   }, [tab, loadTubos, loadHistorial])
 
   function abrirModalConTubo(tubo) {
@@ -160,6 +177,9 @@ export default function CargasPage() {
     setCalcPrecio('')
     setCalcMonto('')
     setModoCalculo('PRECIO')
+    setMetodoPago('')
+    setClienteCarga(null)
+    setClienteEstado('PENDIENTE')
 
     setModal(true)
   }
@@ -170,7 +190,7 @@ export default function CargasPage() {
     setCalcMonto('')
   }
 
-  function abrirModalSalon() {
+  function prepararFormSalon() {
     setTuboSeleccionado(null)
     setForm({
       ...FORM_INICIAL,
@@ -183,8 +203,9 @@ export default function CargasPage() {
     setCalcPrecio('')
     setCalcMonto('')
     setModoCalculo('PRECIO')
-
-    setModal(true)
+    setMetodoPago('')
+    setClienteCarga(null)
+    setClienteEstado('PENDIENTE')
   }
 
   // 1. Cambia Cantidad -> recalcula Monto (T = Q × U) en modo PRECIO, o el Precio (U = T / Q) en modo MONTO.
@@ -250,9 +271,17 @@ export default function CargasPage() {
       toast('Completá los campos obligatorios', 'error')
       return
     }
-    if (!form.metodoPago) {
-      toast('Seleccioná la forma de pago', 'error')
-      return
+    // Solo Carga en Salón cobra y emite ticket; Carga Normal es una recarga interna sin
+    // forma de pago (el cobro real ocurre después en la Entrega correspondiente).
+    if (form.tipoCarga === 'SALON') {
+      if (!metodoPago) {
+        toast('Seleccioná la forma de pago', 'error')
+        return
+      }
+      if (clienteEstado === 'PENDIENTE') {
+        toast('Seleccioná un cliente o marcá "Sin cliente"', 'error')
+        return
+      }
     }
     setConfirmOpen(true)
   }
@@ -260,7 +289,7 @@ export default function CargasPage() {
   async function guardarCarga() {
     setSaving(true)
     try {
-      await api.post('/cargas', {
+      const payload = {
         tuboId:        tuboSeleccionado ? form.tuboId : undefined,
         tipoGas:       form.tipoGas,
         unidad:        form.unidad,
@@ -269,32 +298,291 @@ export default function CargasPage() {
         precioUnitario: Number(calcPrecio) || 0,
         fechaCarga:    new Date(form.fechaCarga).toISOString(),
         observaciones: form.observaciones || undefined,
-        metodoPago:    form.metodoPago,
-      })
+      }
+      if (form.tipoCarga === 'SALON') {
+        payload.metodoPago = metodoPago
+        payload.clienteId = clienteEstado === 'CON_CLIENTE' ? clienteCarga?.id : undefined
+      }
+      const res = await api.post('/cargas', payload)
       toast(
         tuboSeleccionado ? 'Carga registrada — tubo pasó a estado CARGADO' : 'Carga en salón registrada con éxito',
         'success'
       )
       setConfirmOpen(false)
       setModal(false)
+      if (form.tipoCarga === 'SALON') {
+        setCargaTicket(res.data)
+        setTicketModalOpen(true)
+      }
       if (tab === 'pendientes') loadTubos()
-      else loadHistorial()
+      else if (tab === 'historial') loadHistorial()
+      else if (tab === 'salon') prepararFormSalon()
     } catch (err) {
       toast(err.response?.data?.error || 'Error al registrar la carga', 'error')
     } finally { setSaving(false) }
   }
 
+  // Impresión del ticket de Carga en Salón — mismo patrón de despacho que
+  // EntregasPage.jsx (handlePrintTicket): Web Bluetooth en navegador móvil, si no,
+  // diálogo de impresión del sistema vía el print-ticket-container oculto.
+  const imprimirCargaSalonWebBluetooth = async (carga) => {
+    setConnectingPrinter(true)
+    try {
+      const buffer = await construirBufferTicketCargaSalon(carga, { branding, nombreEmpresa: nombre_empresa, direccion, telefono, paperWidth: 32 })
+      const conexion = await conectarImpresoraWebBluetooth()
+      await enviarBufferWebBluetooth(conexion, buffer)
+      toast('Impresión enviada correctamente', 'success')
+    } catch (err) {
+      if (err?.name !== 'NotFoundError') {
+        toast('Error al imprimir: ' + (err?.message || String(err)), 'error')
+      }
+    } finally {
+      setConnectingPrinter(false)
+    }
+  }
+
+  const handlePrintTicketCargaSalon = () => {
+    if (esNavegadorMovilConWebBluetooth()) {
+      imprimirCargaSalonWebBluetooth(cargaTicket)
+    } else {
+      window.print()
+    }
+  }
+
+  const reimprimirTicketCargaSalon = (carga) => {
+    setCargaTicket(carga)
+    if (esNavegadorMovilConWebBluetooth()) {
+      imprimirCargaSalonWebBluetooth(carga)
+    } else {
+      setTimeout(() => window.print(), 150)
+    }
+  }
+
   const totalPages = Math.ceil(total / limit)
+
+  function camposFormularioCarga() {
+    return (
+      <>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <FormGroup label="Gas a cargar" required>
+            <select value={form.tipoGas} onChange={e => handleGasChange(e.target.value)}>
+              <option value="">Seleccionar...</option>
+              {Object.entries(TIPO_GAS_LABEL).map(([k, v]) => (
+                <option key={k} value={k}>{v}</option>
+              ))}
+            </select>
+          </FormGroup>
+
+          <FormGroup label="Unidad">
+            <input
+              value={form.unidad === 'KG' ? 'Kilogramo (kg)' : form.unidad === 'M3' ? 'Metro cúbico (m³)' : '—'}
+              readOnly
+              style={{ background: 'var(--bg-subtle)', cursor: 'not-allowed' }}
+            />
+          </FormGroup>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <FormGroup label="Cantidad cargada" required>
+            <input
+              type="number" min="0.001" step="0.001"
+              placeholder={form.unidad === 'KG' ? 'ej: 25' : 'ej: 6'}
+              value={form.cantidad}
+              onChange={e => handleCantidadChange(e.target.value)}
+            />
+          </FormGroup>
+          <FormGroup label="Fecha de carga" required>
+            <input
+              type="datetime-local"
+              value={form.fechaCarga}
+              onChange={e => setForm(prev => ({ ...prev, fechaCarga: e.target.value }))}
+            />
+          </FormGroup>
+        </div>
+
+        {/* Asistente de cálculo por dinero */}
+        <div style={{
+          border: '1px dashed var(--border-mid)',
+          borderRadius: 8,
+          padding: '12px 14px',
+          marginBottom: 16,
+          background: 'var(--bg-subtle)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <i className="ti ti-calculator" /> Asistente de cobro (Opcional)
+            </div>
+            <div style={{ display: 'flex', border: '1px solid var(--border-mid)', borderRadius: 6, overflow: 'hidden' }}>
+              <button
+                type="button"
+                onClick={() => cambiarModoCalculo('PRECIO')}
+                style={{
+                  padding: '4px 10px', fontSize: 11, fontWeight: 600, border: 'none', cursor: 'pointer',
+                  background: modoCalculo === 'PRECIO' ? 'var(--blue)' : 'transparent',
+                  color: modoCalculo === 'PRECIO' ? '#fff' : 'var(--text-secondary)',
+                }}
+              >
+                Por precio unitario
+              </button>
+              <button
+                type="button"
+                onClick={() => cambiarModoCalculo('MONTO')}
+                style={{
+                  padding: '4px 10px', fontSize: 11, fontWeight: 600, border: 'none', cursor: 'pointer',
+                  background: modoCalculo === 'MONTO' ? 'var(--blue)' : 'transparent',
+                  color: modoCalculo === 'MONTO' ? '#fff' : 'var(--text-secondary)',
+                }}
+              >
+                Por monto total
+              </button>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <FormGroup label="Precio unitario (Gs.)">
+              {modoCalculo === 'PRECIO' ? (
+                <input
+                  type="number"
+                  min="0"
+                  placeholder="ej: 10000"
+                  value={calcPrecio}
+                  onChange={e => handleCalcPrecioChange(e.target.value)}
+                />
+              ) : (
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="text"
+                    readOnly
+                    placeholder="Cálculo automático"
+                    value={calcPrecio ? `${Number(calcPrecio).toLocaleString('es-PY')} Gs.` : ''}
+                    style={{
+                      background: 'var(--bg-subtle, #f1f5f9)',
+                      cursor: 'not-allowed',
+                      color: 'var(--text-secondary)',
+                      fontWeight: 600,
+                      paddingRight: 32
+                    }}
+                  />
+                  <i className="ti ti-lock" style={{
+                    position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
+                    color: 'var(--text-muted)', fontSize: 14
+                  }} />
+                </div>
+              )}
+            </FormGroup>
+            <FormGroup label="Monto total (Gs.)">
+              {modoCalculo === 'MONTO' ? (
+                <input
+                  type="number"
+                  min="0"
+                  placeholder="ej: 250000"
+                  value={calcMonto}
+                  onChange={e => handleCalcMontoChange(e.target.value)}
+                />
+              ) : (
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="text"
+                    readOnly
+                    placeholder="Cálculo automático"
+                    value={calcMonto ? `${Number(calcMonto).toLocaleString('es-PY')} Gs.` : ''}
+                    style={{
+                      background: 'var(--bg-subtle, #f1f5f9)',
+                      cursor: 'not-allowed',
+                      color: 'var(--text-secondary)',
+                      fontWeight: 600,
+                      paddingRight: 32
+                    }}
+                  />
+                  <i className="ti ti-lock" style={{
+                    position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
+                    color: 'var(--text-muted)', fontSize: 14
+                  }} />
+                </div>
+              )}
+            </FormGroup>
+          </div>
+          {modoCalculo === 'PRECIO' ? (
+            !calcPrecio || Number(calcPrecio) <= 0 ? (
+              <div style={{ fontSize: 11, color: 'var(--amber, #d97706)', marginTop: 6, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <i className="ti ti-info-circle" /> Ingresá el precio unitario para calcular el monto total
+              </div>
+            ) : Number(form.cantidad) > 0 && calcMonto !== '' ? (
+              <div style={{ fontSize: 11, color: 'var(--blue)', marginTop: 6, fontWeight: 600 }}>
+                Cálculo: {formatNumberSpanish(Number(form.cantidad))} {form.unidad || 'unidad'} × {Number(calcPrecio).toLocaleString('es-PY')} Gs./{form.unidad || 'unidad'} = {Number(calcMonto).toLocaleString('es-PY')} Gs.
+              </div>
+            ) : null
+          ) : (
+            !calcMonto || Number(calcMonto) <= 0 ? (
+              <div style={{ fontSize: 11, color: 'var(--amber, #d97706)', marginTop: 6, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <i className="ti ti-info-circle" /> Ingresá el monto total para calcular el precio unitario
+              </div>
+            ) : Number(form.cantidad) > 0 && calcPrecio !== '' ? (
+              <div style={{ fontSize: 11, color: 'var(--blue)', marginTop: 6, fontWeight: 600 }}>
+                Cálculo: {Number(calcMonto).toLocaleString('es-PY')} Gs. ÷ {formatNumberSpanish(Number(form.cantidad))} {form.unidad || 'unidad'} = {Number(calcPrecio).toLocaleString('es-PY')} Gs./{form.unidad || 'unidad'}
+              </div>
+            ) : null
+          )}
+        </div>
+
+        {form.tipoCarga === 'SALON' && (
+          <>
+            <FormGroup label="Cliente" required>
+              {clienteEstado === 'SIN_CLIENTE' ? (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 10, border: '1px solid var(--border)', borderRadius: 8, background: 'var(--surface-2)' }}>
+                  <span style={{ fontSize: 13, fontStyle: 'italic', color: 'var(--text-secondary)' }}>Sin cliente</span>
+                  <button type="button" className="btn btn-sm" onClick={() => setClienteEstado('PENDIENTE')}>Cambiar</button>
+                </div>
+              ) : (
+                <>
+                  <ClienteAutocomplete
+                    value={clienteCarga}
+                    onChange={c => { setClienteCarga(c); setClienteEstado(c ? 'CON_CLIENTE' : 'PENDIENTE') }}
+                  />
+                  {clienteEstado === 'PENDIENTE' && (
+                    <button type="button" className="btn btn-sm" style={{ marginTop: 8 }} onClick={() => { setClienteCarga(null); setClienteEstado('SIN_CLIENTE') }}>
+                      Sin cliente
+                    </button>
+                  )}
+                </>
+              )}
+            </FormGroup>
+
+            <FormGroup label="Forma de pago" required>
+              <select
+                value={metodoPago}
+                onChange={e => setMetodoPago(e.target.value)}
+              >
+                <option value="">Seleccioná...</option>
+                <option value="EFECTIVO">Efectivo</option>
+                <option value="TRANSFERENCIA">Transferencia</option>
+              </select>
+            </FormGroup>
+          </>
+        )}
+
+        <FormGroup label="Observaciones">
+          <textarea
+            placeholder="Notas opcionales sobre esta carga..."
+            value={form.observaciones}
+            onChange={e => setForm(prev => ({ ...prev, observaciones: e.target.value }))}
+            style={{ height: 64 }}
+          />
+        </FormGroup>
+      </>
+    )
+  }
 
   return (
     <>
       <PageHeader
         title="Cargas y Recargas"
-        subtitle={tab === 'pendientes'
-          ? `${tubos.length} tubo${tubos.length !== 1 ? 's' : ''} para cargar`
-          : `${total} registro${total !== 1 ? 's' : ''} en historial`}
+        subtitle={
+          tab === 'pendientes' ? `${tubos.length} tubo${tubos.length !== 1 ? 's' : ''} para cargar`
+          : tab === 'historial' ? `${total} registro${total !== 1 ? 's' : ''} en historial`
+          : 'Registrar una nueva carga en salón'
+        }
         actions={
-          <>
+          tab !== 'salon' && (
             <button
               className="btn btn-sm"
               onClick={tab === 'pendientes' ? loadTubos : loadHistorial}
@@ -304,12 +592,7 @@ export default function CargasPage() {
               <i className={`ti ti-refresh ${loading ? 'ti-spin' : ''}`} />
               Actualizar
             </button>
-            {(user?.rol === 'ADMIN' || user?.rol === 'SUPERVISOR' || user?.rol === 'OPERADOR') && (
-              <button className="btn btn-primary btn-sm" onClick={abrirModalSalon}>
-                <i className="ti ti-plus" /> Carga en salón
-              </button>
-            )}
-          </>
+          )
         }
       />
 
@@ -319,10 +602,11 @@ export default function CargasPage() {
           {[
             { key: 'pendientes', label: 'Tubos para cargar', icon: 'ti-cylinder' },
             { key: 'historial',  label: 'Historial de cargas', icon: 'ti-history' },
+            ...(puedeCargar ? [{ key: 'salon', label: 'Carga en salón', icon: 'ti-building-store' }] : []),
           ].map(t => (
             <button
               key={t.key}
-              onClick={() => { setTab(t.key); setPage(1) }}
+              onClick={() => { setTab(t.key); setPage(1); if (t.key === 'salon') prepararFormSalon() }}
               style={{
                 padding: '8px 16px', fontSize: 13, fontWeight: 500, border: 'none',
                 background: 'transparent', cursor: 'pointer',
@@ -494,7 +778,7 @@ export default function CargasPage() {
                       <tr>
                         <th>Número</th>
                         <th>Tipo de carga</th>
-                        <th>Tubo</th>
+                        <th>Tubo / Cliente</th>
                         <th>Gas cargado</th>
                         <th>Cantidad</th>
                         <th>Precio Unit.</th>
@@ -502,6 +786,7 @@ export default function CargasPage() {
                         <th>Fecha</th>
                         <th>Operador</th>
                         <th>Obs.</th>
+                        <th style={{ textAlign: 'right' }}>Ticket</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -524,6 +809,10 @@ export default function CargasPage() {
                                   <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600 }}>{c.tubo.id}</div>
                                   <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{c.tubo.serie}</div>
                                 </>
+                              ) : c.tipoCarga === 'SALON' ? (
+                                <span style={{ fontSize: 12, color: c.cliente ? 'var(--text-primary)' : 'var(--text-muted)', fontStyle: c.cliente ? 'normal' : 'italic' }}>
+                                  {c.cliente?.nombre || 'Sin cliente'}
+                                </span>
                               ) : (
                                 <span style={{ fontSize: 12, fontStyle: 'italic', color: 'var(--text-muted)' }}>Carga en salón</span>
                               )}
@@ -551,6 +840,13 @@ export default function CargasPage() {
                             </td>
                             <td style={{ fontSize: 11 }}>
                               <ObservacionCell texto={c.observaciones} titulo="Observaciones de la carga" />
+                            </td>
+                            <td style={{ textAlign: 'right' }}>
+                              {c.tipoCarga === 'SALON' && (
+                                <button className="btn-icon" title="Reimprimir ticket" onClick={() => reimprimirTicketCargaSalon(c)}>
+                                  <i className="ti ti-printer" />
+                                </button>
+                              )}
                             </td>
                           </tr>
                         )
@@ -582,8 +878,10 @@ export default function CargasPage() {
                             </span>
                           </div>
                           <div className="list-card-item">
-                            <span className="list-card-label">Tubo</span>
-                            <span className="list-card-value">{c.tubo?.id || 'Carga en salón'}</span>
+                            <span className="list-card-label">{c.tubo ? 'Tubo' : 'Cliente'}</span>
+                            <span className="list-card-value">
+                              {c.tubo?.id || (c.tipoCarga === 'SALON' ? (c.cliente?.nombre || 'Sin cliente') : 'Carga en salón')}
+                            </span>
                           </div>
                           <div className="list-card-item">
                             <span className="list-card-label">Gas</span>
@@ -620,6 +918,13 @@ export default function CargasPage() {
                             </div>
                           )}
                         </div>
+                        {c.tipoCarga === 'SALON' && (
+                          <div className="list-card-actions" style={{ justifyContent: 'flex-end', paddingTop: 12 }}>
+                            <button className="btn btn-sm" onClick={() => reimprimirTicketCargaSalon(c)}>
+                              <i className="ti ti-printer" /> Reimprimir ticket
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )
                   })}
@@ -636,12 +941,24 @@ export default function CargasPage() {
           </>
         )}
 
+        {/* TAB: Carga en salón */}
+        {tab === 'salon' && (
+          <div className="card" style={{ padding: 20, maxWidth: 560 }}>
+            {camposFormularioCarga()}
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button className="btn btn-primary" onClick={handleSubmit} disabled={saving}>
+                {saving ? 'Guardando...' : 'Registrar carga'}
+              </button>
+            </div>
+          </div>
+        )}
+
       </div>
 
-      {/* Modal de carga */}
+      {/* Modal de carga (tubo seleccionado desde "Tubos para cargar") */}
       <Modal
         open={modal}
-        title={tuboSeleccionado ? `Registrar carga — ${tuboSeleccionado.id}` : 'Registrar Carga en Salón'}
+        title={`Registrar carga — ${tuboSeleccionado?.id ?? ''}`}
         onClose={() => setModal(false)}
         width={520}
         footer={
@@ -665,186 +982,7 @@ export default function CargasPage() {
           </div>
         )}
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <FormGroup label="Gas a cargar" required>
-            <select value={form.tipoGas} onChange={e => handleGasChange(e.target.value)}>
-              <option value="">Seleccionar...</option>
-              {Object.entries(TIPO_GAS_LABEL).map(([k, v]) => (
-                <option key={k} value={k}>{v}</option>
-              ))}
-            </select>
-          </FormGroup>
-
-          <FormGroup label="Unidad">
-            <input
-              value={form.unidad === 'KG' ? 'Kilogramo (kg)' : form.unidad === 'M3' ? 'Metro cúbico (m³)' : '—'}
-              readOnly
-              style={{ background: 'var(--bg-subtle)', cursor: 'not-allowed' }}
-            />
-          </FormGroup>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <FormGroup label="Cantidad cargada" required>
-            <input
-              type="number" min="0.001" step="0.001"
-              placeholder={form.unidad === 'KG' ? 'ej: 25' : 'ej: 6'}
-              value={form.cantidad}
-              onChange={e => handleCantidadChange(e.target.value)}
-            />
-          </FormGroup>
-          <FormGroup label="Fecha de carga" required>
-            <input
-              type="datetime-local"
-              value={form.fechaCarga}
-              onChange={e => setForm(prev => ({ ...prev, fechaCarga: e.target.value }))}
-            />
-          </FormGroup>
-        </div>
-
-        {/* Asistente de cálculo por dinero */}
-        <div style={{ 
-          border: '1px dashed var(--border-mid)', 
-          borderRadius: 8, 
-          padding: '12px 14px', 
-          marginBottom: 16, 
-          background: 'var(--bg-subtle)'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: 4 }}>
-              <i className="ti ti-calculator" /> Asistente de cobro (Opcional)
-            </div>
-            <div style={{ display: 'flex', border: '1px solid var(--border-mid)', borderRadius: 6, overflow: 'hidden' }}>
-              <button
-                type="button"
-                onClick={() => cambiarModoCalculo('PRECIO')}
-                style={{
-                  padding: '4px 10px', fontSize: 11, fontWeight: 600, border: 'none', cursor: 'pointer',
-                  background: modoCalculo === 'PRECIO' ? 'var(--blue)' : 'transparent',
-                  color: modoCalculo === 'PRECIO' ? '#fff' : 'var(--text-secondary)',
-                }}
-              >
-                Por precio unitario
-              </button>
-              <button
-                type="button"
-                onClick={() => cambiarModoCalculo('MONTO')}
-                style={{
-                  padding: '4px 10px', fontSize: 11, fontWeight: 600, border: 'none', cursor: 'pointer',
-                  background: modoCalculo === 'MONTO' ? 'var(--blue)' : 'transparent',
-                  color: modoCalculo === 'MONTO' ? '#fff' : 'var(--text-secondary)',
-                }}
-              >
-                Por monto total
-              </button>
-            </div>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <FormGroup label="Precio unitario (Gs.)">
-              {modoCalculo === 'PRECIO' ? (
-                <input
-                  type="number"
-                  min="0"
-                  placeholder="ej: 10000"
-                  value={calcPrecio}
-                  onChange={e => handleCalcPrecioChange(e.target.value)}
-                />
-              ) : (
-                <div style={{ position: 'relative' }}>
-                  <input
-                    type="text"
-                    readOnly
-                    placeholder="Cálculo automático"
-                    value={calcPrecio ? `${Number(calcPrecio).toLocaleString('es-PY')} Gs.` : ''}
-                    style={{
-                      background: 'var(--bg-subtle, #f1f5f9)',
-                      cursor: 'not-allowed',
-                      color: 'var(--text-secondary)',
-                      fontWeight: 600,
-                      paddingRight: 32
-                    }}
-                  />
-                  <i className="ti ti-lock" style={{
-                    position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
-                    color: 'var(--text-muted)', fontSize: 14
-                  }} />
-                </div>
-              )}
-            </FormGroup>
-            <FormGroup label="Monto total (Gs.)">
-              {modoCalculo === 'MONTO' ? (
-                <input
-                  type="number"
-                  min="0"
-                  placeholder="ej: 250000"
-                  value={calcMonto}
-                  onChange={e => handleCalcMontoChange(e.target.value)}
-                />
-              ) : (
-                <div style={{ position: 'relative' }}>
-                  <input
-                    type="text"
-                    readOnly
-                    placeholder="Cálculo automático"
-                    value={calcMonto ? `${Number(calcMonto).toLocaleString('es-PY')} Gs.` : ''}
-                    style={{
-                      background: 'var(--bg-subtle, #f1f5f9)',
-                      cursor: 'not-allowed',
-                      color: 'var(--text-secondary)',
-                      fontWeight: 600,
-                      paddingRight: 32
-                    }}
-                  />
-                  <i className="ti ti-lock" style={{
-                    position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
-                    color: 'var(--text-muted)', fontSize: 14
-                  }} />
-                </div>
-              )}
-            </FormGroup>
-          </div>
-          {modoCalculo === 'PRECIO' ? (
-            !calcPrecio || Number(calcPrecio) <= 0 ? (
-              <div style={{ fontSize: 11, color: 'var(--amber, #d97706)', marginTop: 6, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
-                <i className="ti ti-info-circle" /> Ingresá el precio unitario para calcular el monto total
-              </div>
-            ) : Number(form.cantidad) > 0 && calcMonto !== '' ? (
-              <div style={{ fontSize: 11, color: 'var(--blue)', marginTop: 6, fontWeight: 600 }}>
-                Cálculo: {formatNumberSpanish(Number(form.cantidad))} {form.unidad || 'unidad'} × {Number(calcPrecio).toLocaleString('es-PY')} Gs./{form.unidad || 'unidad'} = {Number(calcMonto).toLocaleString('es-PY')} Gs.
-              </div>
-            ) : null
-          ) : (
-            !calcMonto || Number(calcMonto) <= 0 ? (
-              <div style={{ fontSize: 11, color: 'var(--amber, #d97706)', marginTop: 6, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
-                <i className="ti ti-info-circle" /> Ingresá el monto total para calcular el precio unitario
-              </div>
-            ) : Number(form.cantidad) > 0 && calcPrecio !== '' ? (
-              <div style={{ fontSize: 11, color: 'var(--blue)', marginTop: 6, fontWeight: 600 }}>
-                Cálculo: {Number(calcMonto).toLocaleString('es-PY')} Gs. ÷ {formatNumberSpanish(Number(form.cantidad))} {form.unidad || 'unidad'} = {Number(calcPrecio).toLocaleString('es-PY')} Gs./{form.unidad || 'unidad'}
-              </div>
-            ) : null
-          )}
-        </div>
-
-        <FormGroup label="Forma de pago" required>
-          <select
-            value={form.metodoPago}
-            onChange={e => setForm(prev => ({ ...prev, metodoPago: e.target.value }))}
-          >
-            <option value="">Seleccioná...</option>
-            <option value="EFECTIVO">Efectivo</option>
-            <option value="TRANSFERENCIA">Transferencia</option>
-          </select>
-        </FormGroup>
-
-        <FormGroup label="Observaciones">
-          <textarea
-            placeholder="Notas opcionales sobre esta carga..."
-            value={form.observaciones}
-            onChange={e => setForm(prev => ({ ...prev, observaciones: e.target.value }))}
-            style={{ height: 64 }}
-          />
-        </FormGroup>
+        {camposFormularioCarga()}
       </Modal>
 
       {/* Modal de confirmación de carga */}
@@ -892,10 +1030,18 @@ export default function CargasPage() {
               </span>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
-              <span style={{ color: 'var(--text-muted)' }}>Forma de pago:</span>
-              <span style={{ fontWeight: 600 }}>{form.metodoPago === 'TRANSFERENCIA' ? 'Transferencia' : 'Efectivo'}</span>
-            </div>
+            {form.tipoCarga === 'SALON' && (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Cliente:</span>
+                  <span style={{ fontWeight: 600 }}>{clienteEstado === 'SIN_CLIENTE' ? 'Sin cliente' : (clienteCarga?.nombre || '—')}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Forma de pago:</span>
+                  <span style={{ fontWeight: 600 }}>{metodoPago === 'TRANSFERENCIA' ? 'Transferencia' : 'Efectivo'}</span>
+                </div>
+              </>
+            )}
 
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
               <span style={{ fontWeight: 600 }}>Monto Total:</span>
@@ -906,6 +1052,107 @@ export default function CargasPage() {
           </div>
         </div>
       </Modal>
+
+      {/* Modal de ticket — Carga en Salón */}
+      <Modal
+        open={ticketModalOpen}
+        title={`Carga en Salón — ${cargaTicket?.numero || ''}`}
+        onClose={() => setTicketModalOpen(false)}
+        width={420}
+        footer={
+          <>
+            <button className="btn" onClick={() => setTicketModalOpen(false)}>Cerrar</button>
+            <button className="btn btn-primary" onClick={handlePrintTicketCargaSalon} disabled={connectingPrinter}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <i className="ti ti-printer" /> {connectingPrinter ? 'Imprimiendo...' : 'Imprimir ticket'}
+            </button>
+          </>
+        }
+      >
+        {cargaTicket && (
+          <div style={{ fontSize: 12, lineHeight: 1.6 }}>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>Cliente: {cargaTicket.cliente?.nombre || 'Sin cliente'}</div>
+            <div>Fecha: {new Date(cargaTicket.fechaCarga).toLocaleString('es-PY')}</div>
+            <div>Atendido por: {cargaTicket.operador?.nombre || cargaTicket.operador?.username}</div>
+            <div>Gas: {TIPO_GAS_LABEL[cargaTicket.tipoGas] || cargaTicket.tipoGas}</div>
+            <div>Cantidad: {formatNumberSpanish(cargaTicket.cantidad)} {cargaTicket.unidad === 'KG' ? 'kg' : 'm³'}</div>
+            <div>Precio Unit.: {Number(cargaTicket.precioUnitario).toLocaleString('es-PY')} GS</div>
+            <div style={{ fontWeight: 700, marginTop: 6 }}>
+              Total: {Math.round(Number(cargaTicket.cantidad) * Number(cargaTicket.precioUnitario)).toLocaleString('es-PY')} GS
+            </div>
+            <div>Forma de pago: {cargaTicket.metodoPago === 'TRANSFERENCIA' ? 'Transferencia' : 'Efectivo'}</div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Elemento que solo se muestra para la impresión física (80mm) */}
+      {cargaTicket && createPortal(
+        <div className="print-ticket-container">
+          <div className="ticket-header">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', marginBottom: '10px' }}>
+              <img src={branding.isotipoSrc} alt="Isotipo" style={{ width: '40px', height: '40px', objectFit: 'contain' }} />
+              <img src={branding.logoSrc} alt="Logo" style={{ width: '108px', height: '40px', objectFit: 'contain' }} />
+            </div>
+            {direccion ? <p style={{ margin: 0, fontSize: '10px' }}>{direccion}</p> : <p style={{ margin: 0, fontSize: '10px' }}>Gestión de Gases Industriales</p>}
+            {telefono && <p style={{ margin: '2px 0 0', fontSize: '10px' }}>Tel: {telefono}</p>}
+            <p style={{ margin: '4px 0 0', fontSize: '11px', fontWeight: 'bold' }}>
+              CARGA EN SALÓN: {cargaTicket.numero}
+            </p>
+          </div>
+
+          <div style={{ margin: '8px 0', fontSize: '11px' }}>
+            <strong>Cliente:</strong> {cargaTicket.cliente?.nombre || 'Sin cliente'}<br />
+            {cargaTicket.cliente?.ruc && <>RUC/CI: {cargaTicket.cliente.ruc}<br /></>}
+            <strong>Fecha:</strong> {new Date(cargaTicket.fechaCarga).toLocaleString('es-PY')}<br />
+            <strong>Atendido por:</strong> {cargaTicket.operador?.nombre || cargaTicket.operador?.username || ''}<br />
+            <strong>Forma de pago:</strong> {cargaTicket.metodoPago === 'TRANSFERENCIA' ? 'Transferencia' : 'Efectivo'}
+          </div>
+
+          <table className="ticket-table">
+            <thead>
+              <tr>
+                <th style={{ textAlign: 'left' }}>Gas</th>
+                <th style={{ textAlign: 'center' }}>Cant.</th>
+                <th style={{ textAlign: 'right' }}>Subtotal</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>{TIPO_GAS_LABEL[cargaTicket.tipoGas] || cargaTicket.tipoGas}</td>
+                <td style={{ textAlign: 'center' }}>
+                  {formatNumberSpanish(cargaTicket.cantidad)} {cargaTicket.unidad === 'KG' ? 'kg' : 'm³'}<br />
+                  <span style={{ fontSize: '9px', color: '#888' }}>x {Number(cargaTicket.precioUnitario).toLocaleString('es-PY')}</span>
+                </td>
+                <td style={{ textAlign: 'right', fontWeight: '500' }}>
+                  {Math.round(Number(cargaTicket.cantidad) * Number(cargaTicket.precioUnitario)).toLocaleString('es-PY')} GS
+                </td>
+              </tr>
+              <tr>
+                <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px' }}>TOTAL:</td>
+                <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px', color: 'var(--blue)' }}>
+                  {Math.round(Number(cargaTicket.cantidad) * Number(cargaTicket.precioUnitario)).toLocaleString('es-PY')} GS
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          {cargaTicket.observaciones && (
+            <div style={{ margin: '8px 0', fontSize: '10px', fontStyle: 'italic', borderTop: '1px dashed #000', paddingTop: '4px' }}>
+              <strong>Obs:</strong> {cargaTicket.observaciones}
+            </div>
+          )}
+
+          <div className="ticket-signatures">
+            <div className="signature-line">Firma Operador</div>
+            <div className="signature-line">Firma Cliente</div>
+          </div>
+
+          <div className="ticket-footer">
+            ¡Gracias por su preferencia!
+          </div>
+        </div>,
+        document.body
+      )}
     </>
   )
 }

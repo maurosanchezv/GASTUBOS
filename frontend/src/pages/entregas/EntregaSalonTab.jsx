@@ -17,6 +17,7 @@ import { Modal, Spinner, GasDot, StateBadge, FormGroup, formatCapacidad } from '
 import { useAuthStore } from '../../store/authStore.js'
 import { GASES_RETORNO, capacidadesParaGas, capacidadInicialParaGas, nextRecambioDescripcion } from '../../utils/recambiosCalculadora.js'
 import TuboChip from '../../components/TuboChip.jsx'
+import ClienteAutocomplete from '../../components/ClienteAutocomplete.jsx'
 
 const SCANNER_VERIFICAR_ID = 'entrega-salon-verificar-qr-reader'
 const SCANNER_RETORNO_ID = 'entrega-salon-retorno-qr-reader'
@@ -34,8 +35,7 @@ export default function EntregaSalonTab({ toast, onFinish }) {
   const [paso, setPaso] = useState('datos')
 
   // ── Paso 1: datos y tubos ────────────────────────────────────────────────
-  const [clientes, setClientes] = useState([])
-  const [clienteId, setClienteId] = useState('')
+  const [clienteSeleccionado, setClienteSeleccionado] = useState(null)
   const [tipoOperacion, setTipoOperacion] = useState('ENTREGA_SIMPLE')
   const [tubosIds, setTubosIds] = useState([])
   const [tubosDetalles, setTubosDetalles] = useState([])
@@ -77,10 +77,6 @@ export default function EntregaSalonTab({ toast, onFinish }) {
   const [confirmando, setConfirmando] = useState(false)
   const [modalConfirmarAbierto, setModalConfirmarAbierto] = useState(false)
 
-  useEffect(() => {
-    api.get('/clientes').then(r => setClientes(r.data)).catch(() => {})
-  }, [])
-
   // Si el operador había creado una entrega de salón y no llegó a
   // confirmarla, se la ofrecemos retomar en vez de dejarla huérfana.
   useEffect(() => {
@@ -107,7 +103,7 @@ export default function EntregaSalonTab({ toast, onFinish }) {
 
   function resetWizard() {
     setPaso('datos')
-    setClienteId('')
+    setClienteSeleccionado(null)
     setTipoOperacion('ENTREGA_SIMPLE')
     setTubosIds([])
     setTubosDetalles([])
@@ -135,7 +131,7 @@ export default function EntregaSalonTab({ toast, onFinish }) {
     // Restaurar también el estado del paso "datos" — si no, el botón
     // "Volver" muestra el formulario vacío y metodoPago queda '' (rompe
     // la validación al confirmar, ver PUT /:id/confirmar).
-    setClienteId(pendienteExistente.clienteId || '')
+    setClienteSeleccionado(pendienteExistente.cliente || null)
     setTipoOperacion(pendienteExistente.tipoOperacion || 'ENTREGA_SIMPLE')
     setMetodoPago(pendienteExistente.metodoPago || '')
     setObservaciones(pendienteExistente.observaciones || '')
@@ -234,7 +230,7 @@ export default function EntregaSalonTab({ toast, onFinish }) {
   }
 
   async function crearEntregaSalon() {
-    if (!clienteId) return toast('Seleccioná un cliente', 'error')
+    if (!clienteSeleccionado) return toast('Seleccioná un cliente', 'error')
     if (tubosIds.length === 0) return toast('Agregá al menos un tubo', 'error')
     if (!metodoPago) return toast('Seleccioná la forma de pago', 'error')
     if (tipoOperacion === 'ALQUILER' && !fechaVencimiento) return toast('Ingresá la fecha de vencimiento del alquiler', 'error')
@@ -242,7 +238,7 @@ export default function EntregaSalonTab({ toast, onFinish }) {
     setCreando(true)
     try {
       const { data: creada } = await api.post('/entregas', {
-        clienteId,
+        clienteId: clienteSeleccionado.id,
         sucursalId: null,
         direccionEntrega: 'Retiro en Salón',
         tipoOperacion,
@@ -455,10 +451,7 @@ export default function EntregaSalonTab({ toast, onFinish }) {
             <div className="form-grid">
               <div className="form-group">
                 <label className="form-label">Cliente <span className="form-required">*</span></label>
-                <select value={clienteId} onChange={e => setClienteId(e.target.value)} required>
-                  <option value="">Seleccionar cliente...</option>
-                  {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-                </select>
+                <ClienteAutocomplete value={clienteSeleccionado} onChange={setClienteSeleccionado} />
               </div>
               <div className="form-group">
                 <label className="form-label">Tipo de operación <span className="form-required">*</span></label>

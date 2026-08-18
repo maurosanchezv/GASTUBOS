@@ -262,7 +262,7 @@ export async function construirBufferTicketVentaCamion(carga, config) {
 
   const cantStr = `${formatNumberSpanish(carga.cantidad)} ${carga.unidad}`
   const precioUnitStr = Number(carga.precioUnitario).toLocaleString('es-PY')
-  const subtotal = Math.round(Number(carga.cantidad) * Number(carga.precioUnitario))
+  const subtotal = Number(carga.cantidad) * Number(carga.precioUnitario)
   const subtotalStr = subtotal.toLocaleString('es-PY') + ' GS'
 
   builder.addTextLine(`${carga.tubo?.gas || ''} (Tubo ${carga.tuboId})`.slice(0, width))
@@ -273,6 +273,83 @@ export async function construirBufferTicketVentaCamion(carga, config) {
 
   builder.addTextLine('Forma de pago: ' + (carga.metodoPago || '-'))
   builder.addTextLine('Recibido: ' + Number(carga.montoRecibido || 0).toLocaleString('es-PY') + ' GS')
+  builder.addTextLine(doubleLine())
+
+  builder.addTextLine('').addTextLine('')
+  const lineLength = width >= 48 ? 18 : 13
+  const soloLine = '-'.repeat(lineLength)
+  const padCentro = Math.max(0, Math.floor((width - lineLength) / 2))
+  builder.addTextLine(' '.repeat(padCentro) + soloLine)
+  const labelFirma = 'Firma Cliente'
+  const padLabel = Math.max(0, Math.floor((width - labelFirma.length) / 2))
+  builder.addTextLine(' '.repeat(padLabel) + labelFirma)
+  builder.addTextLine('')
+
+  builder.alignCenter().boldOn().addTextLine('Gracias por su preferencia!').boldOff()
+
+  builder.addTextLine('').addTextLine('').addTextLine('').addTextLine('').addTextLine('').addTextLine('')
+  builder.feedLines(4)
+  return builder.getBuffer()
+}
+
+export async function construirBufferTicketCargaSalon(carga, config) {
+  const { branding, nombreEmpresa, direccion, telefono, paperWidth } = config
+
+  let logoBytes = null
+  try {
+    logoBytes = await generarLogoEscPos(branding.isotipoSrc, branding.logoSrc)
+  } catch (e) {
+    console.warn('No se pudo generar el logo para la impresion:', e)
+  }
+
+  const builder = new EscPosBuilder()
+  const width = paperWidth
+  const { wrapText, justify, line, doubleLine } = crearHelpersTicket(width)
+
+  builder.initialize()
+  if (logoBytes) {
+    builder.addBytes(logoBytes)
+    builder.addTextLine('')
+  } else {
+    builder.alignCenter().boldOn().doubleSizeOn().addTextLine((nombreEmpresa || 'GASTUBOS').toUpperCase()).doubleSizeOff()
+  }
+
+  builder.alignCenter()
+  if (direccion) {
+    wrapText(direccion, width).forEach(l => builder.addTextLine(l))
+  }
+  if (telefono) {
+    wrapText('Tel: ' + telefono, width).forEach(l => builder.addTextLine(l))
+  }
+  builder.addTextLine(doubleLine())
+
+  builder.alignLeft().boldOn().addTextLine('CARGA EN SALON: ' + carga.numero).boldOff()
+  builder.addTextLine(line())
+
+  const clienteText = 'Cliente: ' + (carga.cliente?.nombre || 'Sin cliente')
+  wrapText(clienteText, width).forEach(l => builder.addTextLine(l))
+  if (carga.cliente?.ruc) {
+    builder.addTextLine('RUC/CI: ' + carga.cliente.ruc)
+  }
+  builder.addTextLine('Fecha: ' + new Date(carga.fechaCarga).toLocaleString('es-PY'))
+  builder.addTextLine('Atendido por: ' + (carga.operador?.nombre || carga.operador?.username || ''))
+  builder.addTextLine(doubleLine())
+
+  builder.boldOn().addTextLine(justify('PRODUCTO', 'SUBTOTAL')).boldOff()
+  builder.addTextLine(line())
+
+  const cantStr = `${formatNumberSpanish(carga.cantidad)} ${carga.unidad}`
+  const precioUnitStr = Number(carga.precioUnitario).toLocaleString('es-PY')
+  const subtotal = Math.round(Number(carga.cantidad) * Number(carga.precioUnitario))
+  const subtotalStr = subtotal.toLocaleString('es-PY') + ' GS'
+
+  builder.addTextLine((carga.tipoGas || '').slice(0, width))
+  builder.addTextLine(justify(`  ${cantStr} x ${precioUnitStr}`, subtotalStr))
+  builder.addTextLine(line())
+  builder.boldOn().addTextLine(justify('TOTAL:', subtotalStr)).boldOff()
+  builder.addTextLine(doubleLine())
+
+  builder.addTextLine('Forma de pago: ' + (carga.metodoPago || '-'))
   builder.addTextLine(doubleLine())
 
   builder.addTextLine('').addTextLine('')

@@ -5,6 +5,7 @@ import api from '../services/api.js'
 import { PageHeader, Modal, FormGroup, Spinner, EmptyState, formatCapacidad } from '../components/ui.jsx'
 import { useToast } from '../components/ui.jsx'
 import { useConfigStore } from '../store/configStore.js'
+import ClienteAutocomplete from '../components/ClienteAutocomplete.jsx'
 
 const GASES = ['Oxígeno', 'CO2', 'Argón', 'Nitrógeno', 'Aire comprimido', 'Mezcla CO2/Argón', 'Acetileno']
 const ESTADOS = ['PENDIENTE', 'DE_BAJA']
@@ -18,13 +19,12 @@ export default function CilindrosTercerosPage() {
   const [items, setItems] = useState([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [clientes, setClientes] = useState([])
-  
+
   // Filtros
   const [q, setQ] = useState('')
   const [filterGas, setFilterGas] = useState('')
   const [filterEstado, setFilterEstado] = useState('')
-  const [filterCliente, setFilterCliente] = useState('')
+  const [filterCliente, setFilterCliente] = useState(null)
   
   // Modales
   const [adquirirModal, setAdquirirModal] = useState(false)
@@ -42,19 +42,13 @@ export default function CilindrosTercerosPage() {
   })
   
   const [motivoBaja, setMotivoBaja] = useState('')
+  const [clientePropietario, setClientePropietario] = useState(null)
 
   // Estados de carga
   const [saving, setSaving] = useState(false)
   const [bajaSaving, setBajaSaving] = useState(false)
-  
-  const { toast } = useToast()
 
-  // Cargar clientes para filtro
-  useEffect(() => {
-    api.get('/clientes')
-      .then(res => setClientes(res.data))
-      .catch(() => {})
-  }, [])
+  const { toast } = useToast()
 
   // Cargar cilindros de terceros
   const load = useCallback(async () => {
@@ -63,7 +57,7 @@ export default function CilindrosTercerosPage() {
       const params = { limit: 200 }
       if (filterEstado) params.estado = filterEstado
       if (filterGas) params.gas = filterGas
-      if (filterCliente) params.clienteId = filterCliente
+      if (filterCliente) params.clienteId = filterCliente.id
       if (q) params.q = q
 
       const res = await api.get('/cilindros-terceros', { params })
@@ -107,6 +101,7 @@ export default function CilindrosTercerosPage() {
       propietario: 'PROPIO',
       propietarioClienteId: item.clienteId || ''
     })
+    setClientePropietario(item.cliente || null)
     setAdquirirModal(true)
   }
 
@@ -235,21 +230,14 @@ export default function CilindrosTercerosPage() {
               <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                 Cliente de Origen
               </label>
-              <select 
-                style={{ width: '100%', height: 38, padding: '0 10px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-mid)', background: 'var(--surface)' }} 
-                value={filterCliente} 
-                onChange={e => setFilterCliente(e.target.value)}
-              >
-                <option value="">Todos los clientes</option>
-                {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-              </select>
+              <ClienteAutocomplete value={filterCliente} onChange={setFilterCliente} placeholder="Todos los clientes — buscar por nombre o RUC/CI..." />
             </div>
 
             {(filterGas || filterEstado || filterCliente || q) && (
               <button 
                 className="btn" 
                 style={{ height: 38, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
-                onClick={() => { setFilterGas(''); setFilterEstado(''); setFilterCliente(''); setQ('') }}
+                onClick={() => { setFilterGas(''); setFilterEstado(''); setFilterCliente(null); setQ('') }}
               >
                 Limpiar
               </button>
@@ -490,16 +478,10 @@ export default function CilindrosTercerosPage() {
 
             {form.propietario === 'CLIENTE' && (
               <FormGroup label="Cliente Propietario *" required>
-                <select
-                  value={form.propietarioClienteId}
-                  onChange={e => setForm(prev => ({ ...prev, propietarioClienteId: e.target.value }))}
-                  required
-                >
-                  <option value="">Seleccionar cliente...</option>
-                  {clientes.map(c => (
-                    <option key={c.id} value={c.id}>{c.nombre} (RUC: {c.ruc || '—'})</option>
-                  ))}
-                </select>
+                <ClienteAutocomplete
+                  value={clientePropietario}
+                  onChange={c => { setClientePropietario(c); setForm(prev => ({ ...prev, propietarioClienteId: c?.id || '' })) }}
+                />
               </FormGroup>
             )}
 

@@ -5,6 +5,7 @@ import api from '../services/api.js'
 import { PageHeader, StateBadge, Modal, FormGroup, Spinner, EmptyState, GasDot, formatCapacidad } from '../components/ui.jsx'
 import { useConfigStore } from '../store/configStore.js'
 import { useToast } from '../components/ui.jsx'
+import ClienteAutocomplete from '../components/ClienteAutocomplete.jsx'
 
 const ESTADOS = ['DISPONIBLE','CARGADO','VACIO','ENTREGADO','ALQUILADO','VENDIDO','RESERVADO','PERDIDO','DEVUELTO','EN_REVISION','DE_BAJA']
 const GASES   = ['CO2','Oxígeno','Argón','Nitrógeno','Aire comprimido','Acetileno','Mezcla Ar+CO2','Mezcla especial']
@@ -34,7 +35,7 @@ export default function TubosPage() {
   const [q,       setQ]       = useState('')
   const [params]  = useSearchParams()
   const [estadoFilter, setEstadoFilter] = useState(params.get('estado') || '')
-  const [clientes, setClientes] = useState([])
+  const [clientePropietario, setClientePropietario] = useState(null)
   const navigate  = useNavigate()
   const { toast } = useToast()
 
@@ -47,12 +48,6 @@ export default function TubosPage() {
   const [reactivarModal, setReactivarModal] = useState(false)
   const [reactivarSaving, setReactivarSaving] = useState(false)
   const [motivoReactivar, setMotivoReactivar] = useState('')
-
-  useEffect(() => {
-    api.get('/clientes')
-      .then(res => setClientes(res.data))
-      .catch(() => {})
-  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -94,6 +89,7 @@ export default function TubosPage() {
       toast('Tubo creado correctamente', 'success')
       setModal(false)
       setForm(getEmptyTubo())
+      setClientePropietario(null)
       load()
     } catch (err) {
       toast(err.response?.data?.error || 'Error al crear tubo', 'error')
@@ -388,12 +384,10 @@ export default function TubosPage() {
             </FormGroup>
             {form.propietario === 'CLIENTE' && (
               <FormGroup label="Cliente Propietario" required>
-                <select value={form.propietarioClienteId} onChange={f('propietarioClienteId')} required>
-                  <option value="">Seleccionar cliente...</option>
-                  {clientes.map(c => (
-                    <option key={c.id} value={c.id}>{c.nombre} (RUC: {c.ruc})</option>
-                  ))}
-                </select>
+                <ClienteAutocomplete
+                  value={clientePropietario}
+                  onChange={c => { setClientePropietario(c); setForm(prev => ({ ...prev, propietarioClienteId: c?.id || '' })) }}
+                />
               </FormGroup>
             )}
             <FormGroup label="Fecha de creación">
