@@ -20,7 +20,10 @@ const cargaSchema = z.object({
   precioUnitario: z.number().nonnegative().optional().default(0),
   fechaCarga:    z.string().datetime(),
   observaciones: z.string().optional(),
-  metodoPago:    z.enum(['EFECTIVO', 'TRANSFERENCIA']),
+  // Solo aplican (y se exigen) cuando tipoCarga=SALON: una recarga normal de depósito no
+  // es un punto de venta, el cobro real ocurre después en la Entrega correspondiente.
+  metodoPago:    z.enum(['EFECTIVO', 'TRANSFERENCIA']).optional().nullable(),
+  clienteId:     z.string().min(1).optional().nullable(),
 })
 
 const ventaCamionSchema = z.object({
@@ -86,6 +89,14 @@ router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res,
   try {
     const data = cargaSchema.parse(req.body)
 
+    // Solo Carga en Salón es un punto de venta real (con ticket); Carga Normal es una
+    // recarga interna de depósito sin cobro propio, así que no debe llevar forma de
+    // pago ni cliente aunque el payload los mande.
+    const esSalon = data.tipoCarga === 'SALON'
+    if (esSalon && !data.metodoPago) {
+      return res.status(400).json({ error: 'Seleccioná la forma de pago' })
+    }
+
     let tubo = null
     if (data.tuboId) {
       tubo = await prisma.tubo.findUnique({ where: { id: data.tuboId, activo: true } })
@@ -113,11 +124,13 @@ router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res,
           fechaCarga:    new Date(data.fechaCarga),
           operadorId:    req.user.id,
           observaciones: data.observaciones,
-          metodoPago:    data.metodoPago,
+          metodoPago:    esSalon ? data.metodoPago : null,
+          clienteId:     esSalon ? (data.clienteId || null) : null,
         },
         include: {
           tubo:     { select: { id: true, serie: true, gas: true } },
-          operador: { select: { username: true, nombre: true } },
+          operador: { select: { id: true, username: true, nombre: true } },
+          cliente:  { select: { id: true, nombre: true, ruc: true } },
         },
       })
 

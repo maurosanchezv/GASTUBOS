@@ -85,7 +85,10 @@ router.get('/', async (req, res, next) => {
       }),
 
       prisma.carga.findMany({
-        where: { fechaCarga: { gte: startDate, lte: endDate }, metodoPago: { not: null } },
+        // Carga Normal es una recarga interna de depósito sin cobro propio ni ticket
+        // (el cobro real ocurre en la Entrega correspondiente); se excluye acá para no
+        // duplicar el movimiento de dinero, histórico incluido.
+        where: { fechaCarga: { gte: startDate, lte: endDate }, tipoCarga: { not: 'NORMAL' }, metodoPago: { not: null } },
         include: {
           operador: { select: { id: true, nombre: true, username: true } },
           cliente:  { select: { id: true, nombre: true } },
