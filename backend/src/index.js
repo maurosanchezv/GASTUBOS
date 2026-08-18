@@ -109,8 +109,23 @@ app.get('/api/health', (req, res) => res.json({ ok: true, version: '1.0.0' }))
 app.get('/', (req, res) => res.json({ ok: true, message: 'GasTubos API Backend is running. Access the app via the frontend or mobile build.' }))
 
 // ─── Error handler global ─────────────────────────────────────────────────────
+// Traduce errores conocidos de Prisma a mensajes legibles en vez de exponer el
+// mensaje interno crudo (ej. "Invalid `prisma.cliente.create()` invocation...").
+const CAMPO_DUPLICADO_LABEL = {
+  ruc: 'RUC/CI', username: 'nombre de usuario', email: 'email',
+  serie: 'número de serie', numero: 'número', codigo: 'código',
+  gas: 'tipo de gas', placa: 'placa/patente',
+}
+
 app.use((err, req, res, next) => {
   console.error(err)
+
+  if (err.code === 'P2002') {
+    const campos = Array.isArray(err.meta?.target) ? err.meta.target : [err.meta?.target].filter(Boolean)
+    const etiquetas = campos.map(c => CAMPO_DUPLICADO_LABEL[c] || c).join(', ')
+    return res.status(409).json({ error: `Ya existe un registro con ese ${etiquetas || 'valor'}` })
+  }
+
   const status = err.status || 500
   res.status(status).json({ error: err.message || 'Error interno del servidor' })
 })
