@@ -17,6 +17,7 @@ import { useConfigStore } from "../store/configStore.js";
 import { useToast } from "../components/ui.jsx";
 import { TRANSICIONES } from "../utils/estadosTubo.js";
 import { getBrandingSources } from "../utils/logosSvg.js";
+import ClienteAutocomplete from "../components/ClienteAutocomplete.jsx";
 
 const GAS_LABELS = {
   CO2: "CO₂",
@@ -49,8 +50,7 @@ export default function TuboDetallePage() {
   const [qrModal, setQrModal] = useState(false);
   const [nuevoEstado, setNuevoEstado] = useState("");
   const [obsEstado, setObsEstado] = useState("");
-  const [clientes, setClientes] = useState([]);
-  const [clienteIdReserva, setClienteIdReserva] = useState("");
+  const [clienteReserva, setClienteReserva] = useState(null);
 
   const [editModal, setEditModal] = useState(false);
   const [editGas, setEditGas] = useState("");
@@ -215,13 +215,6 @@ export default function TuboDetallePage() {
     );
   };
 
-  useEffect(() => {
-    api
-      .get("/clientes")
-      .then((res) => setClientes(res.data))
-      .catch(() => {});
-  }, []);
-
   const getPublicTuboUrl = () => {
     const apiUrl = import.meta.env.VITE_API_URL || "";
     if (apiUrl.startsWith("http")) {
@@ -309,13 +302,13 @@ export default function TuboDetallePage() {
         estadoNuevo: nuevoEstado,
         observaciones: obsEstado,
         clienteId:
-          nuevoEstado === "RESERVADO" ? clienteIdReserva || null : null,
+          nuevoEstado === "RESERVADO" ? clienteReserva?.id || null : null,
       });
       toast("Estado actualizado", "success");
       setCambioModal(false);
       setNuevoEstado("");
       setObsEstado("");
-      setClienteIdReserva("");
+      setClienteReserva(null);
       load();
     } catch (err) {
       toast(err.response?.data?.error || "Error al cambiar estado", "error");
@@ -528,7 +521,7 @@ export default function TuboDetallePage() {
                       {tubo.cargas.map((c) => {
                         const cant = Number(c.cantidad || 0);
                         const pu = Number(c.precioUnitario || 0);
-                        const sub = cant * pu;
+                        const sub = Math.round(cant * pu);
                         const uLabel = c.unidad === 'KG' ? 'kg' : 'm³';
                         return (
                           <tr key={c.id}>
@@ -593,7 +586,7 @@ export default function TuboDetallePage() {
                   {tubo.cargas.map((c) => {
                     const cant = Number(c.cantidad || 0);
                     const pu = Number(c.precioUnitario || 0);
-                    const sub = cant * pu;
+                    const sub = Math.round(cant * pu);
                     const uLabel = c.unidad === 'KG' ? 'kg' : 'm³';
                     return (
                       <div
@@ -1371,17 +1364,7 @@ export default function TuboDetallePage() {
         </FormGroup>
         {nuevoEstado === "RESERVADO" && (
           <FormGroup label="Reservar para cliente" required>
-            <select
-              value={clienteIdReserva}
-              onChange={(e) => setClienteIdReserva(e.target.value)}
-            >
-              <option value="">Seleccionar cliente...</option>
-              {clientes.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.nombre}
-                </option>
-              ))}
-            </select>
+            <ClienteAutocomplete value={clienteReserva} onChange={setClienteReserva} />
           </FormGroup>
         )}
         <FormGroup label="Observación">

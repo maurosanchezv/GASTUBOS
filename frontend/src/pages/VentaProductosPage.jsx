@@ -8,8 +8,9 @@ import { useConfigStore } from '../store/configStore.js'
 import { getBrandingSources } from '../utils/logosSvg.js'
 import { conectarImpresoraWebBluetooth, enviarBufferWebBluetooth, esNavegadorMovilConWebBluetooth } from '../utils/webBluetoothPrinter.js'
 import { construirBufferTicketVentaProductos } from '../utils/ticketsImpresion.js'
+import ClienteAutocomplete from '../components/ClienteAutocomplete.jsx'
 
-const fmtGs = (v) => `${Number(v).toLocaleString('es-PY')} Gs.`
+const fmtGs = (v) => `${Math.round(Number(v) || 0).toLocaleString('es-PY')} Gs.`
 
 const METODOS = [
   { value: 'EFECTIVO',     label: 'Efectivo',     icon: 'ti-cash' },
@@ -26,7 +27,6 @@ export default function VentaProductosPage() {
   const [tab, setTab] = useState('nueva')
 
   const [productos, setProductos] = useState([])
-  const [clientes, setClientes] = useState([])
   const [ventas, setVentas] = useState([])
   const [loadingVentas, setLoadingVentas] = useState(false)
 
@@ -36,7 +36,7 @@ export default function VentaProductosPage() {
   const [librePrecio, setLibrePrecio] = useState('')
   const [libreCantidad, setLibreCantidad] = useState('1')
   const [metodoPago, setMetodoPago] = useState('')
-  const [clienteId, setClienteId] = useState('')
+  const [clienteVenta, setClienteVenta] = useState(null)
   const [observaciones, setObservaciones] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -47,7 +47,6 @@ export default function VentaProductosPage() {
 
   useEffect(() => {
     api.get('/productos', { params: { activo: true } }).then(r => setProductos(r.data)).catch(() => {})
-    api.get('/clientes').then(r => setClientes(r.data)).catch(() => {})
   }, [])
 
   const loadVentas = async () => {
@@ -125,7 +124,7 @@ export default function VentaProductosPage() {
   const resetVenta = () => {
     setCarrito([])
     setMetodoPago('')
-    setClienteId('')
+    setClienteVenta(null)
     setObservaciones('')
     setBusqueda('')
   }
@@ -142,7 +141,7 @@ export default function VentaProductosPage() {
     setSubmitting(true)
     try {
       const payload = {
-        clienteId: clienteId || null,
+        clienteId: clienteVenta?.id || null,
         metodoPago,
         observaciones: observaciones || null,
         detalles: carrito.map(l => ({
@@ -405,10 +404,7 @@ export default function VentaProductosPage() {
 
               <div>
                 <label className="form-label">Cliente (opcional)</label>
-                <select value={clienteId} onChange={e => setClienteId(e.target.value)}>
-                  <option value="">Sin cliente / Venta anónima</option>
-                  {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-                </select>
+                <ClienteAutocomplete value={clienteVenta} onChange={setClienteVenta} placeholder="Sin cliente / Venta anónima — buscar por nombre o RUC/CI..." />
               </div>
 
               <div>

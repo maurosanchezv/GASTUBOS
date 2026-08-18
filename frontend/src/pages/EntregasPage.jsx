@@ -17,6 +17,7 @@ import { construirBufferTicketEntrega, construirBufferTicketRemisionInicial } fr
 import { conectarImpresoraWebBluetooth, enviarBufferWebBluetooth, esNavegadorMovilConWebBluetooth } from '../utils/webBluetoothPrinter.js'
 import TuboChip from '../components/TuboChip.jsx'
 import EntregaSalonTab from './entregas/EntregaSalonTab.jsx'
+import ClienteAutocomplete from '../components/ClienteAutocomplete.jsx'
 
 // ... (EMPTY y fixes de Leaflet se mantienen arriba)
 delete L.Icon.Default.prototype._getIconUrl
@@ -69,7 +70,7 @@ export default function EntregasPage() {
 
   const [tab, setTab]           = useState(params.get('tab') || 'nueva')
   const [form, setForm]         = useState(EMPTY)
-  const [clientes, setClientes] = useState([])
+  const [clienteSeleccionado, setClienteSeleccionado] = useState(null)
   const [usuarios, setUsuarios] = useState([])
   const [precios, setPrecios]   = useState([])
 
@@ -251,7 +252,6 @@ export default function EntregasPage() {
   }
 
   useEffect(() => {
-    api.get('/clientes').then(r => setClientes(r.data)).catch(() => {})
     api.get('/usuarios/repartidores').then(r => setUsuarios(r.data)).catch(() => {})
     api.get('/precios').then(r => setPrecios(r.data)).catch(() => {})
     if (params.get('tubo')) agregarTubo(params.get('tubo'))
@@ -643,6 +643,7 @@ export default function EntregasPage() {
       })
       toast('Entrega registrada correctamente', 'success')
       setForm(EMPTY)
+      setClienteSeleccionado(null)
       setMapaPickerAbierto(false)
       loadEntregas()
     } catch (err) {
@@ -651,7 +652,6 @@ export default function EntregasPage() {
   }
 
   const f = k => e => setForm(p => ({ ...p, [k]: e.target.value }))
-  const clienteSeleccionado = clientes.find(c => c.id === form.clienteId)
   const getLat = e => e.latitud || e.sucursal?.latitud || e.cliente?.latitud
   const getLng = e => e.longitud || e.sucursal?.longitud || e.cliente?.longitud
   const entregasConCoords = entregas.filter(e => {
@@ -667,9 +667,8 @@ export default function EntregasPage() {
     entregasConCoords.map(e => `${Number(getLat(e)).toFixed(6)},${Number(getLng(e)).toFixed(6)}`)
   ))
 
-  const handleClienteChange = (e) => {
-    const cid = e.target.value
-    const c = clientes.find(x => x.id === cid)
+  const handleClienteChange = (c) => {
+    setClienteSeleccionado(c)
     if (!c) {
       setForm(f => ({ ...f, clienteId: '', sucursalId: '', direccionEntrega: '', latitud: null, longitud: null }))
       return
@@ -681,7 +680,7 @@ export default function EntregasPage() {
       lastSelectedAddress.current = principal.direccion
       setForm(f => ({
         ...f,
-        clienteId: cid,
+        clienteId: c.id,
         sucursalId: principal.id,
         direccionEntrega: principal.direccion,
         latitud: principal.latitud || null,
@@ -691,7 +690,7 @@ export default function EntregasPage() {
       lastSelectedAddress.current = c.direccion || ''
       setForm(f => ({
         ...f,
-        clienteId: cid,
+        clienteId: c.id,
         sucursalId: '',
         direccionEntrega: c.direccion || '',
         latitud: c.latitud || null,
@@ -740,10 +739,7 @@ export default function EntregasPage() {
 
                     <div className="form-group">
                       <label className="form-label">Cliente <span className="form-required">*</span></label>
-                      <select value={form.clienteId} onChange={handleClienteChange} required>
-                        <option value="">Seleccionar cliente...</option>
-                        {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-                      </select>
+                      <ClienteAutocomplete value={clienteSeleccionado} onChange={handleClienteChange} />
                     </div>
                     <div className="form-group">
                       <label className="form-label">Tipo de operación <span className="form-required">*</span></label>

@@ -17,6 +17,7 @@ import { Modal, Spinner, GasDot, StateBadge, FormGroup, formatCapacidad } from '
 import { useAuthStore } from '../../store/authStore.js'
 import { GASES_RETORNO, capacidadesParaGas, capacidadInicialParaGas, nextRecambioDescripcion } from '../../utils/recambiosCalculadora.js'
 import TuboChip from '../../components/TuboChip.jsx'
+import ClienteAutocomplete from '../../components/ClienteAutocomplete.jsx'
 
 const SCANNER_VERIFICAR_ID = 'entrega-salon-verificar-qr-reader'
 const SCANNER_RETORNO_ID = 'entrega-salon-retorno-qr-reader'
@@ -34,8 +35,7 @@ export default function EntregaSalonTab({ toast, onFinish }) {
   const [paso, setPaso] = useState('datos')
 
   // ── Paso 1: datos y tubos ────────────────────────────────────────────────
-  const [clientes, setClientes] = useState([])
-  const [clienteId, setClienteId] = useState('')
+  const [clienteSeleccionado, setClienteSeleccionado] = useState(null)
   const [tipoOperacion, setTipoOperacion] = useState('ENTREGA_SIMPLE')
   const [tubosIds, setTubosIds] = useState([])
   const [tubosDetalles, setTubosDetalles] = useState([])
@@ -75,10 +75,7 @@ export default function EntregaSalonTab({ toast, onFinish }) {
   // ── Paso 4: confirmación ─────────────────────────────────────────────────
   const [montoRecibido, setMontoRecibido] = useState('')
   const [confirmando, setConfirmando] = useState(false)
-
-  useEffect(() => {
-    api.get('/clientes').then(r => setClientes(r.data)).catch(() => {})
-  }, [])
+  const [modalConfirmarAbierto, setModalConfirmarAbierto] = useState(false)
 
   // Si el operador había creado una entrega de salón y no llegó a
   // confirmarla, se la ofrecemos retomar en vez de dejarla huérfana.
@@ -106,7 +103,7 @@ export default function EntregaSalonTab({ toast, onFinish }) {
 
   function resetWizard() {
     setPaso('datos')
-    setClienteId('')
+    setClienteSeleccionado(null)
     setTipoOperacion('ENTREGA_SIMPLE')
     setTubosIds([])
     setTubosDetalles([])
@@ -125,11 +122,29 @@ export default function EntregaSalonTab({ toast, onFinish }) {
     setRecambios([])
     setNuevoRecambioId('')
     setMontoRecibido('')
+    setModalConfirmarAbierto(false)
   }
 
   async function continuarPendiente() {
     setEntregaCreada(pendienteExistente)
-    const subtotal = (pendienteExistente.detalles || []).reduce((acc, d) => acc + Number(d.subtotal || 0), 0)
+
+    // Restaurar también el estado del paso "datos" — si no, el botón
+    // "Volver" muestra el formulario vacío y metodoPago queda '' (rompe
+    // la validación al confirmar, ver PUT /:id/confirmar).
+    setClienteSeleccionado(pendienteExistente.cliente || null)
+    setTipoOperacion(pendienteExistente.tipoOperacion || 'ENTREGA_SIMPLE')
+    setMetodoPago(pendienteExistente.metodoPago || '')
+    setObservaciones(pendienteExistente.observaciones || '')
+    const detalles = pendienteExistente.detalles || []
+    setTubosIds(detalles.map(d => d.tuboId))
+    setTubosDetalles(detalles.map(d => ({
+      tuboId: d.tuboId,
+      cantidadGas: Number(d.cantidadGas || 0),
+      unidadGas: d.unidadGas || 'KG',
+      precioUnitario: Number(d.precioUnitario || 0),
+    })))
+
+    const subtotal = detalles.reduce((acc, d) => acc + Number(d.subtotal || 0), 0)
     setMontoRecibido(String(subtotal))
     setPendienteExistente(null)
     setPaso('verificar')
@@ -215,7 +230,7 @@ export default function EntregaSalonTab({ toast, onFinish }) {
   }
 
   async function crearEntregaSalon() {
-    if (!clienteId) return toast('Seleccioná un cliente', 'error')
+    if (!clienteSeleccionado) return toast('Seleccioná un cliente', 'error')
     if (tubosIds.length === 0) return toast('Agregá al menos un tubo', 'error')
     if (!metodoPago) return toast('Seleccioná la forma de pago', 'error')
     if (tipoOperacion === 'ALQUILER' && !fechaVencimiento) return toast('Ingresá la fecha de vencimiento del alquiler', 'error')
@@ -223,7 +238,7 @@ export default function EntregaSalonTab({ toast, onFinish }) {
     setCreando(true)
     try {
       const { data: creada } = await api.post('/entregas', {
-        clienteId,
+        clienteId: clienteSeleccionado.id,
         sucursalId: null,
         direccionEntrega: 'Retiro en Salón',
         tipoOperacion,
@@ -436,10 +451,7 @@ export default function EntregaSalonTab({ toast, onFinish }) {
             <div className="form-grid">
               <div className="form-group">
                 <label className="form-label">Cliente <span className="form-required">*</span></label>
-                <select value={clienteId} onChange={e => setClienteId(e.target.value)} required>
-                  <option value="">Seleccionar cliente...</option>
-                  {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-                </select>
+                <ClienteAutocomplete value={clienteSeleccionado} onChange={setClienteSeleccionado} />
               </div>
               <div className="form-group">
                 <label className="form-label">Tipo de operación <span className="form-required">*</span></label>
@@ -573,6 +585,9 @@ export default function EntregaSalonTab({ toast, onFinish }) {
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); agregarManualVerificar() } }}
                 style={{ flex: 1, height: 42, fontSize: 14 }}
               />
+              <button className="btn btn-primary" onClick={agregarManualVerificar} disabled={!manualTuboId.trim()} style={{ height: 42, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <i className="ti ti-check" /> Validar
+              </button>
               <button className="btn btn-secondary" onClick={startScannerVerificar} style={{ height: 42, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <i className="ti ti-qrcode" /> Escanear
               </button>
@@ -610,10 +625,13 @@ export default function EntregaSalonTab({ toast, onFinish }) {
             </div>
           )}
 
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className={`btn ${todosVerificados ? 'btn-primary' : 'btn-warning'}`} style={{ flex: 1, height: 46 }}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <button className={`btn ${todosVerificados ? 'btn-primary' : 'btn-warning'}`} style={{ height: 46 }}
               disabled={scannedIds.length === 0} onClick={() => setPaso('retorno')}>
               Siguiente: Retorno de Cilindros <i className="ti ti-arrow-right" />
+            </button>
+            <button className="btn btn-outline" style={{ height: 44 }} onClick={() => setPaso('datos')}>
+              <i className="ti ti-arrow-left" /> Volver
             </button>
           </div>
         </>
@@ -622,7 +640,7 @@ export default function EntregaSalonTab({ toast, onFinish }) {
       {/* ── PASO 3: RETORNO ───────────────────────────────────────────────── */}
       {paso === 'retorno' && (
         <>
-          {tieneRetorno !== true && recambios.length === 0 ? (
+          {tieneRetorno === null ? (
             <div className="card" style={{ padding: 20, textAlign: 'center' }}>
               <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'var(--blue-light)', color: 'var(--blue)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
                 <i className="ti ti-transfer" style={{ fontSize: 26 }} />
@@ -635,7 +653,7 @@ export default function EntregaSalonTab({ toast, onFinish }) {
                 <button className="btn btn-primary" style={{ height: 46 }} onClick={() => setTieneRetorno(true)}>
                   <i className="ti ti-check" /> SÍ, RETORNA CILINDROS
                 </button>
-                <button className="btn btn-outline" style={{ height: 44 }} onClick={() => { setRecambios([]); setTieneRetorno(false) }}>
+                <button className="btn btn-outline" style={{ height: 44 }} onClick={() => { setRecambios([]); setTieneRetorno(false); setPaso('confirmar') }}>
                   <i className="ti ti-x" style={{ color: 'var(--red)' }} /> NO RETORNA NINGUNO
                 </button>
               </div>
@@ -793,13 +811,32 @@ export default function EntregaSalonTab({ toast, onFinish }) {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <button className="btn btn-primary" style={{ height: 50 }} onClick={confirmarEntregaSalon} disabled={confirmando}>
+            <button className="btn btn-primary" style={{ height: 50 }} onClick={() => setModalConfirmarAbierto(true)} disabled={confirmando}>
               <i className="ti ti-check" /> {confirmando ? 'Confirmando...' : 'Confirmar Entrega en Salón'}
             </button>
             <button className="btn btn-outline" style={{ height: 44 }} onClick={() => setPaso('retorno')} disabled={confirmando}>
               <i className="ti ti-arrow-left" /> Volver
             </button>
           </div>
+
+          {modalConfirmarAbierto && (
+            <Modal open={modalConfirmarAbierto} title="Confirmar entrega en salón" onClose={() => setModalConfirmarAbierto(false)} width={380}>
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '0 0 18px' }}>
+                Vas a confirmar la entrega de {scannedIds.length} tubo(s)
+                {recambios.length > 0 ? ` y el retorno de ${recambios.length} cilindro(s)` : ', sin retorno de cilindros'}
+                {' '}por un monto de <strong>{(Number(montoRecibido) || 0).toLocaleString('es-PY')} Gs.</strong> ¿Confirmás este movimiento?
+              </p>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn btn-outline" style={{ flex: 1, height: 44 }} onClick={() => setModalConfirmarAbierto(false)} disabled={confirmando}>
+                  Cancelar
+                </button>
+                <button className="btn btn-primary" style={{ flex: 1, height: 44 }}
+                  onClick={async () => { setModalConfirmarAbierto(false); await confirmarEntregaSalon() }} disabled={confirmando}>
+                  <i className="ti ti-check" /> Sí, confirmar
+                </button>
+              </div>
+            </Modal>
+          )}
         </>
       )}
 

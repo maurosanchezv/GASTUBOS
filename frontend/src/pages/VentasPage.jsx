@@ -3,37 +3,39 @@ import { useState, useEffect } from 'react'
 import api from '../services/api.js'
 import { PageHeader, Spinner, EmptyState, GasDot, formatCapacidad } from '../components/ui.jsx'
 import { useToast } from '../components/ui.jsx'
+import ClienteAutocomplete from '../components/ClienteAutocomplete.jsx'
 
 export default function VentasPage() {
   const [ventas,   setVentas]   = useState([])
-  const [clientes, setClientes] = useState([])
   const [tubos,    setTubos]    = useState([])
   const [loading, setLoading]   = useState(true)
-  const [form, setForm]         = useState({ tuboId: '', clienteId: '', referencia: '', observaciones: '' })
+  const [form, setForm]         = useState({ tuboId: '', referencia: '', observaciones: '' })
+  const [clienteComprador, setClienteComprador] = useState(null)
   const [saving, setSaving]     = useState(false)
   const { toast }               = useToast()
 
   useEffect(() => {
     Promise.all([
       api.get('/ventas'),
-      api.get('/clientes'),
       api.get('/tubos', { params: { estado: 'DISPONIBLE', limit: 100 } }),
-    ]).then(([v, c, t]) => { 
-      setVentas(v.data); 
-      setClientes(c.data); 
+    ]).then(([v, t]) => {
+      setVentas(v.data);
       setTubos(t.data.tubos.filter(x => !x.id.startsWith('CLI_') && !x.id.startsWith('CLI-')))
     })
     .catch(() => {}).finally(() => setLoading(false))
   }, [])
 
   const handleSubmit = async (e) => {
-    e.preventDefault(); setSaving(true)
+    e.preventDefault()
+    if (!clienteComprador) return toast('Seleccioná el cliente comprador', 'error')
+    setSaving(true)
     try {
-      await api.post('/ventas', form)
+      await api.post('/ventas', { ...form, clienteId: clienteComprador.id })
       toast('Venta registrada', 'success')
-      setForm({ tuboId: '', clienteId: '', referencia: '', observaciones: '' })
+      setForm({ tuboId: '', referencia: '', observaciones: '' })
+      setClienteComprador(null)
       const [v, t] = await Promise.all([api.get('/ventas'), api.get('/tubos', { params: { estado: 'DISPONIBLE', limit: 100 } })])
-      setVentas(v.data); 
+      setVentas(v.data);
       setTubos(t.data.tubos.filter(x => !x.id.startsWith('CLI_') && !x.id.startsWith('CLI-')))
     } catch (err) { toast(err.response?.data?.error || 'Error', 'error') }
     finally { setSaving(false) }
@@ -58,10 +60,7 @@ export default function VentasPage() {
               </div>
               <div className="form-group">
                 <label className="form-label">Cliente comprador <span className="form-required">*</span></label>
-                <select value={form.clienteId} onChange={f('clienteId')} required>
-                  <option value="">Seleccionar cliente...</option>
-                  {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-                </select>
+                <ClienteAutocomplete value={clienteComprador} onChange={setClienteComprador} />
               </div>
               <div className="form-group">
                 <label className="form-label">Referencia (factura, orden)</label>
