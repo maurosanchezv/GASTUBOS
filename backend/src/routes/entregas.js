@@ -91,21 +91,29 @@ const entregaSchema = z.object({
 // ─── GET /api/entregas ────────────────────────────────────────────────────────
 router.get('/', async (req, res, next) => {
   try {
-    const { clienteId, repartidorId, canal, confirmada, cancelada, desde, hasta, page = 1, limit = 30 } = req.query
+    const { clienteId, repartidorId, canal, confirmada, cancelada, desde, hasta, page = 1, limit = 30, activasEnCliente } = req.query
     const where = {}
     if (clienteId) where.clienteId = clienteId
     if (canal) where.canal = canal
     if (repartidorId) where.repartidorId = repartidorId
-    
-    if (confirmada !== undefined) {
-      where.confirmada = confirmada === 'true'
-      // Si piden las no confirmadas, por defecto ocultamos las canceladas (no concretadas)
-      if (confirmada === 'false' && cancelada === undefined) {
-        where.cancelada = false
+
+    if (activasEnCliente === 'true') {
+      // Para el mapa de "tubos entregados": entregas concretadas, no canceladas, con al
+      // menos un tubo que siga activo en manos del cliente (no cuenta si ya se devolvió).
+      where.confirmada = true
+      where.cancelada = false
+      where.detalles = { some: { tubo: { estado: { in: ['ENTREGADO', 'ALQUILADO'] } } } }
+    } else {
+      if (confirmada !== undefined) {
+        where.confirmada = confirmada === 'true'
+        // Si piden las no confirmadas, por defecto ocultamos las canceladas (no concretadas)
+        if (confirmada === 'false' && cancelada === undefined) {
+          where.cancelada = false
+        }
       }
-    }
-    if (cancelada !== undefined) {
-      where.cancelada = cancelada === 'true'
+      if (cancelada !== undefined) {
+        where.cancelada = cancelada === 'true'
+      }
     }
 
     if (desde || hasta) {
