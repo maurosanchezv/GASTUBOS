@@ -170,10 +170,17 @@ export default function EntregasPage() {
   // Historial + mapa historial
   const [saving, setSaving]   = useState(false)
   const [entregas, setEntregas] = useState([])
+  const [totalEntregas, setTotalEntregas] = useState(0)
+  const [paginaH, setPaginaH] = useState(1)
+  const limitH = 30
   const [loadingH, setLoadingH] = useState(false)
   const [mapaHistAbierto, setMapaHistAbierto] = useState(false)
   const mapaHistRef      = useRef(null)
   const mapaHistInstance = useRef(null)
+  // Dataset del mapa: TODAS las entregas con tubos actualmente activos en el cliente
+  // (no solo la página visible del historial), para que el mapa refleje el total real.
+  const [entregasActivasMapa, setEntregasActivasMapa] = useState([])
+  const [loadingMapa, setLoadingMapa] = useState(false)
 
   // Detalle de entrega y control de ticket
   const [modalDetalle, setModalDetalle] = useState(false)
@@ -200,6 +207,7 @@ export default function EntregasPage() {
     setTicketTab('comprobante')
     setModalDetalle(true)
     loadEntregas()
+    loadEntregasMapa()
   }
 
   const getRecambiosRecibidos = (e) => {
@@ -260,6 +268,10 @@ export default function EntregasPage() {
 
   useEffect(() => {
     if (tab === 'historial') loadEntregas()
+  }, [tab, paginaH])
+
+  useEffect(() => {
+    if (tab === 'historial') loadEntregasMapa()
     else setMapaHistAbierto(false)
   }, [tab])
 
@@ -373,12 +385,12 @@ export default function EntregasPage() {
     const getLat = e => e.latitud || e.sucursal?.latitud || e.cliente?.latitud
     const getLng = e => e.longitud || e.sucursal?.longitud || e.cliente?.longitud
 
-    const conCoords = entregas.filter(e => {
+    const conCoords = entregasActivasMapa.filter(e => {
       const lat = getLat(e)
       const lng = getLng(e)
       if (!lat || !lng || !e.confirmada || e.cancelada) return false
       // Filtrar tubos que sigan activos en manos del cliente ('ENTREGADO' o 'ALQUILADO')
-      const tubosActivosEnCliente = e.detalles?.filter(d => 
+      const tubosActivosEnCliente = e.detalles?.filter(d =>
         !d.tubo || d.tubo.estado === 'ENTREGADO' || d.tubo.estado === 'ALQUILADO'
       ) || []
       return tubosActivosEnCliente.length > 0
@@ -494,14 +506,26 @@ export default function EntregasPage() {
     }
 
     mapaHistInstance.current = map
-  }, [mapaHistAbierto, entregas])
+  }, [mapaHistAbierto, entregasActivasMapa])
 
   async function loadEntregas() {
     setLoadingH(true)
     try {
-      const r = await api.get('/entregas')
+      const r = await api.get('/entregas', { params: { page: paginaH, limit: limitH } })
       setEntregas(r.data.entregas)
+      setTotalEntregas(r.data.total)
     } catch { } finally { setLoadingH(false) }
+  }
+
+  // Dataset separado del mapa: todas las entregas con tubos activos en cliente (no
+  // solo la página visible del historial), acotado a un límite generoso ya que este
+  // universo está limitado por la cantidad real de tubos que la empresa tiene en la calle.
+  async function loadEntregasMapa() {
+    setLoadingMapa(true)
+    try {
+      const r = await api.get('/entregas', { params: { activasEnCliente: true, limit: 1000 } })
+      setEntregasActivasMapa(r.data.entregas)
+    } catch { } finally { setLoadingMapa(false) }
   }
 
   async function cancelarEntrega(id, numero) {
@@ -512,6 +536,7 @@ export default function EntregasPage() {
       await api.put(`/entregas/${id}/cancelar`, { motivo: motivo || 'Cancelada en oficina' })
       toast('Entrega cancelada e inventario devuelto correctamente', 'success')
       loadEntregas()
+      loadEntregasMapa()
     } catch (err) {
       toast(err.response?.data?.error || 'Error al cancelar la entrega', 'error')
     }
@@ -571,6 +596,7 @@ export default function EntregasPage() {
       await api.delete(`/entregas/${entregaId}/quitar-tubo-adicional/${tuboId}`)
       toast(`Tubo ${tuboId} removido del pedido con éxito`, 'success')
       loadEntregas()
+      loadEntregasMapa()
       if (entregaSeleccionada) {
         setEntregaSeleccionada(prev => ({
           ...prev,
@@ -646,6 +672,7 @@ export default function EntregasPage() {
       setClienteSeleccionado(null)
       setMapaPickerAbierto(false)
       loadEntregas()
+      loadEntregasMapa()
     } catch (err) {
       toast(err.response?.data?.error || 'Error al registrar entrega', 'error')
     } finally { setSaving(false) }
@@ -654,7 +681,7 @@ export default function EntregasPage() {
   const f = k => e => setForm(p => ({ ...p, [k]: e.target.value }))
   const getLat = e => e.latitud || e.sucursal?.latitud || e.cliente?.latitud
   const getLng = e => e.longitud || e.sucursal?.longitud || e.cliente?.longitud
-  const entregasConCoords = entregas.filter(e => {
+  const entregasConCoords = entregasActivasMapa.filter(e => {
     const lat = getLat(e)
     const lng = getLng(e)
     if (!lat || !lng || !e.confirmada || e.cancelada) return false
@@ -1125,33 +1152,36 @@ export default function EntregasPage() {
 
         {/* ── HISTORIAL ─────────────────────────────────────────────────────── */}
         {tab === 'historial' && (
-          loadingH ? <Spinner /> : (
-            <div>
-              {/* Botones de acción historial */}
-              <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
-                <button className="btn" onClick={loadEntregas} disabled={loadingH}
-                  style={{ display: 'flex', alignItems: 'center', gap: 6, flex: '1 1 auto', justifyContent: 'center', maxWidth: '200px' }}>
-                  <i className={`ti ti-refresh ${loadingH ? 'ti-spin' : ''}`} />
-                  {loadingH ? 'Actualizando...' : 'Actualizar'}
-                </button>
+          <div>
+            {/* Botones de acción historial */}
+            <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
+              <button className="btn" onClick={() => { loadEntregas(); loadEntregasMapa() }} disabled={loadingH}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, flex: '1 1 auto', justifyContent: 'center', maxWidth: '200px' }}>
+                <i className={`ti ti-refresh ${loadingH ? 'ti-spin' : ''}`} />
+                {loadingH ? 'Actualizando...' : 'Actualizar'}
+              </button>
 
-                <button className="btn" onClick={() => setMapaHistAbierto(v => !v)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 6, flex: '1 1 auto', justifyContent: 'center', maxWidth: '200px' }}>
-                  <i className="ti ti-map" />
-                  {mapaHistAbierto
-                    ? 'Ocultar mapa'
-                    : `Mapa (${ubicacionesUnicasMapa.length})`}
-                </button>
+              <button className="btn" onClick={() => setMapaHistAbierto(v => !v)} disabled={loadingMapa}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, flex: '1 1 auto', justifyContent: 'center', maxWidth: '200px' }}>
+                <i className={`ti ${loadingMapa ? 'ti-loader ti-spin' : 'ti-map'}`} />
+                {mapaHistAbierto
+                  ? 'Ocultar mapa'
+                  : loadingMapa ? 'Cargando mapa...' : `Mapa (${ubicacionesUnicasMapa.length})`}
+              </button>
+            </div>
+
+            {/* Mapa de historial — se mantiene montado aunque la tabla recargue (cambio
+                de página), si no, Leaflet queda apuntando a un <div> que React destruyó
+                al mostrar el Spinner y el mapa se ve en blanco al volver. */}
+            {mapaHistAbierto && (
+              <div className="card" style={{ marginBottom: 16, padding: 0, overflow: 'hidden' }}>
+                <div ref={mapaHistRef} style={{ height: 380 }} />
               </div>
+            )}
 
-              {/* Mapa de historial */}
-              {mapaHistAbierto && (
-                <div className="card" style={{ marginBottom: 16, padding: 0, overflow: 'hidden' }}>
-                  <div ref={mapaHistRef} style={{ height: 380 }} />
-                </div>
-              )}
-
-              {/* Vista Tabla (Desktop) */}
+            {loadingH ? <Spinner /> : (
+              <>
+                {/* Vista Tabla (Desktop) */}
               <div className="card table-wrap hide-mobile" style={{ padding: 0 }}>
                 {entregas.length === 0
                   ? <EmptyState icon="ti-truck-delivery" message="Sin entregas registradas" />
@@ -1341,8 +1371,19 @@ export default function EntregasPage() {
                   ))
                 )}
               </div>
-            </div>
-          )
+
+                {totalEntregas > limitH && (
+                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8, padding: '12px 0 4px' }}>
+                    <button className="btn btn-sm" disabled={paginaH === 1} onClick={() => setPaginaH(p => p - 1)}>← Anterior</button>
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      Página {paginaH} de {Math.ceil(totalEntregas / limitH)} ({totalEntregas} entregas)
+                    </span>
+                    <button className="btn btn-sm" disabled={paginaH >= Math.ceil(totalEntregas / limitH)} onClick={() => setPaginaH(p => p + 1)}>Siguiente →</button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         )}
       </div>
 

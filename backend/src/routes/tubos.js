@@ -57,14 +57,17 @@ const tuboSchema = z.object({
 })
 
 // ─── GET /api/tubos ───────────────────────────────────────────────────────────
+const ORDENABLES = ['id', 'createdAt']
+
 router.get('/', async (req, res, next) => {
   try {
-    const { estado, gas, propietario, clienteId, q, page = 1, limit = 50, disponibles, deTerceros } = req.query
+    const { estado, gas, propietario, clienteId, q, page = 1, limit = 50, disponibles, deTerceros, ocultarBaja, sortBy, sortDir } = req.query
     const where = { activo: true }
     if (deTerceros === 'true') {
       where.recambiosComoEntregado = { some: {} }
     }
     if (estado)      where.estado      = estado
+    else if (ocultarBaja === 'true') where.estado = { not: 'DE_BAJA' }
     if (disponibles === 'true') {
       where.estado = { in: ['DISPONIBLE', 'CARGADO', 'RESERVADO'] }
       where.detallesEntrega = {
@@ -97,7 +100,7 @@ router.get('/', async (req, res, next) => {
             select: { recambiosComoEntregado: true }
           }
         },
-        orderBy: { id: 'asc' },
+        orderBy: { [ORDENABLES.includes(sortBy) ? sortBy : 'id']: sortDir === 'desc' ? 'desc' : 'asc' },
         skip: (Number(page) - 1) * Number(limit),
         take: Number(limit),
       }),
