@@ -49,21 +49,45 @@ export default function TubosPage() {
   const [reactivarSaving, setReactivarSaving] = useState(false)
   const [motivoReactivar, setMotivoReactivar] = useState('')
 
+  const [page, setPage] = useState(1)
+  const [sortBy, setSortBy] = useState('id')       // 'id' | 'createdAt'
+  const [sortDir, setSortDir] = useState('asc')     // 'asc' | 'desc'
+  const limit = 50
+
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await api.get('/tubos', { params: { q: q || undefined, estado: estadoFilter || undefined, limit: 80 } })
-      let ownTubos = res.data.tubos.filter(t => !t.id.startsWith('CLI_') && !t.id.startsWith('CLI-'))
-      if (hideBaja && !estadoFilter) {
-        ownTubos = ownTubos.filter(t => t.estado !== 'DE_BAJA')
-      }
+      const res = await api.get('/tubos', {
+        params: {
+          q: q || undefined,
+          estado: estadoFilter || undefined,
+          ocultarBaja: hideBaja || undefined,
+          sortBy, sortDir, page, limit,
+        },
+      })
+      const ownTubos = res.data.tubos.filter(t => !t.id.startsWith('CLI_') && !t.id.startsWith('CLI-'))
       setTubos(ownTubos)
-      setTotal(ownTubos.length)
+      setTotal(res.data.total)
     } catch { toast('Error al cargar tubos', 'error') }
     finally { setLoading(false) }
-  }, [q, estadoFilter, hideBaja])
+  }, [q, estadoFilter, hideBaja, sortBy, sortDir, page])
 
   useEffect(() => { load() }, [load])
+
+  // Cualquier cambio de filtro u orden vuelve a la página 1
+  const handleFiltroChange = (setter) => (value) => { setter(value); setPage(1) }
+
+  const handleSortToggle = (campo) => {
+    if (sortBy === campo) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortBy(campo)
+      setSortDir('asc')
+    }
+    setPage(1)
+  }
+
+  const totalPages = Math.ceil(total / limit)
 
   const handleCreate = async (e) => {
     e.preventDefault()
@@ -175,11 +199,11 @@ export default function TubosPage() {
             <input
               placeholder="Buscar por código, cilindro, gas..."
               value={q}
-              onChange={e => setQ(e.target.value)}
+              onChange={e => handleFiltroChange(setQ)(e.target.value)}
             />
-            {q && <button className="btn-icon" onClick={() => setQ('')}><i className="ti ti-x" /></button>}
+            {q && <button className="btn-icon" onClick={() => handleFiltroChange(setQ)('')}><i className="ti ti-x" /></button>}
           </div>
-          <select style={{ width: 180 }} value={estadoFilter} onChange={e => setEstadoFilter(e.target.value)}>
+          <select style={{ width: 180 }} value={estadoFilter} onChange={e => handleFiltroChange(setEstadoFilter)(e.target.value)}>
             <option value="">Todos los estados</option>
             {ESTADOS.map(s => <option key={s} value={s}>{s.replace('_',' ')}</option>)}
           </select>
@@ -187,7 +211,7 @@ export default function TubosPage() {
             <input
               type="checkbox"
               checked={hideBaja}
-              onChange={e => setHideBaja(e.target.checked)}
+              onChange={e => handleFiltroChange(setHideBaja)(e.target.checked)}
             />
             Ocultar dados de baja
           </label>
@@ -210,6 +234,10 @@ export default function TubosPage() {
                       <th>Propietario</th>
                       <th>Cliente</th>
                       <th>Ubicación</th>
+                      <th style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }} onClick={() => handleSortToggle('createdAt')}>
+                        Fecha Creación
+                        {sortBy === 'createdAt' && <i className={`ti ti-arrow-${sortDir === 'asc' ? 'up' : 'down'}`} style={{ marginLeft: 4, fontSize: 12 }} />}
+                      </th>
                       <th></th>
                     </tr>
                   </thead>
@@ -241,6 +269,9 @@ export default function TubosPage() {
                           {t.cliente?.nombre || '—'}
                         </td>
                         <td style={{ color: 'var(--text-secondary)' }}>{t.ubicacion || '—'}</td>
+                        <td style={{ color: 'var(--text-secondary)', fontSize: 12, whiteSpace: 'nowrap' }}>
+                          {t.createdAt ? new Date(t.createdAt).toLocaleDateString('es-PY') : '—'}
+                        </td>
                         <td>
                           <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                             <button className="btn btn-sm" onClick={() => navigate(`/tubos/${t.id}/detalle`)}>
@@ -293,6 +324,10 @@ export default function TubosPage() {
                         <span className="list-card-label">Cliente actual</span>
                         <span className="list-card-value">{t.cliente?.nombre || 'En depósito'}</span>
                       </div>
+                      <div className="list-card-item">
+                        <span className="list-card-label">Fecha Creación</span>
+                        <span className="list-card-value">{t.createdAt ? new Date(t.createdAt).toLocaleDateString('es-PY') : '—'}</span>
+                      </div>
                     </div>
                     <div className="list-card-actions">
                       <button className="btn btn-sm" style={{ flex: 1 }} onClick={() => navigate(`/tubos/${t.id}/detalle`)}>
@@ -315,6 +350,14 @@ export default function TubosPage() {
                 ))
               )}
             </div>
+
+            {totalPages > 1 && (
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8, padding: '12px 0 4px' }}>
+                <button className="btn btn-sm" disabled={page === 1} onClick={() => setPage(p => p - 1)}>← Anterior</button>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Página {page} de {totalPages}</span>
+                <button className="btn btn-sm" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>Siguiente →</button>
+              </div>
+            )}
           </>
         )}
       </div>
