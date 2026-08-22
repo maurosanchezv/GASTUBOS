@@ -14,8 +14,13 @@ Sistema web y móvil para gestionar tubos de gases industriales (CO₂, Oxígeno
   - `OPERADOR`: Carga de datos, registro de tubos, clientes y remisiones.
   - `REPARTIDOR`: Interfaz móvil simplificada para visualización de su hoja de ruta y confirmación de entregas mediante escaneo QR.
 - **Logística Integrada:** Registro de entregas (simples, alquileres, ventas), cancelaciones con reversión de estados, control de cargas de gas y devoluciones de tubos vacíos.
+- **Entrega en Salón:** además del reparto en camión, los clientes que retiran en mostrador pasan por el mismo control de tubos y retorno de cilindros que ya usa el repartidor.
+- **Venta en Camión:** venta fraccionada de gas directo desde el stock del camión del repartidor, sin entregar el tubo completo.
+- **Venta de Productos:** catálogo de productos (no gas) con carrito, descuento/reposición automática de stock y ticket propio.
+- **Movimiento de Dinero:** registro de ingresos y egresos de caja, con su propio historial.
+- **Cilindros de Terceros:** seguimiento de cilindros que no son propios, recibidos por el repartidor o en oficina, hasta su eventual adquisición.
 - **Exportación:** Generación de reportes y comprobantes de entregas en PDF.
-- **Impresión Térmica:** Emisión de comprobantes de remisión con logotipos de la empresa (vía Bluetooth en móvil y desde el historial en computadora para formatos de 58mm y 80mm).
+- **Impresión Térmica:** Emisión de comprobantes de remisión con logotipos de la empresa — vía Bluetooth clásico en la app móvil, vía Web Bluetooth directo desde el navegador del celular (sin depender de la app instalada), y desde el historial en computadora, en formatos de 58mm y 80mm.
 - **Compatibilidad Móvil:** Compilado como aplicación nativa Android mediante Capacitor.
 
 ---
@@ -52,11 +57,16 @@ gastubos/
 │   │   │   ├── auth.js            ← Autenticación (Login, Perfil)
 │   │   │   ├── tubos.js           ← ABM de Tubos y generación de QR
 │   │   │   ├── clientes.js        ← Gestión de clientes
-│   │   │   ├── entregas.js        ← Transacciones de remisión (Iniciar, Confirmar, Cancelar)
-│   │   │   ├── devoluciones.js    ← Gestión de retornos de cilindros
+│   │   │   ├── entregas.js        ← Remisiones: reparto y entrega en salón (Iniciar, Confirmar, Cancelar)
+│   │   │   ├── devoluciones.js    ← Devolución de tubo propio (cierre de alquiler/entrega)
 │   │   │   ├── alquileres.js      ← Control de contratos de alquiler
 │   │   │   ├── ventas.js          ← Registro de ventas de tubos
-│   │   │   ├── cargas.js          ← Refill/Recargas de gas de los tubos
+│   │   │   ├── cargas.js          ← Recargas de gas (normal/salón) y venta fraccionada desde camión
+│   │   │   ├── camiones.js        ← Gestión de camiones y stock asignado al repartidor
+│   │   │   ├── cilindrosTerceros.js ← Cilindros de clientes no propios, hasta su adquisición
+│   │   │   ├── productos.js       ← ABM de catálogo de productos (no gas)
+│   │   │   ├── ventasProductos.js ← Venta de productos con descuento/reposición de stock
+│   │   │   ├── movimientosDinero.js ← Ingresos y egresos de caja
 │   │   │   ├── precios.js         ← Tarifario de gases
 │   │   │   ├── auditoria.js       ← Historial de acciones sobre tubos
 │   │   │   ├── usuarios.js        ← CRUD de cuentas de usuarios
@@ -66,22 +76,33 @@ gastubos/
 │   │       ├── prisma.js          ← Cliente Prisma unificado
 │   │       ├── helpers.js         ← Contadores atómicos secuenciales
 │   │       ├── auditoria.js       ← Registro rápido en historial
-│   │       └── estadosTubo.js     ← Máquina de estados y transiciones válidas
+│   │       ├── estadosTubo.js     ← Máquina de estados y transiciones válidas
+│   │       └── recepcionesRepartidor.js ← Recepciones activas de cilindros por repartidor
 │   └── package.json
 │
 ├── frontend/
 │   ├── android/                   ← Proyecto nativo Android (Capacitor)
 │   ├── src/
 │   │   ├── App.jsx                ← Enrutador y guards de sesión
-│   │   ├── components/            ← Componentes UI comunes y Layout
+│   │   ├── components/            ← Componentes UI comunes, Layout y TuboChip
 │   │   ├── services/api.js        ← Cliente Axios configurado con token y proxy
 │   │   ├── store/authStore.js     ← Zustand store para sesión activa
+│   │   ├── utils/
+│   │   │   ├── ticketsImpresion.js    ← Armado de tickets ESC/POS (todos los módulos)
+│   │   │   ├── webBluetoothPrinter.js ← Impresión Web Bluetooth desde el navegador
+│   │   │   └── recambiosCalculadora.js ← Selector de gas/capacidad para retorno de cilindros
 │   │   └── pages/                 ← Páginas del panel web y vistas móviles
+│   │       ├── EntregasPage.jsx       ← Nueva Entrega, Entrega en Salón e Historial
+│   │       ├── entregas/EntregaSalonTab.jsx ← Wizard de entrega en salón (reciclado del reparto)
+│   │       ├── RepartoPage.jsx        ← App móvil del repartidor (hoja de ruta, retorno, venta en camión)
+│   │       ├── ProductosPage.jsx      ← Catálogo de productos
+│   │       ├── VentaProductosPage.jsx ← Punto de venta de productos
+│   │       ├── MovimientoDineroPage.jsx ← Caja: ingresos y egresos
+│   │       └── DiagnosticoBluetoothPage.jsx ← Diagnóstico de conexión Web Bluetooth
 │   ├── capacitor.config.json      ← Ajustes de compilación de Capacitor
 │   └── package.json
 │
-├── docs/                          ← Guías y manuales de desarrollo
-└── docker-compose.yml             ← Orquestación de PostgreSQL local
+└── docker-compose.yml             ← Solo PostgreSQL para desarrollo local (ver nota más abajo)
 ```
 
 ---
@@ -129,11 +150,9 @@ quedan en ningún archivo. El primer usuario ADMIN se crea aparte con
 
 ## ⚡ Guía de Inicio Rápido (Desarrollo local)
 
-Para una explicación exhaustiva de las terminales y del flujo en Android, consulta la [Guía de Desarrollo Detallada](file:///home/machine/chobi-gas/GASTUBOS/docs/guia_inicio_rapido_desarrollo.md).
-
 ### 1. Iniciar Base de Datos y Backend (WSL2)
 
-> Docker se usa acá únicamente como comodidad para tener PostgreSQL corriendo en tu PC local — **no se usa Docker en ningún ambiente desplegado** (dev/prod/Cryopar corren con PostgreSQL nativo + PM2 en el VPS, sin contenedores).
+> Docker se usa acá **únicamente** para tener PostgreSQL corriendo en tu PC local sin instalarlo nativo — `docker-compose.yml` solo define ese servicio. El backend y el frontend siempre corren fuera de Docker, en todos los ambientes (local, dev, prod, Cryopar): no hay ningún `Dockerfile` de backend/frontend en el repo, y el VPS ni siquiera tiene Docker instalado.
 
 ```bash
 # Levantar la base de datos (solo en tu PC local, no aplica al VPS)
@@ -151,7 +170,7 @@ npm run dev              # Correr backend en http://localhost:3001
 ### 2. Iniciar Frontend (Web)
 ```bash
 cd frontend
-cp .env.example .env
+echo 'VITE_API_URL=http://localhost:3001/api' > .env   # no hay .env.example: es la única variable
 npm install
 npm run dev              # Correr frontend en http://localhost:5173
 ```
@@ -222,17 +241,28 @@ cd android && ./gradlew assembleDebug
 | **GET** | `/api/tubos/:id/qr` | Obtener código QR en base64 | Cualquiera |
 | **GET** | `/api/clientes` | Listar clientes registrados | Cualquiera |
 | **POST** | `/api/clientes` | Registrar un nuevo cliente | `OPERADOR` |
-| **POST** | `/api/entregas` | Crear una remisión de entrega | `OPERADOR` |
-| **PUT** | `/api/entregas/:id/confirmar` | Confirmar entrega realizada | `REPARTIDOR` |
+| **POST** | `/api/entregas` | Crear una remisión (reparto o salón, ver `canal`) | `OPERADOR` |
+| **PUT** | `/api/entregas/:id/confirmar` | Confirmar entrega, incluye retorno de cilindros | `REPARTIDOR` |
 | **PUT** | `/api/entregas/:id/cancelar` | Cancelar remisión y revertir estados | `OPERADOR` |
 | **GET** | `/api/alquileres` | Listar contratos de alquiler | Cualquiera |
 | **POST** | `/api/cargas` | Registrar recarga de gas a un tubo | `OPERADOR` |
+| **POST** | `/api/cargas/venta-camion` | Venta fraccionada de gas desde el camión | `REPARTIDOR` |
+| **GET** | `/api/camiones` | Listar camiones y stock asignado | Cualquiera |
+| **GET** | `/api/cilindros-terceros` | Listar cilindros de terceros pendientes | Cualquiera |
+| **POST** | `/api/cilindros-terceros/:id/adquirir` | Convertir un cilindro de tercero en tubo propio | `OPERADOR` |
+| **GET** | `/api/productos` | Listar catálogo de productos | Cualquiera |
+| **POST** | `/api/ventas-productos` | Registrar venta de productos (descuenta stock) | `OPERADOR` |
+| **GET** | `/api/movimientos-dinero` | Listar movimientos de caja | `OPERADOR` |
+| **POST** | `/api/movimientos-dinero` | Registrar ingreso/egreso de caja | `OPERADOR` |
 | **GET** | `/api/precios` | Obtener tarifario actual por gas | Cualquiera |
 | **PUT** | `/api/precios` | Actualizar tarifas de gas | `ADMIN` |
 | **GET** | `/api/auditoria` | Listar historial de auditoría global | Cualquiera |
+| **GET** | `/api/reportes/resumen` | KPIs, rendición por repartidor y stock | `ADMIN`/`SUPERVISOR` |
 | **GET** | `/api/usuarios` | Listar cuentas de usuario | `ADMIN` |
 | **POST** | `/api/usuarios` | Crear cuenta de usuario | `ADMIN` |
 | **GET** | `/api/health` | Estado del backend | — |
+
+> Tabla no exhaustiva — cada módulo tiene endpoints adicionales de detalle/edición. Ver `backend/src/routes/` para el listado completo.
 
 ---
 
@@ -272,6 +302,11 @@ Un cambio en el schema sin su migración generada queda invisible para cualquier
 - [x] Generación y descarga de comprobantes en PDF (Implementado vía `jspdf`)
 - [x] Impresión térmica de remisiones con logotipos de la empresa (móvil y web).
 - [x] Despliegue en VPS propio con arquitectura de 3 ambientes independientes, HTTPS y proceso administrado con PM2 — desarrollo y producción PMS ya desplegados; producción Cryopar pendiente.
+- [x] Venta fraccionada de gas desde el camión del repartidor.
+- [x] Venta de productos de catálogo (no gas) con control de stock.
+- [x] Entrega en salón — retiro en mostrador con el mismo control de retorno de cilindros del reparto.
+- [x] Módulo de Movimiento de Dinero (caja).
+- [x] Impresión de tickets vía Web Bluetooth desde el navegador del celular, sin depender de la app instalada.
 - [ ] Tareas cron automatizadas para la alerta y vencimiento de alquileres.
 - [ ] Envío automático de notificaciones por WhatsApp/Email al cliente ante vencimientos.
 - [ ] Módulo de facturación directa y registro de métodos de pago.
