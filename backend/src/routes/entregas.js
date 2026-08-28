@@ -42,7 +42,14 @@ function parseGasYCapacidadInfo(str, tuboReferencia) {
       .trim()
     const matchNumber = cleanStr.match(/(\d+(?:\.\d+)?)/)
     if (matchNumber) {
-      numVal = parseFloat(matchNumber[1])
+      const candidato = parseFloat(matchNumber[1])
+      // La columna capacidadLitros/capacidadKg es Decimal(5,2): sólo admite hasta 999.99.
+      // El texto puede ser un código/serie escaneado (no la capacidad real), así que un
+      // número fuera de un rango plausible de capacidad se descarta en vez de intentar
+      // guardarlo (evita "numeric field overflow" en cilindroTerceroInfo.create).
+      if (!isNaN(candidato) && candidato > 0 && candidato < 1000) {
+        numVal = candidato
+      }
     }
   }
 
