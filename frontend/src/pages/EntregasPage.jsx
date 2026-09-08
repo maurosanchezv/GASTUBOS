@@ -26,6 +26,43 @@ import PlanAlquilerTicketBlock from '../components/PlanAlquilerTicketBlock.jsx'
 delete L.Icon.Default.prototype._getIconUrl
 L.Icon.Default.mergeOptions({ iconUrl, iconRetinaUrl, shadowUrl })
 
+// Color del pin del mapa según el tipo de operación de la entrega.
+const COLOR_TIPO_OPERACION = {
+  ENTREGA_SIMPLE: '#16a34a', // verde
+  ALQUILER:       '#7c3aed', // morado
+  VENTA:          '#ea580c', // naranja
+}
+const COLOR_TIPO_MIXTO = '#475569' // varios tipos en el mismo punto
+
+const LABEL_TIPO_OPERACION = {
+  ENTREGA_SIMPLE: 'Entrega simple',
+  ALQUILER:       'Alquiler',
+  VENTA:          'Venta',
+}
+
+// Pin teardrop coloreado como L.divIcon (sin depender de assets externos).
+const pinIcon = (color) => L.divIcon({
+  className: 'map-pin-tipo',
+  html: `<svg width="26" height="38" viewBox="0 0 26 38" xmlns="http://www.w3.org/2000/svg">
+    <path d="M13 0C5.82 0 0 5.82 0 13c0 9.75 13 25 13 25s13-15.25 13-25C26 5.82 20.18 0 13 0z" fill="${color}" stroke="#ffffff" stroke-width="2"/>
+    <circle cx="13" cy="13" r="4.5" fill="#ffffff"/>
+  </svg>`,
+  iconSize: [26, 38],
+  iconAnchor: [13, 38],
+  popupAnchor: [0, -32],
+})
+
+// Color de un grupo de entregas encimadas: si todas son del mismo tipo, ese
+// color; si hay mezcla, el color "mixto".
+function colorGrupoEntregas(grupo) {
+  const tipos = new Set(grupo.map(e => e.tipoOperacion))
+  if (tipos.size === 1) {
+    const [tipo] = tipos
+    return COLOR_TIPO_OPERACION[tipo] || COLOR_TIPO_MIXTO
+  }
+  return COLOR_TIPO_MIXTO
+}
+
 const EMPTY = {
   clienteId: '', sucursalId: '', direccionEntrega: '', tipoOperacion: 'ENTREGA_SIMPLE',
   repartidorId: '', observaciones: '', tubosIds: [],
@@ -552,12 +589,30 @@ export default function EntregasPage() {
         </div>
       </div>`
 
-      L.marker([lat, lng]).addTo(map).bindPopup(popupContent)
+      L.marker([lat, lng], { icon: pinIcon(colorGrupoEntregas(groupDeliveries)) }).addTo(map).bindPopup(popupContent)
     })
 
     if (conCoords.length > 1) {
       const bounds = L.latLngBounds(conCoords.map(e => [e.latitud, e.longitud]))
       map.fitBounds(bounds, { padding: [40, 40] })
+    }
+
+    // Leyenda de colores por tipo de operación.
+    const tiposPresentes = new Set(conCoords.map(e => e.tipoOperacion))
+    if (tiposPresentes.size > 0) {
+      const leyenda = L.control({ position: 'bottomright' })
+      leyenda.onAdd = () => {
+        const div = L.DomUtil.create('div')
+        div.style.cssText = 'background:#fff;padding:6px 9px;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.3);font:12px sans-serif;line-height:1.6'
+        div.innerHTML = Object.keys(COLOR_TIPO_OPERACION)
+          .filter(t => tiposPresentes.has(t))
+          .map(t => `<div style="display:flex;align-items:center;gap:6px">
+            <span style="width:11px;height:11px;border-radius:50%;background:${COLOR_TIPO_OPERACION[t]};display:inline-block"></span>
+            ${LABEL_TIPO_OPERACION[t]}
+          </div>`).join('')
+        return div
+      }
+      leyenda.addTo(map)
     }
 
     mapaHistInstance.current = map

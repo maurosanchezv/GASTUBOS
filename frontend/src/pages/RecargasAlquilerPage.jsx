@@ -4,8 +4,11 @@
 // siempre desde Alquileres → detalle del contrato → "Solicitar recarga";
 // acá solo se monitorea el estado y, si hace falta, se cancela una orden.
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import api from '../services/api.js'
 import { PageHeader, Spinner, EmptyState, Modal, useToast } from '../components/ui.jsx'
+import { useConfigStore } from '../store/configStore.js'
+import { getBrandingSources } from '../utils/logosSvg.js'
 
 const gs = (val) => Number(val || 0).toLocaleString('es-PY') + ' Gs'
 const fecha = (val) => val ? new Date(val).toLocaleString('es-PY') : '—'
@@ -37,6 +40,8 @@ function Campo({ label, children, span }) {
 
 export default function RecargasAlquilerPage() {
   const { toast } = useToast()
+  const { nombre_empresa, direccion, telefono, isotipo_empresa, logo_empresa } = useConfigStore()
+  const branding = getBrandingSources(isotipo_empresa, logo_empresa)
   const [ordenes, setOrdenes] = useState([])
   const [loading, setLoading] = useState(true)
   const [filtro, setFiltro] = useState('todas')
@@ -205,13 +210,16 @@ export default function RecargasAlquilerPage() {
         title={detalle ? `Orden ${detalle.numero}` : ''}
         onClose={() => setDetalle(null)}
         width={620}
-        footer={detalle && puedeCancelar(detalle.estado) ? (
+        footer={detalle && (
           <>
             <button className="btn" onClick={() => setDetalle(null)}>Cerrar</button>
-            <button className="btn btn-danger" onClick={() => cancelarOrden(detalle)}>Cancelar orden</button>
+            {puedeCancelar(detalle.estado) && (
+              <button className="btn btn-danger" onClick={() => cancelarOrden(detalle)}>Cancelar orden</button>
+            )}
+            <button className="btn btn-primary" onClick={() => window.print()}>
+              <i className="ti ti-printer" /> Imprimir remisión
+            </button>
           </>
-        ) : (
-          <button className="btn" onClick={() => setDetalle(null)}>Cerrar</button>
         )}
       >
         {detalle && (() => {
@@ -286,6 +294,81 @@ export default function RecargasAlquilerPage() {
           )
         })()}
       </Modal>
+
+      {/* Remisión imprimible (solo visible al imprimir; se dispara desde el modal) */}
+      {detalle && createPortal(
+        (() => {
+          const o = detalle
+          const c = cobro(o)
+          const esRecambio = o.tipoServicio === 'RECAMBIO_TUBO'
+          return (
+            <div className="print-ticket-container">
+              <div className="ticket-header">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', marginBottom: '10px' }}>
+                  <img src={branding.isotipoSrc} alt="Isotipo" style={{ width: '40px', height: '40px', objectFit: 'contain' }} />
+                  <img src={branding.logoSrc} alt="Logo" style={{ width: '108px', height: '40px', objectFit: 'contain' }} />
+                </div>
+                {direccion ? <p style={{ margin: 0, fontSize: '10px' }}>{direccion}</p> : <p style={{ margin: 0, fontSize: '10px' }}>{nombre_empresa || 'GasTubos'}</p>}
+                {telefono && <p style={{ margin: '2px 0 0', fontSize: '10px' }}>Tel: {telefono}</p>}
+                <p style={{ margin: '4px 0 0', fontSize: '11px', fontWeight: 'bold' }}>RECARGA ALQUILER: {o.numero}</p>
+              </div>
+
+              <div style={{ margin: '8px 0', fontSize: '11px' }}>
+                <strong>Cliente:</strong> {o.cliente?.nombre}<br />
+                <strong>RUC/CI:</strong> {o.cliente?.ruc || '—'}<br />
+                <strong>Dirección:</strong> {o.direccion || '—'}<br />
+                <strong>Fecha:</strong> {fecha(o.fechaFinalizacion || o.fechaSolicitud)}<br />
+                <strong>Chofer:</strong> {o.repartidor?.nombre || o.repartidor?.username || '—'}<br />
+                <strong>Contrato:</strong> {o.alquiler?.numero || '—'}{o.alquiler?.plan?.nombre ? ` · ${o.alquiler.plan.nombre}` : ''}
+              </div>
+
+              <table className="ticket-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px dashed #000' }}>
+                    <th style={{ textAlign: 'left', paddingBottom: '4px' }}>Servicio</th>
+                    <th style={{ textAlign: 'right', paddingBottom: '4px' }}>Monto</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td style={{ paddingTop: '6px' }}>
+                      <strong>{esRecambio ? 'Recambio de tubo' : 'Recarga del mismo tubo'}</strong><br />
+                      <span style={{ fontSize: '10px', color: '#555' }}>
+                        {esRecambio
+                          ? `Retira ${o.tubo?.id || '?'} / entrega ${o.tuboNuevo?.id || '?'}`
+                          : `Tubo ${o.tubo?.id || '?'}`}
+                      </span>
+                      {o.cantidadGasRecargada != null && (
+                        <><br /><span style={{ fontSize: '10px', color: '#555' }}>Gas recargado: {Number(o.cantidadGasRecargada).toLocaleString('es-PY')}</span></>
+                      )}
+                    </td>
+                    <td style={{ textAlign: 'right', fontWeight: 500, paddingTop: '6px' }}>{gs(c.total)}</td>
+                  </tr>
+                  <tr style={{ borderTop: '1px dashed #000' }}>
+                    <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px', paddingTop: '6px' }}>TOTAL:</td>
+                    <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px', paddingTop: '6px' }}>{gs(c.total)}</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <div style={{ margin: '8px 0', fontSize: '11px' }}>
+                <strong>Forma de pago:</strong> {c.metodo || (c.pagado > 0 ? '-' : 'No cobrado')}<br />
+                <strong>Cobrado:</strong> {gs(c.pagado)}
+                {c.saldo > 0 && <><br /><strong>Saldo pendiente:</strong> {gs(c.saldo)}</>}
+              </div>
+
+              <div className="ticket-signatures" style={{ display: 'flex', justifyContent: 'center', marginTop: '24px', paddingTop: '10px' }}>
+                <div className="signature-line" style={{ width: '60%', borderTop: '1px solid #000', textAlign: 'center', fontSize: '10px', paddingTop: '4px' }}>Firma Cliente</div>
+              </div>
+
+              <div className="ticket-footer" style={{ textAlign: 'center', borderTop: '1px dashed #000', paddingTop: '8px', marginTop: '16px', fontSize: '10px' }}>
+                ¡Gracias por su preferencia!
+              </div>
+            </div>
+          )
+        })(),
+        document.body
+      )}
     </>
   )
 }

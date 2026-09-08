@@ -1022,6 +1022,13 @@ textarea { resize: vertical; min-height: 72px; }
   color: var(--text-muted);
 }
 
+/* Pin coloreado del mapa de historial (L.divIcon): sin el recuadro blanco
+   que Leaflet le pone por defecto a los div-icon. */
+.map-pin-tipo {
+  background: transparent;
+  border: 0;
+}
+
 
 
 
