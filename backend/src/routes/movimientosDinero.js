@@ -13,13 +13,16 @@ router.use(requireAuth)
 router.use(requireRol('ADMIN', 'SUPERVISOR'))
 
 const TIPO_LABEL = {
-  ENTREGA:        'Entrega',
-  ALQUILER:       'Alquiler',
-  VENTA_CILINDRO: 'Venta de cilindro',
-  RECARGA:        'Recarga (recambio)',
-  VENTA_SALON:    'Venta en salón',
-  VENTA_CAMION:   'Venta desde camión',
-  VENTA_PRODUCTO: 'Venta de producto',
+  ENTREGA:            'Entrega',
+  VENTA_CILINDRO:     'Venta de cilindro',
+  RECARGA:            'Recarga (recambio)',
+  VENTA_SALON:        'Venta en salón',
+  VENTA_CAMION:       'Venta desde camión',
+  VENTA_PRODUCTO:     'Venta de producto',
+  ALQUILER_INICIAL:     'Alquiler Inicial',
+  ALQUILER_MENSUALIDAD: 'Mensualidad Alquiler',
+  ALQUILER_RECARGA:     'Recarga Alquiler',
+  ALQUILER_OTRO:        'Otro cargo de Alquiler',
 }
 
 const ESTADO_LABEL = {
@@ -28,6 +31,13 @@ const ESTADO_LABEL = {
   PENDIENTE:  'Pendiente de cobro',
   CONFIRMADO: 'Confirmado',
   CANCELADA:  'Cancelada',
+}
+
+const TIPO_CARGO_A_MOVIMIENTO = {
+  INICIAL:            'ALQUILER_INICIAL',
+  MENSUALIDAD:        'ALQUILER_MENSUALIDAD',
+  RECARGA_DOMICILIO:  'ALQUILER_RECARGA',
+  OTRO:               'ALQUILER_OTRO',
 }
 
 function normalizarFormaPago(metodoPago) {
@@ -72,9 +82,12 @@ router.get('/', async (req, res, next) => {
     const { periodo = 'hoy', desde, hasta } = req.query
     const { startDate, endDate } = resolveDateRange(periodo, desde, hasta)
 
-    const [entregas, cargas, ventasProductos] = await Promise.all([
+    const [entregas, cargas, ventasProductos, pagosCargoAlquiler] = await Promise.all([
       prisma.entrega.findMany({
-        where: { fechaEntrega: { gte: startDate, lte: endDate }, metodoPago: { not: null } },
+        // ALQUILER se excluye acá: su dinero se representa a través de
+        // CargoAlquiler (ver abajo) — es la fuente única para no duplicar
+        // el mismo cobro por dos lados.
+        where: { fechaEntrega: { gte: startDate, lte: endDate }, metodoPago: { not: null }, tipoOperacion: { not: 'ALQUILER' } },
         include: {
           cliente:    { select: { id: true, nombre: true } },
           repartidor: { select: { id: true, nombre: true, username: true } },
@@ -104,14 +117,30 @@ router.get('/', async (req, res, next) => {
         },
         orderBy: { fechaVenta: 'desc' },
       }),
+
+      // Cada PagoCargoAlquiler es un cobro real e independiente — si una
+      // mensualidad se pagó en dos partes, esto trae las dos filas por
+      // separado (fecha, monto y forma de pago propios de cada una), no un
+      // agregado. CargoAlquiler.montoPagado/fechaPago ya no se usan acá.
+      prisma.pagoCargoAlquiler.findMany({
+        where: { fechaPago: { gte: startDate, lte: endDate } },
+        include: {
+          cargoAlquiler: {
+            select: {
+              tipo: true,
+              alquiler: { select: { numero: true, clienteId: true, cliente: { select: { nombre: true } } } },
+            },
+          },
+          usuario: { select: { id: true, nombre: true, username: true } },
+        },
+        orderBy: { fechaPago: 'desc' },
+      }),
     ])
 
     const movimientos = []
 
     for (const e of entregas) {
-      const tipoKey = e.tipoOperacion === 'ALQUILER' ? 'ALQUILER'
-        : e.tipoOperacion === 'VENTA' ? 'VENTA_CILINDRO'
-        : 'ENTREGA'
+      const tipoKey = e.tipoOperacion === 'VENTA' ? 'VENTA_CILINDRO' : 'ENTREGA'
 
       const subtotalProductos = (e.detalles || []).reduce((sum, d) => sum + Number(d.subtotal || 0), 0)
       const totalOperacion = subtotalProductos + Number(e.costoDelivery || 0)
@@ -158,6 +187,29 @@ router.get('/', async (req, res, next) => {
         monto,
         estado: 'CONFIRMADO',
         estadoLabel: ESTADO_LABEL.CONFIRMADO,
+      })
+    }
+
+    for (const p of pagosCargoAlquiler) {
+      // Cada fila es un cobro real e independiente — un cargo pagado en dos
+      // partes aparece acá dos veces, cada una con su propia fecha/monto/forma
+      // de pago, nunca como un único movimiento con el último dato pisado.
+      const tipoKey = TIPO_CARGO_A_MOVIMIENTO[p.cargoAlquiler?.tipo] || 'ALQUILER_OTRO'
+
+      movimientos.push({
+        id: `pago-cargo-alquiler-${p.id}`,
+        tipo: tipoKey,
+        tipoLabel: TIPO_LABEL[tipoKey],
+        referencia: p.cargoAlquiler?.alquiler?.numero || '—',
+        fecha: p.fechaPago,
+        usuario: p.usuario?.nombre || p.usuario?.username || 'Alquileres',
+        cliente: p.cargoAlquiler?.alquiler?.cliente?.nombre || 'Sin cliente',
+        formaPago: normalizarFormaPago(p.metodoPago),
+        monto: Number(p.monto),
+        // Cada pago es, en sí mismo, un cobro confirmado — no hereda el
+        // estado (PARCIAL/PAGADO) del cargo, que es agregado de varios pagos.
+        estado: 'COBRADO',
+        estadoLabel: ESTADO_LABEL.COBRADO,
       })
     }
 

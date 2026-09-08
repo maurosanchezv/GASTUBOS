@@ -13,11 +13,14 @@ import { PageHeader, StateBadge, Spinner, GasDot, EmptyState, Modal, formatCapac
 import { useToast } from '../components/ui.jsx'
 import { useConfigStore } from '../store/configStore.js'
 import { LOGO_TUBOS_SVG, LOGO_PMS_SVG, getBrandingSources } from '../utils/logosSvg.js'
+import { isGoogleMapsLink, isShortGoogleMapsLink, parseGoogleMapsLink, resolveShortMapsLink } from '../utils/googleMapsLink.js'
 import { construirBufferTicketEntrega, construirBufferTicketRemisionInicial } from '../utils/ticketsImpresion.js'
+import { precioFilaDetalle, totalTicket } from '../utils/ticketMontos.js'
 import { conectarImpresoraWebBluetooth, enviarBufferWebBluetooth, esNavegadorMovilConWebBluetooth } from '../utils/webBluetoothPrinter.js'
 import TuboChip from '../components/TuboChip.jsx'
 import EntregaSalonTab from './entregas/EntregaSalonTab.jsx'
 import ClienteAutocomplete from '../components/ClienteAutocomplete.jsx'
+import PlanAlquilerTicketBlock from '../components/PlanAlquilerTicketBlock.jsx'
 
 // ... (EMPTY y fixes de Leaflet se mantienen arriba)
 delete L.Icon.Default.prototype._getIconUrl
@@ -27,7 +30,9 @@ const EMPTY = {
   clienteId: '', sucursalId: '', direccionEntrega: '', tipoOperacion: 'ENTREGA_SIMPLE',
   repartidorId: '', observaciones: '', tubosIds: [],
   tubosDetalles: [],
-  fechaVencimiento: '', referencia: '',
+  planId: '', referencia: '',
+  // ALQUILER: lista de ítems del plan, precargada y editable antes del despacho.
+  itemsAlquiler: [],
   latitud: null, longitud: null,
   costoDelivery: '',
   metodoPago: '',
@@ -73,6 +78,7 @@ export default function EntregasPage() {
   const [clienteSeleccionado, setClienteSeleccionado] = useState(null)
   const [usuarios, setUsuarios] = useState([])
   const [precios, setPrecios]   = useState([])
+  const [planesAlquiler, setPlanesAlquiler] = useState([])
 
   // Búsqueda de tubos mejorada
   const [tuboBusq, setTuboBusq]       = useState('')
@@ -94,25 +100,27 @@ export default function EntregasPage() {
     }
     setAddrBuscando(true)
     try {
-      // 1. Intentar Photon (Komoot) centrado prioritariamente en Paraguay (-25.2867, -57.6474)
-      const photonUrl = `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&lat=-25.2867&lon=-57.6474&limit=6`
+      // 1. Intentar Photon (Komoot) restringido a Paraguay (bbox) para evitar resultados de otros países
+      const photonUrl = `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&lat=-25.2867&lon=-57.6474&limit=6&bbox=-62.65,-27.6,-54.2,-19.3`
       const resPhoton = await fetch(photonUrl)
       const dataPhoton = await resPhoton.json()
-      
+
       let sugs = []
       if (dataPhoton && dataPhoton.features && dataPhoton.features.length > 0) {
-        sugs = dataPhoton.features.map(f => {
-          const p = f.properties || {}
-          const coords = f.geometry?.coordinates || []
-          const nameParts = [p.name, p.street, p.housing, p.district, p.city || p.town || p.county, p.state || p.country]
-            .filter(Boolean)
-          const name = Array.from(new Set(nameParts)).join(', ')
-          return {
-            display_name: name || p.name || query,
-            lat: coords[1],
-            lon: coords[0],
-          }
-        }).filter(item => item.lat && item.lon)
+        sugs = dataPhoton.features
+          .filter(f => !(f.properties || {}).countrycode || (f.properties || {}).countrycode === 'PY')
+          .map(f => {
+            const p = f.properties || {}
+            const coords = f.geometry?.coordinates || []
+            const nameParts = [p.name, p.street, p.housing, p.district, p.city || p.town || p.county, p.state || p.country]
+              .filter(Boolean)
+            const name = Array.from(new Set(nameParts)).join(', ')
+            return {
+              display_name: name || p.name || query,
+              lat: coords[1],
+              lon: coords[0],
+            }
+          }).filter(item => item.lat && item.lon)
       }
 
       // 2. Si Photon trajo pocas opciones, buscar también en Nominatim delimitado a Paraguay
@@ -262,6 +270,7 @@ export default function EntregasPage() {
   useEffect(() => {
     api.get('/usuarios/repartidores').then(r => setUsuarios(r.data)).catch(() => {})
     api.get('/precios').then(r => setPrecios(r.data)).catch(() => {})
+    api.get('/planes-alquiler', { params: { activo: true } }).then(r => setPlanesAlquiler(r.data)).catch(() => {})
     if (params.get('tubo')) agregarTubo(params.get('tubo'))
     if (params.get('tab')) setTab(params.get('tab'))
   }, [])
@@ -320,6 +329,52 @@ export default function EntregasPage() {
       }
     } catch (err) {
       console.error('Error reverse geocoding', err)
+    }
+  }
+
+  // Aplica una ubicación (lat/lon) extraída de un link de Google Maps/WhatsApp:
+  // fija el marcador, actualiza el mapa si está abierto y resuelve la dirección legible.
+  const aplicarUbicacionPegada = ({ lat, lon }) => {
+    const placeholder = 'Ubicación de WhatsApp/Google Maps (obteniendo dirección...)'
+    lastSelectedAddress.current = placeholder
+    setForm(f => ({ ...f, direccionEntrega: placeholder, latitud: lat, longitud: lon }))
+    setAddrSugs([])
+    reverseGeocode(lat, lon)
+    toast('Ubicación detectada desde el link', 'success')
+    if (mapaPickerInstance.current) {
+      const { map, marker } = mapaPickerInstance.current
+      if (marker) marker.setLatLng([lat, lon])
+      else mapaPickerInstance.current.marker = L.marker([lat, lon]).addTo(map)
+      map.setView([lat, lon], 16)
+    }
+  }
+
+  // Pegar un link de ubicación (WhatsApp comparte vía Google Maps) en el campo
+  // de dirección: si trae coordenadas las usamos directo; si es un link corto
+  // (maps.app.goo.gl) lo resolvemos contra el backend para leer el destino real.
+  const handleAddressPaste = async (e) => {
+    const text = e.clipboardData?.getData('text') || ''
+    if (!isGoogleMapsLink(text) && !parseGoogleMapsLink(text)) return
+    e.preventDefault()
+
+    const direct = parseGoogleMapsLink(text)
+    if (direct) {
+      aplicarUbicacionPegada(direct)
+      return
+    }
+    if (!isShortGoogleMapsLink(text)) {
+      toast('No se encontraron coordenadas en ese link', 'error')
+      return
+    }
+    setAddrBuscando(true)
+    try {
+      const resolved = await resolveShortMapsLink(api, text.trim())
+      if (resolved) aplicarUbicacionPegada(resolved)
+      else toast('No se pudo leer la ubicación de ese link', 'error')
+    } catch (err) {
+      toast('No se pudo resolver el link de Google Maps', 'error')
+    } finally {
+      setAddrBuscando(false)
     }
   }
 
@@ -652,8 +707,8 @@ export default function EntregasPage() {
     if (!form.clienteId) return toast('Seleccioná un cliente', 'error')
     if (!form.repartidorId) return setModalSinRepartidor(true)
     if (form.tubosIds.length === 0) return toast('Agregá al menos un tubo', 'error')
-    if (form.tipoOperacion === 'ALQUILER' && !form.fechaVencimiento) {
-      return toast('Ingresá la fecha de vencimiento del alquiler', 'error')
+    if (form.tipoOperacion === 'ALQUILER' && !form.planId) {
+      return toast('Seleccioná el plan de alquiler', 'error')
     }
     if (!form.metodoPago) return toast('Seleccioná la forma de pago', 'error')
     setSaving(true)
@@ -661,7 +716,17 @@ export default function EntregasPage() {
       await api.post('/entregas', {
         ...form,
         repartidorId:     form.repartidorId || undefined,
-        fechaVencimiento: form.fechaVencimiento ? new Date(form.fechaVencimiento).toISOString() : undefined,
+        planId:           form.tipoOperacion === 'ALQUILER' ? form.planId : undefined,
+        itemsAlquiler:    form.tipoOperacion === 'ALQUILER'
+          ? form.itemsAlquiler
+              .filter(i => i.descripcion.trim())
+              .map((i, idx) => ({
+                descripcion: i.descripcion.trim(),
+                cantidad: Number(i.cantidad) > 0 ? Math.trunc(Number(i.cantidad)) : 1,
+                serializado: !!i.serializado,
+                orden: idx,
+              }))
+          : undefined,
         referencia:       form.referencia || undefined,
         latitud:          form.latitud ?? undefined,
         longitud:         form.longitud ?? undefined,
@@ -679,6 +744,27 @@ export default function EntregasPage() {
   }
 
   const f = k => e => setForm(p => ({ ...p, [k]: e.target.value }))
+
+  // Al elegir/cambiar el plan de alquiler, precargar su lista de ítems (editable
+  // después). Cambiar de plan reemplaza la lista; limpiar el plan la vacía.
+  const handlePlanChange = e => {
+    const planId = e.target.value
+    const plan = planesAlquiler.find(p => p.id === planId)
+    setForm(p => ({
+      ...p,
+      planId,
+      itemsAlquiler: plan
+        ? (plan.items || []).map(i => ({
+            descripcion: i.descripcion, cantidad: Number(i.cantidad) || 1, serializado: !!i.serializado,
+          }))
+        : [],
+    }))
+  }
+  const addItemAlq    = () => setForm(p => ({ ...p, itemsAlquiler: [...p.itemsAlquiler, { descripcion: '', cantidad: 1, serializado: false }] }))
+  const removeItemAlq = idx => setForm(p => ({ ...p, itemsAlquiler: p.itemsAlquiler.filter((_, i) => i !== idx) }))
+  const updItemAlq    = (idx, patch) => setForm(p => ({
+    ...p, itemsAlquiler: p.itemsAlquiler.map((it, i) => i === idx ? { ...it, ...patch } : it),
+  }))
   const getLat = e => e.latitud || e.sucursal?.latitud || e.cliente?.latitud
   const getLng = e => e.longitud || e.sucursal?.longitud || e.cliente?.longitud
   const entregasConCoords = entregasActivasMapa.filter(e => {
@@ -804,11 +890,12 @@ export default function EntregasPage() {
                       </div>
                       <div ref={addrRef} style={{ position: 'relative' }}>
                         <input type="text" value={form.direccionEntrega} onChange={f('direccionEntrega')}
-                          placeholder={clienteSeleccionado?.direccion || 'Ej: Av. San Martín, Asunción...'} required
+                          placeholder={clienteSeleccionado?.direccion || 'Ej: Av. San Martín, Asunción... o pegá el link de ubicación de WhatsApp'} required
                           style={{ paddingRight: addrBuscando ? '30px' : '10px' }}
                           onKeyDown={e => {
                             if (e.key === 'Escape') setAddrSugs([])
                           }}
+                          onPaste={handleAddressPaste}
                         />
 
                         {addrBuscando && (
@@ -872,6 +959,11 @@ export default function EntregasPage() {
                             ))}
                           </div>
                         )}
+                      </div>
+
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                        <i className="ti ti-brand-whatsapp" style={{ marginRight: 4 }} />
+                        Tip: pegá aquí el link de ubicación que te comparte el cliente por WhatsApp para cargar el GPS exacto.
                       </div>
 
                       {/* Controles de ubicación */}
@@ -941,9 +1033,78 @@ export default function EntregasPage() {
                       </select>
                     </div>
                     {form.tipoOperacion === 'ALQUILER' && (
-                      <div className="form-group">
-                        <label className="form-label">Fecha vencimiento alquiler <span className="form-required">*</span></label>
-                        <input type="date" value={form.fechaVencimiento} onChange={f('fechaVencimiento')} required />
+                      <div className="form-group col-span-2">
+                        <label className="form-label">Plan de alquiler <span className="form-required">*</span></label>
+                        <select value={form.planId} onChange={handlePlanChange} required>
+                          <option value="">Seleccioná un plan...</option>
+                          {planesAlquiler.map(p => (
+                            <option key={p.id} value={p.id}>
+                              {p.nombre} — Gs. {Number(p.precioInicial).toLocaleString('es-PY')} inicial
+                            </option>
+                          ))}
+                        </select>
+                        {form.planId && (() => {
+                          const plan = planesAlquiler.find(p => p.id === form.planId)
+                          if (!plan) return null
+                          return (
+                            <div style={{
+                              marginTop: 8, padding: '10px 12px', borderRadius: 8,
+                              background: 'var(--surface-2, #f5f5f5)', fontSize: 12,
+                              display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8,
+                            }}>
+                              <div><span style={{ color: 'var(--text-muted)' }}>Pago inicial:</span> <strong>Gs. {Number(plan.precioInicial).toLocaleString('es-PY')}</strong></div>
+                              <div><span style={{ color: 'var(--text-muted)' }}>Incluye:</span> <strong>{plan.diasIncluidos} días</strong></div>
+                              <div><span style={{ color: 'var(--text-muted)' }}>Mensualidad:</span> <strong>Gs. {Number(plan.precioMensual).toLocaleString('es-PY')}</strong></div>
+                              <div><span style={{ color: 'var(--text-muted)' }}>Recarga a domicilio:</span> <strong>Gs. {Number(plan.precioRecargaDomicilio).toLocaleString('es-PY')}</strong></div>
+                            </div>
+                          )
+                        })()}
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                          El pago inicial ya incluye tubo cargado, regulador, accesorios y los días indicados — no se cobra el gas por separado.
+                        </div>
+
+                        {/* ── Detalle de ítems del plan (precargado, editable) ── */}
+                        {form.planId && (
+                          <div style={{ marginTop: 10, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                              <div style={{ fontWeight: 600, fontSize: 12 }}>Equipos e ítems a entregar</div>
+                              <button type="button" className="btn btn-sm btn-secondary" onClick={addItemAlq}>
+                                <i className="ti ti-plus" /> Agregar
+                              </button>
+                            </div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
+                              Precargado del plan. Se imprime en la remisión; el repartidor registra los nº de serie al entregar.
+                            </div>
+                            {form.itemsAlquiler.length === 0 ? (
+                              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Sin ítems — el plan no tiene lista cargada.</div>
+                            ) : (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                {form.itemsAlquiler.map((it, idx) => (
+                                  <div key={idx} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                    <input
+                                      style={{ flex: 1 }}
+                                      placeholder="Descripción"
+                                      value={it.descripcion}
+                                      onChange={e => updItemAlq(idx, { descripcion: e.target.value })}
+                                    />
+                                    <input
+                                      type="number" min="1" style={{ width: 52 }} title="Cantidad"
+                                      value={it.cantidad}
+                                      onChange={e => updItemAlq(idx, { cantidad: e.target.value })}
+                                    />
+                                    <label style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, whiteSpace: 'nowrap', cursor: 'pointer' }} title="¿Lleva nº de serie?">
+                                      <input type="checkbox" checked={it.serializado} onChange={e => updItemAlq(idx, { serializado: e.target.checked })} />
+                                      Serie
+                                    </label>
+                                    <button type="button" className="btn btn-sm btn-danger" style={{ padding: '0 8px' }} onClick={() => removeItemAlq(idx)} title="Quitar">
+                                      <i className="ti ti-trash" />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
                     {form.tipoOperacion === 'VENTA' && (
@@ -1050,12 +1211,13 @@ export default function EntregasPage() {
                     form.tubosIds.map(tuboId => {
                       const detail = form.tubosDetalles?.find(d => d.tuboId === tuboId)
                       return (
-                        <TuboChip 
-                          key={tuboId} 
-                          tuboId={tuboId} 
+                        <TuboChip
+                          key={tuboId}
+                          tuboId={tuboId}
                           detail={detail}
                           onChange={updateTuboDetail}
-                          onRemove={quitarTubo} 
+                          onRemove={quitarTubo}
+                          esAlquiler={form.tipoOperacion === 'ALQUILER'}
                         />
                       )
                     })
@@ -1083,18 +1245,22 @@ export default function EntregasPage() {
 
                   {/* Cálculo del Total Estimado de Entrega */}
                   {(() => {
-                    const subtotalTubosCalculado = (form.tubosDetalles || []).reduce((acc, d) => {
-                      const cant = Number(d.cantidadGas || 0)
-                      const prec = Number(d.precioUnitario || 0)
-                      return acc + (cant > 0 ? (cant * prec) : prec)
-                    }, 0)
+                    const esAlquiler = form.tipoOperacion === 'ALQUILER'
+                    const planSeleccionado = esAlquiler ? planesAlquiler.find(p => p.id === form.planId) : null
+                    const subtotalTubosCalculado = esAlquiler
+                      ? Number(planSeleccionado?.precioInicial || 0) * form.tubosIds.length
+                      : (form.tubosDetalles || []).reduce((acc, d) => {
+                          const cant = Number(d.cantidadGas || 0)
+                          const prec = Number(d.precioUnitario || 0)
+                          return acc + (cant > 0 ? (cant * prec) : prec)
+                        }, 0)
                     const costoDeliv = Number(form.costoDelivery || 0)
                     const totalGral = subtotalTubosCalculado + costoDeliv
 
                     return (
                       <>
                         <div style={{ marginBottom: 10 }}>
-                          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>SUBTOTAL GAS</div>
+                          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>{esAlquiler ? 'PAGO INICIAL' : 'SUBTOTAL GAS'}</div>
                           <div style={{ fontSize: 14, fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
                             {subtotalTubosCalculado.toLocaleString('es-PY')} Gs
                           </div>
@@ -1501,12 +1667,12 @@ export default function EntregasPage() {
                             </>
                           ) : (
                             <span style={{ fontSize: '10px', color: '#666', fontWeight: 500 }}>
-                              Envase Vacío
+                              {entregaSeleccionada?.tipoOperacion === 'ALQUILER' ? 'Alquiler' : 'Envase Vacío'}
                             </span>
                           )}
                         </td>
                         <td style={{ textAlign: 'right', fontWeight: '500' }}>
-                          {Number(d.subtotal).toLocaleString('es-PY')} GS
+                          {precioFilaDetalle(entregaSeleccionada, d).toLocaleString('es-PY')} GS
                         </td>
                       </tr>
                     ))}
@@ -1519,15 +1685,17 @@ export default function EntregasPage() {
                     <tr>
                       <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px' }}>TOTAL ESTIMADO:</td>
                       <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px', color: 'var(--blue)' }}>
-                        {(
-                          (entregaSeleccionada.detalles?.reduce((acc, d) => acc + Number(d.subtotal), 0) || 0) +
-                          Number(entregaSeleccionada.costoDelivery || 0)
-                        ).toLocaleString('es-PY')} GS
+                        {totalTicket(entregaSeleccionada).toLocaleString('es-PY')} GS
                       </td>
                     </tr>
                   </tbody>
                 </table>
-                
+
+                <PlanAlquilerTicketBlock
+                  entrega={entregaSeleccionada}
+                  incluirEstado={false}
+                />
+
                 <div className="ticket-signatures">
                   <div className="signature-line">Firma Despacho Depósito</div>
                   <div className="signature-line">Firma Chofer</div>
@@ -1604,12 +1772,12 @@ export default function EntregasPage() {
                               </>
                             ) : (
                               <span style={{ fontSize: '10px', color: '#666', fontWeight: 500 }}>
-                                Envase Vacío
+                                {entregaSeleccionada?.tipoOperacion === 'ALQUILER' ? 'Alquiler' : 'Envase Vacío'}
                               </span>
                             )}
                           </td>
                           <td style={{ textAlign: 'right', fontWeight: '500' }}>
-                            {Number(d.subtotal).toLocaleString('es-PY')} GS
+                            {precioFilaDetalle(entregaSeleccionada, d).toLocaleString('es-PY')} GS
                           </td>
                         </tr>
                       ))}
@@ -1622,14 +1790,16 @@ export default function EntregasPage() {
                       <tr>
                         <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px' }}>TOTAL COBRADO:</td>
                         <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px', color: 'var(--blue)' }}>
-                          {(
-                            (entregaSeleccionada.detalles?.reduce((acc, d) => acc + Number(d.subtotal), 0) || 0) +
-                            Number(entregaSeleccionada.costoDelivery || 0)
-                          ).toLocaleString('es-PY')} GS
+                          {totalTicket(entregaSeleccionada).toLocaleString('es-PY')} GS
                         </td>
                       </tr>
                     </tbody>
                   </table>
+
+                  <PlanAlquilerTicketBlock
+                    entrega={entregaSeleccionada}
+                    incluirEstado={true}
+                  />
 
                   {/* Secc 2: Recambios Recibidos */}
                   {(() => {
@@ -1753,12 +1923,12 @@ export default function EntregasPage() {
                         </>
                       ) : (
                         <span style={{ fontSize: '10px', color: '#555', fontWeight: 500 }}>
-                          Envase Vacío
+                          {entregaSeleccionada?.tipoOperacion === 'ALQUILER' ? 'Alquiler' : 'Envase Vacío'}
                         </span>
                       )}
                     </td>
                     <td style={{ textAlign: 'right', fontWeight: '500' }}>
-                      {Number(d.subtotal).toLocaleString('es-PY')} GS
+                      {precioFilaDetalle(entregaSeleccionada, d).toLocaleString('es-PY')} GS
                     </td>
                   </tr>
                 );
@@ -1772,14 +1942,16 @@ export default function EntregasPage() {
               <tr>
                 <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px' }}>TOTAL:</td>
                 <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px', color: 'var(--blue)' }}>
-                  {(
-                    (entregaSeleccionada.detalles?.reduce((acc, d) => acc + Number(d.subtotal), 0) || 0) +
-                    Number(entregaSeleccionada.costoDelivery || 0)
-                  ).toLocaleString('es-PY')} GS
+                  {totalTicket(entregaSeleccionada).toLocaleString('es-PY')} GS
                 </td>
               </tr>
             </tbody>
           </table>
+
+          <PlanAlquilerTicketBlock
+            entrega={entregaSeleccionada}
+            incluirEstado={ticketTab === 'comprobante'}
+          />
 
           {ticketTab === 'comprobante' && (() => {
             const recs = getRecambiosRecibidos(entregaSeleccionada)

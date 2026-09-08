@@ -4,6 +4,7 @@ import api from '../services/api.js'
 import { PageHeader, Modal, FormGroup, Spinner, EmptyState, TipoBadge } from '../components/ui.jsx'
 import { useToast } from '../components/ui.jsx'
 import MiniMapaPicker from '../components/MiniMapaPicker.jsx'
+import { isGoogleMapsLink, isShortGoogleMapsLink, parseGoogleMapsLink, resolveShortMapsLink } from '../utils/googleMapsLink.js'
 
 const EMPTY = {
   nombre: '',
@@ -84,24 +85,26 @@ export default function ClientesPage() {
     }
     setAddrBuscando(true)
     try {
-      const photonUrl = `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&lat=-25.2867&lon=-57.6474&limit=6`
+      const photonUrl = `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&lat=-25.2867&lon=-57.6474&limit=6&bbox=-62.65,-27.6,-54.2,-19.3`
       const resPhoton = await fetch(photonUrl)
       const dataPhoton = await resPhoton.json()
-      
+
       let sugs = []
       if (dataPhoton && dataPhoton.features && dataPhoton.features.length > 0) {
-        sugs = dataPhoton.features.map(f => {
-          const p = f.properties || {}
-          const coords = f.geometry?.coordinates || []
-          const nameParts = [p.name, p.street, p.housing, p.district, p.city || p.town || p.county, p.state || p.country]
-            .filter(Boolean)
-          const name = Array.from(new Set(nameParts)).join(', ')
-          return {
-            display_name: name || p.name || query,
-            lat: coords[1],
-            lon: coords[0],
-          }
-        }).filter(item => item.lat && item.lon)
+        sugs = dataPhoton.features
+          .filter(f => !(f.properties || {}).countrycode || (f.properties || {}).countrycode === 'PY')
+          .map(f => {
+            const p = f.properties || {}
+            const coords = f.geometry?.coordinates || []
+            const nameParts = [p.name, p.street, p.housing, p.district, p.city || p.town || p.county, p.state || p.country]
+              .filter(Boolean)
+            const name = Array.from(new Set(nameParts)).join(', ')
+            return {
+              display_name: name || p.name || query,
+              lat: coords[1],
+              lon: coords[0],
+            }
+          }).filter(item => item.lat && item.lon)
       }
 
       if (sugs.length < 3) {
@@ -288,6 +291,56 @@ export default function ClientesPage() {
     setAddrSugs([])
   }
 
+  // Aplica una ubicación (lat/lon) extraída de un link de Google Maps/WhatsApp
+  // al formulario indicado (cliente principal o sucursal) y resuelve la dirección legible.
+  const aplicarUbicacionPegada = async (setter, { lat, lon }) => {
+    const placeholder = 'Ubicación de WhatsApp/Google Maps (obteniendo dirección...)'
+    lastSelectedAddress.current = placeholder
+    setter(f => ({ ...f, direccion: placeholder, latitud: lat, longitud: lon }))
+    setAddrSugs([])
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18`)
+      const data = await res.json()
+      if (data.display_name) {
+        lastSelectedAddress.current = data.display_name
+        setter(f => ({ ...f, direccion: data.display_name }))
+      }
+    } catch {}
+    toast('Ubicación detectada desde el link', 'success')
+  }
+
+  // Pegar un link de ubicación (WhatsApp comparte vía Google Maps) en el campo
+  // de dirección: si trae coordenadas las usamos directo; si es un link corto
+  // (maps.app.goo.gl) lo resolvemos contra el backend para leer el destino real.
+  const manejarPegadoDireccion = async (e, setter) => {
+    const text = e.clipboardData?.getData('text') || ''
+    if (!isGoogleMapsLink(text) && !parseGoogleMapsLink(text)) return
+    e.preventDefault()
+
+    const direct = parseGoogleMapsLink(text)
+    if (direct) {
+      aplicarUbicacionPegada(setter, direct)
+      return
+    }
+    if (!isShortGoogleMapsLink(text)) {
+      toast('No se encontraron coordenadas en ese link', 'error')
+      return
+    }
+    setAddrBuscando(true)
+    try {
+      const resolved = await resolveShortMapsLink(api, text.trim())
+      if (resolved) aplicarUbicacionPegada(setter, resolved)
+      else toast('No se pudo leer la ubicación de ese link', 'error')
+    } catch {
+      toast('No se pudo resolver el link de Google Maps', 'error')
+    } finally {
+      setAddrBuscando(false)
+    }
+  }
+
+  const handleAddressPaste = e => manejarPegadoDireccion(e, setForm)
+  const handleAddressPasteSucursal = e => manejarPegadoDireccion(e, setFormSucursal)
+
   return (
     <>
       <PageHeader
@@ -453,6 +506,7 @@ export default function ClientesPage() {
                 onChange={f('direccion')}
                 placeholder="Ej: Av. San Martín, Asunción..."
                 style={{ paddingRight: addrBuscando ? '30px' : '10px' }}
+                onPaste={handleAddressPaste}
               />
               {addrBuscando && (
                 <div style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', zIndex: 10 }}>
@@ -489,6 +543,11 @@ export default function ClientesPage() {
                   ))}
                 </div>
               )}
+            </div>
+
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+              <i className="ti ti-brand-whatsapp" style={{ marginRight: 4 }} />
+              Tip: pegá aquí el link de ubicación que te comparte el cliente por WhatsApp para cargar el GPS exacto.
             </div>
 
             {/* Mini Mapa Interactivo */}
@@ -657,6 +716,7 @@ export default function ClientesPage() {
                   onChange={fSuc('direccion')}
                   placeholder="Ej: Ruta 2 Km 14, San Lorenzo..."
                   required
+                  onPaste={handleAddressPasteSucursal}
                 />
                 {addrSugs.length > 0 && modalSucursal && (
                   <div style={{
@@ -681,6 +741,11 @@ export default function ClientesPage() {
                     ))}
                   </div>
                 )}
+              </div>
+
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                <i className="ti ti-brand-whatsapp" style={{ marginRight: 4 }} />
+                Tip: pegá aquí el link de ubicación que te comparte el cliente por WhatsApp para cargar el GPS exacto.
               </div>
 
               <div style={{ marginTop: 8 }}>

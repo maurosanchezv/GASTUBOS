@@ -81,8 +81,11 @@ router.get('/resumen', async (req, res, next) => {
         _count: { estado: true },
       }),
 
+      // Alineado con Alquileres y Dashboard: "vencido" es estrictamente
+      // estadoFinanciero === VENCIDO, nunca una comparación de fecha aparte
+      // (evita que este número no coincida con el de las otras pantallas).
       prisma.alquiler.count({
-        where: { estado: 'ACTIVO', fechaVencimiento: { lt: ahora } },
+        where: { estado: 'ACTIVO', estadoFinanciero: 'VENCIDO' },
       }),
 
       prisma.cilindroTerceroInfo.count({
@@ -297,8 +300,6 @@ router.get('/resumen', async (req, res, next) => {
 // GET /api/reportes/dashboard — todos los indicadores del dashboard en una sola llamada
 router.get('/dashboard', async (req, res, next) => {
   try {
-    const hoy = new Date()
-
     const [
       porEstado,
       alquileresVencidos,
@@ -312,9 +313,9 @@ router.get('/dashboard', async (req, res, next) => {
         where: { activo: true },
         _count: { estado: true },
       }),
-      // Alquileres vencidos
+      // Alquileres vencidos — misma fuente que /resumen y /api/alquileres/indicadores.
       prisma.alquiler.count({
-        where: { estado: 'ACTIVO', fechaVencimiento: { lt: hoy } },
+        where: { estado: 'ACTIVO', estadoFinanciero: 'VENCIDO' },
       }),
       // Últimas 5 entregas
       prisma.entrega.findMany({

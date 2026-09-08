@@ -11,6 +11,9 @@ import { prisma } from '../utils/prisma.js'
 import { requireAuth, requireRol } from '../middleware/auth.js'
 import { registrarAuditoria } from '../utils/auditoria.js'
 import { generarNumero, mapTuboGasToTipoGas } from '../utils/helpers.js'
+import { sumarDias, aMedianocheUTC } from '../utils/fechas.js'
+import { crearCargoInicial, crearCargoDelivery } from '../utils/alquilerCargos.js'
+import { asignarTuboInicial } from '../utils/alquilerTubos.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -90,6 +93,19 @@ const entregaSchema = z.object({
     precioUnitario: z.coerce.number().optional(),
   })).optional(),
   // Solo si tipoOperacion = ALQUILER
+  planId:           z.string().optional(),
+  // Lista de ítems del plan, ya editada por el operador de oficina (precargada
+  // del plan pero puede agregar/quitar/cambiar cantidades). Si no viene, se
+  // copian tal cual los ítems activos del plan.
+  itemsAlquiler:    z.array(z.object({
+    descripcion: z.string().min(1),
+    cantidad:    z.coerce.number().int().positive().default(1),
+    serializado: z.coerce.boolean().optional().default(false),
+    orden:       z.coerce.number().int().nonnegative().optional(),
+  })).optional(),
+  // Deprecado: el vencimiento ahora se calcula desde PlanAlquiler.diasIncluidos.
+  // Se mantiene opcional en el schema por compatibilidad con clientes viejos
+  // que todavía lo manden; el backend ya no lo usa para ALQUILER.
   fechaVencimiento: z.string().datetime().optional(),
   // Solo si tipoOperacion = VENTA
   referencia:       z.string().optional(),
@@ -139,6 +155,7 @@ router.get('/', async (req, res, next) => {
           repartidor: { select: { username: true, nombre: true } },
           detalles:   { include: { tubo: { select: { id: true, gas: true, capacidadLitros: true, capacidadKg: true, estado: true, clienteId: true } } } },
           recambios:  { include: { tuboEntregado: { select: { id: true, gas: true, observaciones: true } } } },
+          alquileres: { include: { plan: { select: { codigo: true, nombre: true } }, items: { orderBy: { orden: 'asc' } } } },
           cilindrosTerceros: true,
         },
         orderBy: { fechaEntrega: 'desc' },
@@ -166,6 +183,7 @@ router.get('/numero/:numero', async (req, res, next) => {
         repartidor: { select: { username: true, nombre: true } },
         detalles:   { include: { tubo: { select: { id: true, gas: true, capacidadLitros: true, capacidadKg: true, estado: true, clienteId: true } } } },
         recambios:  { include: { tuboEntregado: { select: { id: true, gas: true, observaciones: true } } } },
+        alquileres: { include: { plan: { select: { codigo: true, nombre: true } }, items: { orderBy: { orden: 'asc' } } } },
         cilindrosTerceros: true,
       },
     })
@@ -202,8 +220,31 @@ router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res,
     }
 
     // Validaciones específicas por tipo
-    if (data.tipoOperacion === 'ALQUILER' && !data.fechaVencimiento) {
-      return res.status(400).json({ error: 'fechaVencimiento requerido para alquileres' })
+    let planAlquiler = null
+    let itemsAlquilerSnapshot = []
+    if (data.tipoOperacion === 'ALQUILER') {
+      if (!data.planId) {
+        return res.status(400).json({ error: 'Seleccioná un plan de alquiler' })
+      }
+      planAlquiler = await prisma.planAlquiler.findUnique({
+        where: { id: data.planId },
+        include: { items: { where: { activo: true }, orderBy: { orden: 'asc' } } },
+      })
+      if (!planAlquiler || !planAlquiler.activo) {
+        return res.status(400).json({ error: 'Plan de alquiler no encontrado o inactivo' })
+      }
+      // Lista efectiva de ítems: la que mandó el operador ya editada, o —si no
+      // vino el campo— los ítems activos del plan tal cual. Se guarda como
+      // snapshot por contrato (ItemAlquiler), sin referenciar PlanAlquilerItem.
+      const fuenteItems = data.itemsAlquiler !== undefined ? data.itemsAlquiler : planAlquiler.items
+      itemsAlquilerSnapshot = fuenteItems
+        .filter(i => String(i.descripcion || '').trim())
+        .map((i, idx) => ({
+          descripcion: i.descripcion.trim(),
+          cantidad:    Number(i.cantidad) > 0 ? Math.trunc(Number(i.cantidad)) : 1,
+          serializado: !!i.serializado,
+          orden:       i.orden !== undefined ? Number(i.orden) : idx,
+        }))
     }
 
     const numero = await generarNumero('E')
@@ -262,9 +303,17 @@ router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res,
           }
         }
 
+        // ALQUILER se cobra por plan (precioInicial fijo), no por gas × precio:
+        // cantidadGas se conserva a título informativo (cuánto gas tenía el
+        // tubo al salir), pero el precio/subtotal se anula acá para que el
+        // total de la entrega no duplique el cobro que hace CargoAlquiler.
+        if (data.tipoOperacion === 'ALQUILER') {
+          precioUnitario = 0
+        }
+
         const cantNum = Number(cantidadGas || 0)
         const precNum = Number(precioUnitario || 0)
-        const subtotal = cantNum > 0 ? (cantNum * precNum) : precNum
+        const subtotal = data.tipoOperacion === 'ALQUILER' ? 0 : (cantNum > 0 ? (cantNum * precNum) : precNum)
 
         detallesAInsertar.push({
           tuboId,
@@ -311,6 +360,10 @@ router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res,
 
       // 5. Crear registros adicionales según tipo
       if (data.tipoOperacion === 'ALQUILER') {
+        // Fechas reales (fechaInicio, fechaVencimiento, primerPeriodoHasta) se
+        // fijan recién cuando el repartidor confirma la entrega — acá son
+        // provisorias, el contrato nace en PENDIENTE_ENTREGA.
+        const provisional = aMedianocheUTC(new Date())
         for (const tuboId of data.tubosIds) {
           const numeroAlquiler = await generarNumero('AL', tx)
           await tx.alquiler.create({
@@ -319,9 +372,19 @@ router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res,
               clienteId:        data.clienteId,
               tuboId,
               entregaId:        entrega.id,
-              fechaInicio:      new Date(),
-              fechaVencimiento: new Date(data.fechaVencimiento),
-              estado:           'ACTIVO',
+              fechaInicio:      provisional,
+              fechaVencimiento: sumarDias(provisional, planAlquiler.diasIncluidos),
+              estado:           'PENDIENTE_ENTREGA',
+              planId:                 planAlquiler.id,
+              precioInicialAplicado:  planAlquiler.precioInicial,
+              precioMensualAplicado:  planAlquiler.precioMensual,
+              precioRecargaAplicado:  planAlquiler.precioRecargaDomicilio,
+              diasIncluidosAplicados: planAlquiler.diasIncluidos,
+              // Snapshot de ítems del plan, duplicado en cada contrato de la
+              // entrega (1 tubo = 1 equipo completo con su propio regulador, etc.).
+              items: itemsAlquilerSnapshot.length > 0
+                ? { create: itemsAlquilerSnapshot.map(i => ({ ...i })) }
+                : undefined,
             },
           })
         }
@@ -373,12 +436,22 @@ const confirmacionSchema = z.object({
   confirmados: z.array(z.string()).optional(), // Si no viene, se confirman todos
   metodoPago: z.enum(['EFECTIVO', 'TRANSFERENCIA', 'CREDITO', 'PENDIENTE']).optional(),
   montoRecibido: z.coerce.number().optional(),
+  // Solo ALQUILER: series/estado que carga el repartidor por cada ítem del
+  // equipo, y la nota general de verificación física. `itemId` referencia
+  // ItemAlquiler; series sin match se ignoran. Nada de esto bloquea la
+  // confirmación (serie "recomendada pero no obligatoria").
+  itemsAlquiler: z.array(z.object({
+    itemId:    z.string(),
+    serie:     z.string().optional(),
+    entregado: z.coerce.boolean().optional(),
+  })).optional(),
+  observacionEquipoAlquiler: z.string().max(2000).optional(),
 })
 
 router.put('/:id/confirmar', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR', 'REPARTIDOR'), async (req, res, next) => {
   try {
     const { id } = req.params
-    const { recambios, confirmados, metodoPago, montoRecibido } = confirmacionSchema.parse(req.body || {})
+    const { recambios, confirmados, metodoPago, montoRecibido, itemsAlquiler, observacionEquipoAlquiler } = confirmacionSchema.parse(req.body || {})
     const entrega = await prisma.entrega.findUnique({
       where: { id },
       include: { detalles: true }
@@ -611,12 +684,99 @@ router.put('/:id/confirmar', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR', 'REPA
         }
       }
 
-      // 4. Actualizar fecha de inicio/venta de los alquileres/ventas asociados a la fecha real de confirmación
+      // 4. Fecha de inicio real + activación del contrato + cargo INICIAL.
+      // El contrato nace PENDIENTE_ENTREGA (ver POST /entregas); recién acá,
+      // con la entrega confirmada en terreno, se conoce la fecha real y el
+      // cliente empieza a recibir efectivamente sus días incluidos.
       if (entrega.tipoOperacion === 'ALQUILER') {
-        await tx.alquiler.updateMany({
+        const alquileresAConfirmar = await tx.alquiler.findMany({
           where: { entregaId: id, tuboId: { in: confirmadosIds } },
-          data: { fechaInicio: new Date() }
         })
+
+        const fechaInicioReal = aMedianocheUTC(new Date())
+        // El pago ya recolectado en la confirmación se reparte entre los
+        // cargos INICIAL en orden (caso común: un solo tubo, cubre todo).
+        let montoRestante = Number(montoRecibido || 0)
+
+        for (const alq of alquileresAConfirmar) {
+          const dias = alq.diasIncluidosAplicados || 30
+          const primerPeriodoHasta = sumarDias(fechaInicioReal, dias)
+
+          const alqActualizado = await tx.alquiler.update({
+            where: { id: alq.id },
+            data: {
+              fechaInicio:       fechaInicioReal,
+              primerPeriodoHasta,
+              fechaVencimiento:  primerPeriodoHasta,
+              estado:            'ACTIVO',
+            },
+          })
+
+          const precioInicial = Number(alq.precioInicialAplicado || 0)
+          const pagadoEste = Math.max(0, Math.min(montoRestante, precioInicial))
+          montoRestante -= pagadoEste
+
+          await crearCargoInicial(tx, alqActualizado, {
+            montoPagado: pagadoEste,
+            metodoPago:  pagadoEste > 0 ? (metodoPago || entrega.metodoPago) : null,
+            fechaPago:   pagadoEste > 0 ? new Date() : null,
+            usuarioId:   req.user.id,
+          })
+
+          // Primer tubo del historial del contrato (ver ETAPA 2 — AlquilerTubo).
+          await asignarTuboInicial(tx, { alquilerId: alq.id, tuboId: alq.tuboId, fechaDesde: fechaInicioReal })
+
+          await tx.auditoria.create({
+            data: {
+              usuarioId: req.user.id,
+              accion: 'Contrato de alquiler activado (entrega confirmada)',
+              metadata: { alquilerId: alq.id, numero: alq.numero, entregaId: id, primerPeriodoHasta },
+            },
+          })
+        }
+
+        // Series/estado de los ítems del equipo que carga el repartidor + nota
+        // general de verificación física. Todo opcional: no bloquea la confirmación.
+        if (Array.isArray(itemsAlquiler) && itemsAlquiler.length > 0) {
+          for (const it of itemsAlquiler) {
+            const patch = {}
+            if (it.serie !== undefined) patch.serie = String(it.serie).trim() || null
+            if (it.entregado !== undefined) patch.entregado = !!it.entregado
+            if (Object.keys(patch).length === 0) continue
+            // El guard por entregaId evita tocar ítems de otra remisión aunque
+            // manden un itemId cualquiera.
+            await tx.itemAlquiler.updateMany({
+              where: { id: it.itemId, alquiler: { entregaId: id } },
+              data: patch,
+            })
+          }
+        }
+        if (observacionEquipoAlquiler !== undefined) {
+          await tx.entrega.update({
+            where: { id },
+            data: { observacionEquipoAlquiler: String(observacionEquipoAlquiler).trim() || null },
+          })
+        }
+
+        // El costo de delivery de la entrega no tiene fuente financiera propia
+        // una vez que la Entrega ALQUILER queda excluida de Movimiento de Dinero
+        // (ver movimientosDinero.js) — sin esto, ese monto desaparecía en
+        // silencio del reparto de montoRestante de arriba. Se registra como
+        // cargo propio (OTRO) contra el primer contrato de la entrega.
+        const costoDelivery = Number(entrega.costoDelivery || 0)
+        if (costoDelivery > 0 && alquileresAConfirmar.length > 0) {
+          const alqParaDelivery = await tx.alquiler.findUnique({ where: { id: alquileresAConfirmar[0].id } })
+          const pagadoDelivery = Math.max(0, Math.min(montoRestante, costoDelivery))
+          montoRestante -= pagadoDelivery
+
+          await crearCargoDelivery(tx, alqParaDelivery, {
+            monto: costoDelivery,
+            montoPagado: pagadoDelivery,
+            metodoPago: pagadoDelivery > 0 ? (metodoPago || entrega.metodoPago) : null,
+            fechaPago: pagadoDelivery > 0 ? new Date() : null,
+            usuarioId: req.user.id,
+          })
+        }
       }
 
       if (entrega.tipoOperacion === 'VENTA') {
@@ -838,9 +998,15 @@ router.post('/:id/agregar-tubo', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR', '
         finalUnidadGas = ultimaCarga.unidad
       }
 
+      // Mismo criterio que en POST /entregas: en ALQUILER el precio viene del
+      // plan (vía CargoAlquiler), no de gas × precio.
+      if (entrega.tipoOperacion === 'ALQUILER') {
+        precioUnitario = 0
+      }
+
       const cantNum = Number(finalCantidadGas || 0)
       const precNum = Number(precioUnitario || 0)
-      const subtotal = cantNum > 0 ? (cantNum * precNum) : precNum
+      const subtotal = entrega.tipoOperacion === 'ALQUILER' ? 0 : (cantNum > 0 ? (cantNum * precNum) : precNum)
 
       // 4. Crear el detalle de la entrega
       const nuevoDetalle = await tx.detalleEntrega.create({
@@ -891,9 +1057,19 @@ router.post('/:id/agregar-tubo', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR', '
 
       // 6. Crear alquiler o venta si corresponde
       if (entrega.tipoOperacion === 'ALQUILER') {
+        // Reusa el mismo plan que los demás tubos de esta entrega (todos los
+        // tubos de una entrega ALQUILER comparten plan). Sin esto, un tubo
+        // agregado en tránsito quedaría sin plan ni cargo inicial.
+        const alquilerHermano = await tx.alquiler.findFirst({
+          where: { entregaId: id },
+          include: { items: { orderBy: { orden: 'asc' } } },
+        })
+        if (!alquilerHermano?.planId) {
+          throw new Error('No se pudo determinar el plan de alquiler de esta entrega')
+        }
+
         const numeroAlquiler = await generarNumero('AL', tx)
-        const fechaVencimiento = new Date()
-        fechaVencimiento.setDate(fechaVencimiento.getDate() + 30) // 30 días de plazo por defecto
+        const provisional = aMedianocheUTC(new Date())
 
         await tx.alquiler.create({
           data: {
@@ -901,9 +1077,25 @@ router.post('/:id/agregar-tubo', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR', '
             clienteId: entrega.clienteId,
             tuboId,
             entregaId: id,
-            fechaInicio: new Date(),
-            fechaVencimiento,
-            estado: 'ACTIVO'
+            fechaInicio: provisional,
+            fechaVencimiento: sumarDias(provisional, alquilerHermano.diasIncluidosAplicados || 30),
+            estado: 'PENDIENTE_ENTREGA',
+            planId:                 alquilerHermano.planId,
+            precioInicialAplicado:  alquilerHermano.precioInicialAplicado,
+            precioMensualAplicado:  alquilerHermano.precioMensualAplicado,
+            precioRecargaAplicado:  alquilerHermano.precioRecargaAplicado,
+            diasIncluidosAplicados: alquilerHermano.diasIncluidosAplicados,
+            // Mismo detalle de ítems que el resto de la entrega (sin las series
+            // que ya se hayan cargado en los hermanos: el repartidor las carga
+            // por contrato al confirmar).
+            items: alquilerHermano.items.length > 0
+              ? { create: alquilerHermano.items.map(i => ({
+                  descripcion: i.descripcion,
+                  cantidad:    i.cantidad,
+                  serializado: i.serializado,
+                  orden:       i.orden,
+                })) }
+              : undefined,
           }
         })
       }

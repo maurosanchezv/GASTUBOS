@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import api from '../services/api.js'
 import { PageHeader, Spinner, GasDot, EmptyState, formatCapacidad, ObservacionCell } from '../components/ui.jsx'
+import { precioFilaDetalle, subtotalItemsTicket, totalTicket } from '../utils/ticketMontos.js'
 
 const gs = (v) => `${Number(v || 0).toLocaleString('es-PY')} Gs`
 const cap = (t) => formatCapacidad(t)
@@ -75,6 +76,81 @@ function Linea({ label, value, bold }) {
   )
 }
 
+// Bloque "Detalle del plan de alquiler" — solo para remisiones tipo ALQUILER.
+// Muestra el plan contratado, el desglose de ítems/equipos de cada contrato
+// (con su nº de serie) y la nota de estado del equipo.
+function BloquePlanAlquiler({ entrega }) {
+  const alquileres = (entrega.alquileres || []).filter(a => a.estado !== 'CANCELADO')
+  if (alquileres.length === 0) return null
+  const plan = alquileres[0].plan
+  const variosContratos = alquileres.length > 1
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card-header">
+        <div className="card-title">Detalle del plan de alquiler</div>
+      </div>
+
+      <div className="form-grid">
+        <Campo label="Tipo de operación" value="Alquiler / Entrega de alquiler" />
+        <Campo label="Plan contratado" value={plan?.nombre || '—'} />
+      </div>
+
+      {alquileres.map((a, idx) => {
+        const items = (a.items || []).slice().sort((x, y) => (x.orden ?? 0) - (y.orden ?? 0))
+        return (
+          <div key={a.id} style={{ marginTop: idx === 0 ? 10 : 14 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>
+              {variosContratos ? `Equipo ${idx + 1} · ` : ''}Contrato <span style={{ fontFamily: 'var(--font-mono)' }}>{a.numero}</span>
+              {' · '}Cilindro <span style={{ fontFamily: 'var(--font-mono)' }}>{a.tuboId}</span>
+            </div>
+            {items.length === 0 ? (
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Sin ítems registrados en el plan.</div>
+            ) : (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Descripción</th>
+                      <th style={{ textAlign: 'center', width: 60 }}>Cant.</th>
+                      <th style={{ width: '38%' }}>Serie / código</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map(it => (
+                      <tr key={it.id} style={{ opacity: it.entregado === false ? 0.5 : 1 }}>
+                        <td>
+                          {it.descripcion}
+                          {it.entregado === false && <span style={{ fontSize: 10, color: 'var(--red)', marginLeft: 6 }}>no entregado</span>}
+                        </td>
+                        <td style={{ textAlign: 'center' }}>{it.cantidad}</td>
+                        <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>
+                          {it.serie
+                            ? it.serie
+                            : (it.serializado
+                                ? <span style={{ color: 'var(--text-muted)', fontFamily: 'inherit' }}>pendiente</span>
+                                : <span style={{ color: 'var(--text-muted)', fontFamily: 'inherit' }}>—</span>)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )
+      })}
+
+      {entrega.observacionEquipoAlquiler && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, marginBottom: 3 }}>Estado / verificación del equipo</div>
+          <div style={{ fontSize: 13 }}>{entrega.observacionEquipoAlquiler}</div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function RemisionPage() {
   const { numero } = useParams()
   const navigate = useNavigate()
@@ -115,8 +191,9 @@ export default function RemisionPage() {
 
   const detalles = entrega.detalles || []
   const recambios = entrega.recambios || []
-  const subtotalTubos = detalles.reduce((acc, d) => acc + Number(d.subtotal || 0), 0)
-  const total = subtotalTubos + Number(entrega.costoDelivery || 0)
+  const esAlquiler = entrega.tipoOperacion === 'ALQUILER'
+  const subtotalTubos = subtotalItemsTicket(entrega)
+  const total = totalTicket(entrega)
 
   return (
     <>
@@ -192,7 +269,7 @@ export default function RemisionPage() {
                               <td><GasDot gas={d.tubo?.gas} /> {d.tubo?.gas}</td>
                               <td>{cap(d.tubo)}</td>
                               <td style={{ textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap' }}>{formatNumberSpanish(d.cantidadGas)} {d.unidadGas}</td>
-                              <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>{gs(d.subtotal)}</td>
+                              <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>{gs(precioFilaDetalle(entrega, d))}</td>
                             </tr>
                           );
                         })}
@@ -218,7 +295,7 @@ export default function RemisionPage() {
                               </div>
                               {showSerie && <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>Nro: {d.tubo.serie}</div>}
                             </div>
-                            <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 13 }}>{gs(d.subtotal)}</span>
+                            <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 13 }}>{gs(precioFilaDetalle(entrega, d))}</span>
                           </div>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', fontSize: 12, color: 'var(--text-secondary)' }}>
                             <span><GasDot gas={d.tubo?.gas} /> {d.tubo?.gas}</span>
@@ -232,6 +309,11 @@ export default function RemisionPage() {
                 </>
               )}
             </div>
+
+            {/* Detalle del plan de alquiler */}
+            {entrega.tipoOperacion === 'ALQUILER' && (
+              <BloquePlanAlquiler entrega={entrega} />
+            )}
 
             {/* Recambios recibidos */}
             {recambios.length > 0 && (
@@ -267,7 +349,7 @@ export default function RemisionPage() {
                 <Linea label={entrega.canal === 'SALON' ? 'Atendido por' : 'Chofer'} value={entrega.repartidor?.nombre || 'Sin asignar'} />
                 <Linea label="Cilindros" value={String(detalles.length)} />
                 <div style={{ borderTop: '1px solid var(--border)', margin: '2px 0' }} />
-                <Linea label="Subtotal" value={gs(subtotalTubos)} />
+                <Linea label={esAlquiler ? 'Pago inicial plan' : 'Subtotal'} value={gs(subtotalTubos)} />
                 <Linea label="Delivery" value={gs(entrega.costoDelivery)} />
                 <div style={{ borderTop: '1px solid var(--border-mid)', paddingTop: 10 }}>
                   <Linea label="TOTAL" value={gs(total)} bold />

@@ -113,6 +113,47 @@ async function main() {
     })
   }
 
+  // ── Planes de Alquiler ─────────────────────────────────────────────────────
+  // update: {} a propósito (igual que usuarios/clientes/tubos arriba): si un
+  // admin ya editó precios desde el panel, correr el seed de nuevo no se los pisa.
+  // items: plantilla de equipos que se precarga en la remisión de alquiler.
+  // Ajustable después desde /planes-alquiler — estos son valores de arranque.
+  const planesData = [
+    { codigo: 'CHICO',   nombre: 'Equipo Chico',   precioInicial: 400000, diasIncluidos: 30, precioMensual: 250000, precioRecargaDomicilio: 100000,
+      items: [
+        { descripcion: 'Cilindro de oxígeno (equipo chico)', cantidad: 1, serializado: true,  orden: 0 },
+        { descripcion: 'Regulador con flujómetro',           cantidad: 1, serializado: false, orden: 1 },
+        { descripcion: 'Vaso humidificador',                 cantidad: 1, serializado: false, orden: 2 },
+      ] },
+    { codigo: 'MEDIANO', nombre: 'Equipo Mediano', precioInicial: 500000, diasIncluidos: 30, precioMensual: 250000, precioRecargaDomicilio: 150000,
+      items: [
+        { descripcion: 'Cilindro de oxígeno (equipo mediano)', cantidad: 1, serializado: true,  orden: 0 },
+        { descripcion: 'Regulador con flujómetro',             cantidad: 1, serializado: false, orden: 1 },
+        { descripcion: 'Vaso humidificador',                   cantidad: 1, serializado: false, orden: 2 },
+      ] },
+    { codigo: 'GRANDE',  nombre: 'Equipo Grande',  precioInicial: 600000, diasIncluidos: 30, precioMensual: 250000, precioRecargaDomicilio: 260000,
+      items: [
+        { descripcion: 'Cilindro de oxígeno (equipo grande)', cantidad: 1, serializado: true,  orden: 0 },
+        { descripcion: 'Regulador con flujómetro',            cantidad: 1, serializado: false, orden: 1 },
+        { descripcion: 'Vaso humidificador',                  cantidad: 1, serializado: false, orden: 2 },
+        { descripcion: 'Carrito de transporte',               cantidad: 1, serializado: false, orden: 3 },
+      ] },
+  ]
+  for (const p of planesData) {
+    const { items, ...planFields } = p
+    const plan = await prisma.planAlquiler.upsert({
+      where:  { codigo: p.codigo },
+      update: {},
+      create: { ...planFields, descripcion: 'Tubo de oxígeno cargado + regulador + accesorios. Incluye 30 días de alquiler.' },
+    })
+    // Solo sembramos ítems si el plan todavía no tiene ninguno (no pisa una
+    // lista ya ajustada por un admin desde el panel).
+    const yaTiene = await prisma.planAlquilerItem.count({ where: { planId: plan.id } })
+    if (yaTiene === 0) {
+      await prisma.planAlquilerItem.createMany({ data: items.map(i => ({ ...i, planId: plan.id })) })
+    }
+  }
+
   console.log('✅ Seed completo.')
   console.log('   👤 Admin:      admin / admin1234')
   console.log('   👤 Operador:   operador1 / operador123')

@@ -7,13 +7,15 @@ import { useState, useEffect } from 'react'
 import api from '../services/api.js'
 import { GasDot, StateBadge } from './ui.jsx'
 
-export default function TuboChip({ tuboId, detail, onChange, onRemove }) {
+export default function TuboChip({ tuboId, detail, onChange, onRemove, esAlquiler = false }) {
   const [tubo, setTubo] = useState(null)
   useEffect(() => {
     api.get(`/tubos/${tuboId}`).then(r => setTubo(r.data)).catch(() => {})
   }, [tuboId])
 
-  const esPrecioEditable = tubo?.estado === 'DISPONIBLE'
+  // En ALQUILER el precio viene del plan (pago inicial fijo), no de gas ×
+  // precio unitario — el backend ya lo fuerza a 0, acá solo reflejamos eso.
+  const esPrecioEditable = !esAlquiler && tubo?.estado === 'DISPONIBLE'
   const cant = Number(detail?.cantidadGas || 0)
   const prec = Number(detail?.precioUnitario || 0)
   const subtotal = cant > 0 ? (cant * prec) : prec
@@ -132,7 +134,7 @@ export default function TuboChip({ tuboId, detail, onChange, onRemove }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>SUBTOTAL:</span>
           <span style={{ fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--blue)' }}>
-            {subtotal.toLocaleString('es-PY')} Gs
+            {esAlquiler ? 'Incluido en el plan' : `${subtotal.toLocaleString('es-PY')} Gs`}
           </span>
         </div>
       </div>
