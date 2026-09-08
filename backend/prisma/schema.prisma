@@ -270,6 +270,7 @@ model Tubo {
   alquilerTubos              AlquilerTubo[]
   ordenesRecargaComoActual   OrdenRecargaAlquiler[] @relation("OrdenRecargaTuboActual")
   ordenesRecargaComoNuevo    OrdenRecargaAlquiler[] @relation("OrdenRecargaTuboNuevo")
+  ordenesRecargaComoOrigen   OrdenRecargaAlquiler[] @relation("OrdenRecargaTuboOrigen")
 
   @@map("tubos")
 }
@@ -565,6 +566,13 @@ model OrdenRecargaAlquiler {
   camionId     String?
   camion       Camion?  @relation(fields: [camionId], references: [id])
 
+  // Descuento opcional del stock de gas del camión al completar una
+  // RECARGA_MISMO_TUBO: de qué tubo RESERVADO salió el gas y cuántos kg/m³.
+  // Null cuando el repartidor cargó de una fuente no trazada (o en recambios).
+  tuboOrigenId         String?
+  tuboOrigen           Tubo?    @relation("OrdenRecargaTuboOrigen", fields: [tuboOrigenId], references: [id])
+  cantidadGasRecargada Decimal? @db.Decimal(10, 3)
+
   tipoServicio TipoServicioRecarga
   estado       EstadoOrdenRecarga  @default(SOLICITADA)
   // Snapshot del contrato (Alquiler.precioRecargaAplicado) al momento de
@@ -598,6 +606,7 @@ model OrdenRecargaAlquiler {
   @@index([alquilerId])
   @@index([estado])
   @@index([repartidorId])
+  @@index([tuboOrigenId])
   @@map("ordenes_recarga_alquiler")
 }
 

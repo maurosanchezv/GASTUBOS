@@ -19,19 +19,25 @@ router.use(requireAuth)
 const ESTADOS_ASIGNABLES_REPARTIDOR = ['ASIGNADA', 'EN_RUTA', 'EN_SERVICIO']
 
 const INCLUDE_DETALLE = {
-  cliente: { select: { id: true, nombre: true, telefono: true } },
-  tubo: { select: { id: true, gas: true, estado: true } },
+  cliente: { select: { id: true, nombre: true, telefono: true, ruc: true } },
+  tubo: { select: { id: true, gas: true, estado: true, capacidadKg: true } },
   tuboNuevo: { select: { id: true, gas: true } },
+  tuboOrigen: { select: { id: true, gas: true } },
   repartidor: { select: { id: true, nombre: true, username: true } },
   camion: { select: { id: true, placa: true } },
   alquiler: { select: { id: true, numero: true, plan: { select: { codigo: true, nombre: true } } } },
   cargoAlquiler: true,
 }
 
-// ─── POST /api/recargas-alquiler — solicitar ──────────────────────────────
+// ─── POST /api/recargas-alquiler — solicitar (con chofer obligatorio) ─────
+// La solicitud y la asignación al repartidor ocurren en un solo paso/tx: la
+// orden nace directamente en estado ASIGNADA. El panel de Recargas de Alquiler
+// queda solo para seguimiento/cancelación y para reasignar órdenes viejas.
 const solicitarSchema = z.object({
   alquilerId: z.string().min(1),
   tipoServicio: z.enum(['RECARGA_MISMO_TUBO', 'RECAMBIO_TUBO']),
+  repartidorId: z.string().min(1),
+  camionId: z.string().optional(),
   fechaProgramada: z.string().datetime().optional(),
   observaciones: z.string().optional(),
 })
@@ -47,6 +53,19 @@ router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res,
     if (!alquiler) return res.status(404).json({ error: 'Alquiler no encontrado' })
     if (alquiler.estado !== 'ACTIVO') {
       return res.status(400).json({ error: 'Solo se puede solicitar una recarga para un contrato ACTIVO' })
+    }
+
+    const repartidor = await prisma.usuario.findUnique({ where: { id: data.repartidorId } })
+    if (!repartidor || repartidor.rol !== 'REPARTIDOR') {
+      return res.status(400).json({ error: 'El usuario indicado no es un repartidor válido' })
+    }
+
+    // Si no se indica camión explícito, se reutiliza el que el repartidor ya
+    // tiene seleccionado (ver POST /camiones/:id/seleccionar).
+    let camionId = data.camionId || null
+    if (!camionId) {
+      const camionActual = await prisma.camion.findFirst({ where: { repartidorActualId: data.repartidorId } })
+      camionId = camionActual?.id || null
     }
 
     // Dirección real de la entrega (donde está el equipo) si existe; si no,
@@ -65,7 +84,10 @@ router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res,
           clienteId: alquiler.clienteId,
           tuboId: alquiler.tuboId,
           tipoServicio: data.tipoServicio,
-          estado: 'SOLICITADA',
+          estado: 'ASIGNADA',
+          repartidorId: data.repartidorId,
+          camionId,
+          fechaAsignacion: new Date(),
           precioAplicado: alquiler.precioRecargaAplicado || 0,
           direccion, latitud, longitud,
           fechaProgramada: data.fechaProgramada ? new Date(data.fechaProgramada) : null,
@@ -78,8 +100,8 @@ router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res,
       await tx.auditoria.create({
         data: {
           usuarioId: req.user.id,
-          accion: 'Recarga de alquiler solicitada',
-          metadata: { ordenRecargaId: nueva.id, numero, alquilerId: alquiler.id, tipoServicio: data.tipoServicio },
+          accion: 'Recarga de alquiler solicitada y asignada',
+          metadata: { ordenRecargaId: nueva.id, numero, alquilerId: alquiler.id, tipoServicio: data.tipoServicio, repartidorId: data.repartidorId, camionId },
         },
       })
 
@@ -116,6 +138,34 @@ router.get('/mis-asignaciones', requireRol('REPARTIDOR'), async (req, res, next)
       where: { repartidorId: req.user.id, estado: { in: ESTADOS_ASIGNABLES_REPARTIDOR } },
       include: INCLUDE_DETALLE,
       orderBy: { fechaAsignacion: 'asc' },
+    })
+    res.json(ordenes)
+  } catch (err) { next(err) }
+})
+
+// ─── GET /api/recargas-alquiler/mis-historial — historial del repartidor ──
+// Órdenes completadas del repartidor logueado, por rango de fechas. Alimenta la
+// pestaña "Historial" del reparto, junto a las entregas confirmadas y las
+// ventas en camión. (Las canceladas se ven en el panel admin de Recargas.)
+router.get('/mis-historial', requireRol('REPARTIDOR', 'ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
+  try {
+    const { desde, hasta, repartidorId } = req.query
+    const where = { estado: 'COMPLETADA' }
+
+    if (req.user.rol === 'REPARTIDOR') where.repartidorId = req.user.id
+    else if (repartidorId) where.repartidorId = repartidorId
+
+    if (desde || hasta) {
+      where.fechaFinalizacion = {}
+      if (desde) where.fechaFinalizacion.gte = new Date(desde)
+      if (hasta) where.fechaFinalizacion.lte = new Date(hasta)
+    }
+
+    const ordenes = await prisma.ordenRecargaAlquiler.findMany({
+      where,
+      include: INCLUDE_DETALLE,
+      orderBy: { fechaFinalizacion: 'desc' },
+      take: 200,
     })
     res.json(ordenes)
   } catch (err) { next(err) }
@@ -227,6 +277,10 @@ const completarSchema = z.object({
   tuboNuevoId: z.string().optional(),      // requerido si RECAMBIO_TUBO
   metodoPago: z.enum(['EFECTIVO', 'TRANSFERENCIA']).optional(),
   montoPagado: z.coerce.number().nonnegative().optional().default(0),
+  // Descuento opcional del stock de gas del camión (solo RECARGA_MISMO_TUBO).
+  descontarCamion: z.coerce.boolean().optional().default(false),
+  tuboOrigenId: z.string().optional(),
+  cantidadGas: z.coerce.number().nonnegative().optional().default(0),
 })
 
 router.post('/:id/completar', requireRol('REPARTIDOR', 'ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
@@ -242,6 +296,9 @@ router.post('/:id/completar', requireRol('REPARTIDOR', 'ADMIN', 'SUPERVISOR', 'O
     if (data.montoPagado > 0 && !data.metodoPago) {
       return res.status(400).json({ error: 'Indicá la forma de pago si vas a registrar un cobro' })
     }
+    if (data.descontarCamion && (!data.tuboOrigenId || !(data.cantidadGas > 0))) {
+      return res.status(400).json({ error: 'Para descontar del camión indicá el tubo de origen y la cantidad de gas' })
+    }
 
     let resultado
     try {
@@ -251,6 +308,9 @@ router.post('/:id/completar', requireRol('REPARTIDOR', 'ADMIN', 'SUPERVISOR', 'O
         tuboNuevoId: data.tuboNuevoId,
         metodoPago: data.montoPagado > 0 ? data.metodoPago : null,
         montoPagado: data.montoPagado,
+        descontarCamion: data.descontarCamion,
+        tuboOrigenId: data.tuboOrigenId,
+        cantidadGas: data.cantidadGas,
       }))
     } catch (err) {
       if (err instanceof ErrorOrdenRecarga) return res.status(err.status).json({ error: err.message })

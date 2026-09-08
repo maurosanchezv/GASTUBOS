@@ -27,6 +27,13 @@ export async function completarOrdenRecarga(tx, {
   tuboNuevoId,      // requerido solo para RECAMBIO_TUBO
   metodoPago,       // 'EFECTIVO' | 'TRANSFERENCIA' | null (no cobrado)
   montoPagado = 0,
+  // Descuento opcional del stock de gas del camión (solo RECARGA_MISMO_TUBO):
+  // el repartidor rellenó el tubo del cliente con gas de un tubo RESERVADO de
+  // su camión. No cambia el monto que se cobra (ese sigue siendo el precio del
+  // contrato) — es puramente movimiento de inventario, en espejo de venta-camion.
+  descontarCamion = false,
+  tuboOrigenId,     // tubo RESERVADO del camión del que sale el gas
+  cantidadGas = 0,  // kg/m³ a descontar de tuboOrigen.cantidadActual
 }) {
   const orden = await tx.ordenRecargaAlquiler.findUnique({
     where: { id: ordenId },
@@ -41,6 +48,10 @@ export async function completarOrdenRecarga(tx, {
   }
   if (orden.estado === 'CANCELADA') {
     throw new ErrorOrdenRecarga('Esta orden está cancelada', 400)
+  }
+
+  if (descontarCamion && orden.tipoServicio !== 'RECARGA_MISMO_TUBO') {
+    throw new ErrorOrdenRecarga('El descuento de gas del camión solo aplica a la recarga del mismo tubo', 400)
   }
 
   const fechaFinalizacion = new Date()
@@ -62,6 +73,7 @@ export async function completarOrdenRecarga(tx, {
 
   let tuboViejo = null
   let tuboNuevo = null
+  let descuentoCamion = null
 
   if (orden.tipoServicio === 'RECAMBIO_TUBO') {
     if (!tuboNuevoId) throw new ErrorOrdenRecarga('Falta indicar el tubo nuevo para el recambio', 400)
@@ -147,6 +159,65 @@ export async function completarOrdenRecarga(tx, {
         metadata: { ordenRecargaId: orden.id, numero: orden.numero, alquilerId: orden.alquilerId },
       },
     })
+
+    // Descuento opcional del stock del camión — mismo mecanismo que
+    // POST /cargas/venta-camion: valida el tubo origen, descuenta cantidadActual
+    // y, si se agota, saca el tubo del camión y lo deja VACIO.
+    if (descontarCamion) {
+      const cant = Number(cantidadGas)
+      if (!tuboOrigenId) throw new ErrorOrdenRecarga('Indicá de qué tubo del camión sale el gas', 400)
+      if (!(cant > 0)) throw new ErrorOrdenRecarga('La cantidad de gas a descontar debe ser mayor a 0', 400)
+
+      const tuboOrigen = await tx.tubo.findUnique({ where: { id: tuboOrigenId, activo: true } })
+      if (!tuboOrigen) throw new ErrorOrdenRecarga('Tubo origen no encontrado o inactivo', 404)
+      if (tuboOrigen.estado !== 'RESERVADO') {
+        throw new ErrorOrdenRecarga(`El tubo ${tuboOrigenId} no está cargado en un camión (estado: ${tuboOrigen.estado})`, 400)
+      }
+      // El gas tiene que salir del camión asignado a la orden.
+      if (orden.camionId && tuboOrigen.camionId !== orden.camionId) {
+        throw new ErrorOrdenRecarga('Ese tubo no está en el camión asignado a esta orden', 400)
+      }
+      const disponible = Number(tuboOrigen.cantidadActual || 0)
+      if (disponible <= 0) throw new ErrorOrdenRecarga('El tubo del camión no tiene gas disponible', 400)
+      if (cant > disponible) {
+        throw new ErrorOrdenRecarga(`Solo quedan ${disponible} disponibles en el tubo ${tuboOrigenId}`, 400)
+      }
+
+      const restante = disponible - cant
+      const seAgota = restante <= 0
+
+      const tuboOrigenActualizado = await tx.tubo.update({
+        where: { id: tuboOrigenId },
+        data: seAgota
+          ? { cantidadActual: 0, estado: 'VACIO', camionId: null, ubicacion: 'Depósito' }
+          : { cantidadActual: restante },
+      })
+
+      await tx.auditoria.create({
+        data: {
+          tuboId: tuboOrigenId, usuarioId,
+          accion: 'Recarga de alquiler: gas descontado del camión',
+          estadoAnterior: seAgota ? 'RESERVADO' : null,
+          estadoNuevo: seAgota ? 'VACIO' : null,
+          metadata: {
+            ordenRecargaId: orden.id, numero: orden.numero, alquilerId: orden.alquilerId,
+            tuboClienteId: orden.tuboId, cantidad: cant, restante: seAgota ? 0 : restante,
+          },
+        },
+      })
+
+      descuentoCamion = { tuboOrigen: tuboOrigenActualizado, cantidad: cant, restante: seAgota ? 0 : restante, seAgota }
+    }
+
+    // Persiste el descuento (o lo deja en null si no se aplicó) para el ticket
+    // y el historial del repartidor.
+    await tx.ordenRecargaAlquiler.update({
+      where: { id: ordenId },
+      data: {
+        tuboOrigenId: descontarCamion ? tuboOrigenId : null,
+        cantidadGasRecargada: descontarCamion ? Number(cantidadGas) : null,
+      },
+    })
   }
 
   // Cobro: un CargoAlquiler propio (RECARGA_DOMICILIO), pagado en el momento
@@ -171,7 +242,7 @@ export async function completarOrdenRecarga(tx, {
     },
   })
 
-  return { orden: await tx.ordenRecargaAlquiler.findUnique({ where: { id: ordenId } }), cargo, tuboViejo, tuboNuevo }
+  return { orden: await tx.ordenRecargaAlquiler.findUnique({ where: { id: ordenId } }), cargo, tuboViejo, tuboNuevo, descuentoCamion }
 }
 
 export async function cancelarOrdenRecarga(tx, { ordenId, motivo, usuarioId }) {
