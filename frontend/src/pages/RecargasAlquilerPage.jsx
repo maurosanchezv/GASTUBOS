@@ -9,6 +9,14 @@ import { PageHeader, Spinner, EmptyState, useToast } from '../components/ui.jsx'
 
 const gs = (val) => Number(val || 0).toLocaleString('es-PY') + ' Gs'
 const fecha = (val) => val ? new Date(val).toLocaleString('es-PY') : '—'
+// fechaProgramada es una fecha sin hora (viene de un <input type="date">): se
+// formatea en UTC para mostrar siempre el día que se eligió, sin corrimiento
+// por zona horaria.
+const fechaDia = (val) => {
+  if (!val) return null
+  const d = new Date(val)
+  return `${d.getUTCDate()}/${d.getUTCMonth() + 1}/${d.getUTCFullYear()}`
+}
 
 const ESTADO_BADGE = {
   SOLICITADA: 'PENDIENTE', ASIGNADA: 'PENDIENTE', EN_RUTA: 'PARCIAL', EN_SERVICIO: 'PARCIAL',
@@ -78,7 +86,7 @@ export default function RecargasAlquilerPage() {
                   <thead>
                     <tr>
                       <th>Nro</th><th>Cliente</th><th>Contrato</th><th>Plan</th><th>Tipo</th><th>Tubo</th>
-                      <th>Fecha</th><th>Repartidor</th><th>Camión</th><th>Monto</th><th>Estado</th><th></th>
+                      <th>Solicitada</th><th>Repartidor</th><th>Camión</th><th>Monto</th><th>Estado</th><th></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -90,7 +98,12 @@ export default function RecargasAlquilerPage() {
                         <td>{o.alquiler?.plan?.nombre || '—'}</td>
                         <td style={{ fontSize: 11 }}>{o.tipoServicio.replace(/_/g, ' ')}</td>
                         <td className="td-code">{o.tubo?.id}</td>
-                        <td style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{fecha(o.fechaProgramada || o.fechaSolicitud)}</td>
+                        <td style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                          {fecha(o.fechaSolicitud)}
+                          {o.fechaProgramada && (
+                            <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Prog: {fechaDia(o.fechaProgramada)}</div>
+                          )}
+                        </td>
                         <td style={{ fontSize: 11 }}>{o.repartidor?.nombre || o.repartidor?.username || '—'}</td>
                         <td style={{ fontSize: 11 }}>{o.camion?.placa || '—'}</td>
                         <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{gs(o.precioAplicado)}</td>

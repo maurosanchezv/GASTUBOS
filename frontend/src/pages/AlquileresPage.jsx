@@ -174,7 +174,9 @@ export default function AlquileresPage() {
         tipoServicio: formRecarga.tipoServicio,
         repartidorId: formRecarga.repartidorId,
         camionId: formRecarga.camionId || undefined,
-        fechaProgramada: formRecarga.fechaProgramada ? new Date(formRecarga.fechaProgramada).toISOString() : undefined,
+        // 'T12:00:00' (mediodía local) para que ninguna zona horaria mueva la
+        // fecha elegida al día anterior/siguiente al convertir a ISO/UTC.
+        fechaProgramada: formRecarga.fechaProgramada ? new Date(formRecarga.fechaProgramada + 'T12:00:00').toISOString() : undefined,
         observaciones: formRecarga.observaciones || undefined,
       })
       toast('Recarga solicitada y asignada correctamente', 'success')
