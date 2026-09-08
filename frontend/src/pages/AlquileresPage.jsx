@@ -260,8 +260,8 @@ export default function AlquileresPage() {
               <table>
                 <thead>
                   <tr>
-                    <th>Nro</th><th>Cliente</th><th>Plan</th><th>Tubo</th><th>Inicio</th>
-                    <th>Próximo cobro</th><th>Mensualidad</th><th>Saldo</th>
+                    <th>Nro</th><th>Cliente</th><th>Plan</th>
+                    <th>Próximo cobro</th><th>Saldo</th>
                     <th>Contrato</th><th>Financiero</th><th></th>
                   </tr>
                 </thead>
@@ -273,12 +273,9 @@ export default function AlquileresPage() {
                         <td className="td-code" style={{ color: 'var(--blue)' }}>{a.numero}</td>
                         <td style={{ fontWeight: 500 }}>{a.cliente?.nombre}</td>
                         <td>{a.plan?.nombre || <span style={{ color: 'var(--text-muted)' }}>Legacy</span>}</td>
-                        <td className="td-code">{a.tubo?.id}</td>
-                        <td style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{fecha(a.fechaInicio)}</td>
                         <td style={{ fontSize: 11, color: alerta.color, fontWeight: alerta.label ? 700 : 400 }} title={alerta.label || ''}>
                           {fecha(a.fechaVencimiento)}
                         </td>
-                        <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{a.precioMensualAplicado ? gs(a.precioMensualAplicado) : '—'}</td>
                         <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: a.saldoPendiente > 0 ? 'var(--red)' : 'inherit', fontWeight: a.saldoPendiente > 0 ? 700 : 400 }}>
                           {gs(a.saldoPendiente)}
                         </td>
@@ -324,18 +321,10 @@ export default function AlquileresPage() {
                         <span className="list-card-value">{a.plan?.nombre || 'Legacy'}</span>
                       </div>
                       <div className="list-card-item">
-                        <span className="list-card-label">Tubo</span>
-                        <span className="list-card-value">{a.tubo?.id || '—'}</span>
-                      </div>
-                      <div className="list-card-item">
                         <span className="list-card-label">Próximo cobro</span>
                         <span className="list-card-value" style={{ color: alerta.color, fontWeight: alerta.label ? 700 : 500 }}>
                           {fecha(a.fechaVencimiento)}
                         </span>
-                      </div>
-                      <div className="list-card-item">
-                        <span className="list-card-label">Mensualidad</span>
-                        <span className="list-card-value">{a.precioMensualAplicado ? gs(a.precioMensualAplicado) : '—'}</span>
                       </div>
                       <div className="list-card-item">
                         <span className="list-card-label">Saldo</span>
