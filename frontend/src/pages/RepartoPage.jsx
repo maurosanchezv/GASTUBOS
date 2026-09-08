@@ -8,7 +8,7 @@ import { useConfigStore } from '../store/configStore.js'
 import { PageHeader, Spinner, EmptyState, StateBadge, Modal, formatCapacidad, formatUnidadGas, ObservacionCell } from '../components/ui.jsx'
 import { useToast } from '../components/ui.jsx'
 import { LOGO_TUBOS_SVG, LOGO_PMS_SVG, getBrandingSources } from '../utils/logosSvg.js'
-import { formatNumberSpanish, getObservacionesLimpias, construirBufferTicketEntrega, construirBufferTicketVentaCamion } from '../utils/ticketsImpresion.js'
+import { formatNumberSpanish, getObservacionesLimpias, construirBufferTicketEntrega, construirBufferTicketVentaCamion, construirBufferTicketRecargaAlquiler } from '../utils/ticketsImpresion.js'
 import { conectarImpresoraWebBluetooth, enviarBufferWebBluetooth, esNavegadorMovilConWebBluetooth } from '../utils/webBluetoothPrinter.js'
 import PlanAlquilerTicketBlock from '../components/PlanAlquilerTicketBlock.jsx'
 import { precioFilaDetalle, totalTicket } from '../utils/ticketMontos.js'
@@ -274,6 +274,7 @@ export default function RepartoPage() {
       buscarImpresoras()
     } else if (esNavegadorMovilConWebBluetooth()) {
       if (tipo === 'entrega') imprimirEntregaWebBluetooth(datos)
+      else if (tipo === 'recarga_alquiler') imprimirRecargaAlquilerWebBluetooth(datos)
       else imprimirVentaCamionWebBluetooth(datos)
     } else {
       // Desktop sigue usando el diálogo del sistema como siempre. Solo en
@@ -288,6 +289,7 @@ export default function RepartoPage() {
 
   const handlePrintClick = (entrega) => {
     setVentaParaImprimir(null)
+    setRecargaParaImprimir(null)
     setEntregaParaImprimir(entrega)
     setModalDetalle(false) // Close the detail modal first to avoid overlay conflict
     setTimeout(() => dispararImpresion('entrega', entrega), 150)
@@ -355,8 +357,10 @@ export default function RepartoPage() {
   const [recargasAsignadas, setRecargasAsignadas] = useState([])
   const [iniciandoRecargaId, setIniciandoRecargaId] = useState(null)
   const [modalCompletarRecarga, setModalCompletarRecarga] = useState(null) // orden
-  const [formCompletarRecarga, setFormCompletarRecarga] = useState({ tuboNuevoId: '', cobrar: true, metodoPago: 'EFECTIVO', montoPagado: '' })
+  const [formCompletarRecarga, setFormCompletarRecarga] = useState({ tuboNuevoId: '', cobrar: true, metodoPago: 'EFECTIVO', montoPagado: '', descontarCamion: false, tuboOrigenId: '', cantidadGas: '' })
   const [completandoRecarga, setCompletandoRecarga] = useState(false)
+  const [stockCamionRecarga, setStockCamionRecarga] = useState([]) // tubos RESERVADO del camión de la orden
+  const [recargaParaImprimir, setRecargaParaImprimir] = useState(null)
 
   const totalIds = activeEntrega?.detalles?.map(d => d.tuboId) || []
   const todosListos = totalIds.length > 0 && totalIds.every(id => scannedIds.includes(id))
@@ -400,24 +404,28 @@ export default function RepartoPage() {
       const hastaParam = rango.hasta ? `&hasta=${rango.hasta}` : ''
       // Promise.allSettled en vez de Promise.all: con señal débil en ruta,
       // que falle uno de los 3 pedidos no debe borrar los que sí llegaron bien.
-      const [resConf, resCanc, resCargasCamion] = await Promise.allSettled([
+      const hastaRecarga = rango.hasta ? `&hasta=${rango.hasta}` : ''
+      const [resConf, resCanc, resCargasCamion, resRecargas] = await Promise.allSettled([
         api.get(`/entregas?confirmada=true&desde=${rango.desde}${hastaParam}&limit=100${queryParams}`),
         api.get(`/entregas?cancelada=true&desde=${rango.desde}${hastaParam}&limit=100${queryParams}`),
         // Admin/Supervisor ven las cargas en camión de todos los repartidores,
         // igual que ya ven las entregas de todos (sin filtrar por operadorId).
         api.get(`/cargas?tipoCarga=CAMION${user.rol === 'REPARTIDOR' ? `&operadorId=${user.id}` : ''}&desde=${rango.desde}${hastaParam}&limit=100`),
+        api.get(`/recargas-alquiler/mis-historial?desde=${rango.desde}${hastaRecarga}`),
       ])
-      if (resConf.status === 'rejected' && resCanc.status === 'rejected' && resCargasCamion.status === 'rejected') {
+      if (resConf.status === 'rejected' && resCanc.status === 'rejected' && resCargasCamion.status === 'rejected' && resRecargas.status === 'rejected') {
         setHistorialHoy(safeParseJSON(cacheKey))
         return
       }
       const entregasConf = resConf.status === 'fulfilled' ? (resConf.value.data.entregas || []) : []
       const entregasCanc = resCanc.status === 'fulfilled' ? (resCanc.value.data.entregas || []) : []
       const cargasCamion = resCargasCamion.status === 'fulfilled' ? (resCargasCamion.value.data.cargas || []) : []
+      const recargas = resRecargas.status === 'fulfilled' ? (resRecargas.value.data || []) : []
       const entregasNorm = [...entregasConf, ...entregasCanc].map(e => ({ ...e, _tipo: 'entrega' }))
       const cargasNorm = cargasCamion.map(c => ({ ...c, _tipo: 'carga_camion' }))
-      const sorted = [...entregasNorm, ...cargasNorm].sort(
-        (a, b) => new Date(b.updatedAt || b.fechaCarga) - new Date(a.updatedAt || a.fechaCarga)
+      const recargasNorm = recargas.map(o => ({ ...o, _tipo: 'recarga_alquiler' }))
+      const sorted = [...entregasNorm, ...cargasNorm, ...recargasNorm].sort(
+        (a, b) => new Date(b.updatedAt || b.fechaCarga || b.fechaFinalizacion) - new Date(a.updatedAt || a.fechaCarga || a.fechaFinalizacion)
       )
       setHistorialHoy(sorted)
       localStorage.setItem(cacheKey, JSON.stringify(sorted))
@@ -452,31 +460,100 @@ export default function RepartoPage() {
   }
 
   function abrirCompletarRecarga(orden) {
-    setFormCompletarRecarga({ tuboNuevoId: '', cobrar: true, metodoPago: 'EFECTIVO', montoPagado: String(orden.precioAplicado) })
+    setFormCompletarRecarga({
+      tuboNuevoId: '', cobrar: true, metodoPago: 'EFECTIVO', montoPagado: String(orden.precioAplicado),
+      descontarCamion: false, tuboOrigenId: '',
+      // Sugerencia editable: la capacidad del tubo del cliente que se recarga.
+      cantidadGas: orden.tubo?.capacidadKg ? String(orden.tubo.capacidadKg) : '',
+    })
+    setStockCamionRecarga([])
     setModalCompletarRecarga(orden)
+    // El descuento solo aplica a la recarga del mismo tubo y necesita el stock
+    // del camión asignado a la orden.
+    if (orden.tipoServicio === 'RECARGA_MISMO_TUBO' && orden.camion?.id) {
+      api.get(`/camiones/${orden.camion.id}/stock`)
+        .then(res => setStockCamionRecarga((res.data || []).filter(t => t.estado === 'RESERVADO' && Number(t.cantidadActual || 0) > 0)))
+        .catch(() => setStockCamionRecarga([]))
+    }
   }
 
   async function confirmarCompletarRecarga(e) {
     e.preventDefault()
     const orden = modalCompletarRecarga
-    if (orden.tipoServicio === 'RECAMBIO_TUBO' && !formCompletarRecarga.tuboNuevoId) {
+    const f = formCompletarRecarga
+    if (orden.tipoServicio === 'RECAMBIO_TUBO' && !f.tuboNuevoId) {
       return toast('Indicá el tubo nuevo que se entrega', 'error')
+    }
+    if (f.descontarCamion && (!f.tuboOrigenId || !(Number(f.cantidadGas) > 0))) {
+      return toast('Elegí el tubo del camión y la cantidad de gas a descontar', 'error')
     }
     setCompletandoRecarga(true)
     try {
-      await api.post(`/recargas-alquiler/${orden.id}/completar`, {
-        tuboNuevoId: orden.tipoServicio === 'RECAMBIO_TUBO' ? formCompletarRecarga.tuboNuevoId : undefined,
-        metodoPago: formCompletarRecarga.cobrar ? formCompletarRecarga.metodoPago : undefined,
-        montoPagado: formCompletarRecarga.cobrar ? Number(formCompletarRecarga.montoPagado || 0) : 0,
+      const res = await api.post(`/recargas-alquiler/${orden.id}/completar`, {
+        tuboNuevoId: orden.tipoServicio === 'RECAMBIO_TUBO' ? f.tuboNuevoId : undefined,
+        metodoPago: f.cobrar ? f.metodoPago : undefined,
+        montoPagado: f.cobrar ? Number(f.montoPagado || 0) : 0,
+        descontarCamion: orden.tipoServicio === 'RECARGA_MISMO_TUBO' && f.descontarCamion,
+        tuboOrigenId: f.descontarCamion ? f.tuboOrigenId : undefined,
+        cantidadGas: f.descontarCamion ? Number(f.cantidadGas || 0) : 0,
       })
       toast('Servicio completado', 'success')
       setModalCompletarRecarga(null)
       fetchRecargasAsignadas()
+      fetchHistorialHoy()
+      const ordenImpresa = res.data?.orden
+      if (ordenImpresa) {
+        setEntregaParaImprimir(null)
+        setVentaParaImprimir(null)
+        setRecargaParaImprimir(ordenImpresa)
+        setTimeout(() => dispararImpresion('recarga_alquiler', ordenImpresa), 150)
+      }
     } catch (err) {
       toast(err.response?.data?.error || 'Error al completar el servicio', 'error')
     } finally {
       setCompletandoRecarga(false)
     }
+  }
+
+  const reimprimirRecargaAlquiler = (orden) => {
+    setEntregaParaImprimir(null)
+    setVentaParaImprimir(null)
+    setRecargaParaImprimir(orden)
+    setTimeout(() => dispararImpresion('recarga_alquiler', orden), 150)
+  }
+
+  const imprimirRecargaAlquilerWebBluetooth = async (orden) => {
+    setConnectingPrinter(true)
+    try {
+      const buffer = await construirBufferTicketRecargaAlquiler(orden, configTicket())
+      const conexion = await conectarImpresoraWebBluetooth()
+      await enviarBufferWebBluetooth(conexion, buffer)
+      toast('Impresión enviada correctamente', 'success')
+    } catch (err) {
+      if (err?.name !== 'NotFoundError') {
+        toast('Error al imprimir: ' + (err?.message || String(err)), 'error')
+      }
+    } finally {
+      setConnectingPrinter(false)
+    }
+  }
+
+  const imprimirRecargaAlquilerBluetooth = async (orden, deviceAddress) => {
+    if (!window.bluetoothSerial) return
+    if (!deviceAddress) {
+      toast('Por favor, selecciona una impresora', 'warning')
+      return
+    }
+    setConnectingPrinter(true)
+    let binaryBuffer
+    try {
+      binaryBuffer = await construirBufferTicketRecargaAlquiler(orden, configTicket())
+    } catch (e) {
+      toast('Error de formato: ' + e.message, 'error')
+      setConnectingPrinter(false)
+      return
+    }
+    enviarBufferBluetooth(deviceAddress, binaryBuffer).catch(() => {})
   }
 
   // Sincronizar confirmaciones y cancelaciones acumuladas sin señal
@@ -892,6 +969,7 @@ export default function RepartoPage() {
       setVentaConfirmOpen(false)
       setVentaModalOpen(false)
       setEntregaParaImprimir(null)
+      setRecargaParaImprimir(null)
       setVentaParaImprimir(res.data)
       fetchCamionStock(selectedCamionId)
       fetchHistorialHoy()
@@ -905,6 +983,7 @@ export default function RepartoPage() {
 
   const reimprimirVentaCamion = (carga) => {
     setEntregaParaImprimir(null)
+    setRecargaParaImprimir(null)
     setVentaParaImprimir(carga)
     setModalDetalleCamion(false)
     setTimeout(() => dispararImpresion('ventaCamion', carga), 150)
@@ -1466,8 +1545,9 @@ export default function RepartoPage() {
                 {(() => {
                   const countEntregas = historialHoy.filter(e => e._tipo === 'entrega').length
                   const countCamion = historialHoy.filter(e => e._tipo === 'carga_camion').length
+                  const countRecargas = historialHoy.filter(e => e._tipo === 'recarga_alquiler').length
                   return (
-                    <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+                    <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
                       <button
                         className={`btn btn-sm ${filtroTipoHistorial === 'todas' ? 'btn-primary' : 'btn-secondary'}`}
                         onClick={() => setFiltroTipoHistorial('todas')}
@@ -1486,6 +1566,12 @@ export default function RepartoPage() {
                       >
                         En camión ({countCamion})
                       </button>
+                      <button
+                        className={`btn btn-sm ${filtroTipoHistorial === 'recargas' ? 'btn-primary' : 'btn-secondary'}`}
+                        onClick={() => setFiltroTipoHistorial('recargas')}
+                      >
+                        Recargas ({countRecargas})
+                      </button>
                     </div>
                   )
                 })()}
@@ -1494,6 +1580,7 @@ export default function RepartoPage() {
                   const historialFiltrado = historialHoy.filter(e => {
                     if (filtroTipoHistorial === 'entregas') return e._tipo === 'entrega'
                     if (filtroTipoHistorial === 'camion') return e._tipo === 'carga_camion'
+                    if (filtroTipoHistorial === 'recargas') return e._tipo === 'recarga_alquiler'
                     return true
                   })
                   if (historialFiltrado.length === 0) {
@@ -1503,7 +1590,9 @@ export default function RepartoPage() {
                         message={
                           filtroTipoHistorial === 'camion'
                             ? 'No tenés ventas en camión registradas en este período'
-                            : 'No tenés entregas realizadas o canceladas en este período'
+                            : filtroTipoHistorial === 'recargas'
+                              ? 'No tenés recargas de alquiler completadas en este período'
+                              : 'No tenés entregas realizadas o canceladas en este período'
                         }
                       />
                     )
@@ -1511,6 +1600,45 @@ export default function RepartoPage() {
                   return (
                 <div className="reparto-grid">
                   {historialFiltrado.map(e => {
+                    if (e._tipo === 'recarga_alquiler') {
+                      const cargo = e.cargoAlquiler
+                      const pagado = Number(cargo?.montoPagado || 0)
+                      const total = Number(cargo?.monto ?? e.precioAplicado ?? 0)
+                      const saldo = Math.max(0, total - pagado)
+                      return (
+                        <div key={`recarga-${e.id}`} className="reparto-card" style={{ opacity: 0.9 }}>
+                          <div className="reparto-card-head">
+                            <span className="reparto-card-num">{e.numero}</span>
+                            <span className="badge badge-tipo-ALQUILER">
+                              {e.tipoServicio === 'RECAMBIO_TUBO' ? 'RECAMBIO' : 'RECARGA'}
+                            </span>
+                          </div>
+                          <div className="reparto-card-cli">{e.cliente?.nombre}</div>
+                          <div style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            <span>Contrato: <strong className="td-code">{e.alquiler?.numero}</strong></span>
+                            <span>Tubo: <strong className="td-code">{e.tubo?.id}</strong>{e.tuboNuevo ? <> → <strong className="td-code">{e.tuboNuevo.id}</strong></> : ''}</span>
+                            {e.cantidadGasRecargada != null && (
+                              <span>Gas del camión: <strong>{formatNumberSpanish(e.cantidadGasRecargada)}</strong>{e.tuboOrigen ? ` (${e.tuboOrigen.id})` : ''}</span>
+                            )}
+                          </div>
+                          <div className="reparto-card-meta">
+                            <span><i className="ti ti-cash" /> {total.toLocaleString('es-PY')} GS</span>
+                            {saldo > 0
+                              ? <span style={{ color: 'var(--amber)' }}><i className="ti ti-alert-triangle" /> Saldo {saldo.toLocaleString('es-PY')}</span>
+                              : <span style={{ color: 'var(--green)' }}><i className="ti ti-check" /> Cobrado</span>}
+                          </div>
+                          <div className="reparto-card-actions">
+                            <button
+                              className="btn btn-sm btn-secondary"
+                              style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
+                              onClick={() => reimprimirRecargaAlquiler(e)}
+                            >
+                              <i className="ti ti-printer" /> Reimprimir
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    }
                     if (e._tipo === 'carga_camion') {
                       const monto = Math.round(Number(e.cantidad) * Number(e.precioUnitario))
                       return (
@@ -2538,6 +2666,87 @@ export default function RepartoPage() {
         document.body
       )}
 
+      {recargaParaImprimir && createPortal(
+        (() => {
+          const o = recargaParaImprimir
+          const cargo = o.cargoAlquiler
+          const pagado = Number(cargo?.montoPagado || 0)
+          const total = Number(cargo?.monto ?? o.precioAplicado ?? 0)
+          const saldo = Math.max(0, total - pagado)
+          const esRecambio = o.tipoServicio === 'RECAMBIO_TUBO'
+          return (
+            <div className="print-ticket-container">
+              <div className="ticket-header">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', marginBottom: '10px' }}>
+                  <img src={branding.isotipoSrc} alt="Isotipo" style={{ width: '40px', height: '40px', objectFit: 'contain' }} />
+                  <img src={branding.logoSrc} alt="Logo" style={{ width: '108px', height: '40px', objectFit: 'contain' }} />
+                </div>
+                {direccion ? <p style={{ margin: 0, fontSize: '10px' }}>{direccion}</p> : <p style={{ margin: 0, fontSize: '10px' }}>Gestión de Gases Industriales</p>}
+                {telefono && <p style={{ margin: '2px 0 0', fontSize: '10px' }}>Tel: {telefono}</p>}
+                <p style={{ margin: '4px 0 0', fontSize: '11px', fontWeight: 'bold' }}>RECARGA ALQUILER: {o.numero}</p>
+              </div>
+
+              <div style={{ margin: '8px 0', fontSize: '11px' }}>
+                <strong>Cliente:</strong> {o.cliente?.nombre}<br />
+                <strong>RUC/CI:</strong> {o.cliente?.ruc || '—'}<br />
+                <strong>Dirección:</strong> {o.direccion}<br />
+                <strong>Fecha:</strong> {o.fechaFinalizacion ? new Date(o.fechaFinalizacion).toLocaleString('es-PY') : '—'}<br />
+                <strong>Chofer:</strong> {o.repartidor?.nombre || o.repartidor?.username || ''}<br />
+                <strong>Contrato:</strong> {o.alquiler?.numero || '—'}{o.alquiler?.plan?.nombre ? ` · ${o.alquiler.plan.nombre}` : ''}
+              </div>
+
+              <table className="ticket-table">
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: 'left' }}>Servicio</th>
+                    <th style={{ textAlign: 'right' }}>Monto</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>
+                      <strong>{esRecambio ? 'Recambio de tubo' : 'Recarga del mismo tubo'}</strong>
+                      <span style={{ fontSize: '10px', color: '#555', display: 'block' }}>
+                        {esRecambio
+                          ? `Retira ${o.tubo?.id || '?'} / entrega ${o.tuboNuevo?.id || '?'}`
+                          : `Tubo ${o.tubo?.id || '?'} (${o.tubo?.gas || ''})`}
+                      </span>
+                      {o.cantidadGasRecargada != null && (
+                        <span style={{ fontSize: '10px', color: '#555', display: 'block' }}>
+                          Gas recargado: {formatNumberSpanish(o.cantidadGasRecargada)}
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ textAlign: 'right', fontWeight: '500' }}>{total.toLocaleString('es-PY')} GS</td>
+                  </tr>
+                  <tr>
+                    <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px', paddingTop: '6px' }}>TOTAL:</td>
+                    <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px', color: 'var(--blue)', paddingTop: '6px' }}>
+                      {total.toLocaleString('es-PY')} GS
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <div style={{ margin: '8px 0', fontSize: '11px' }}>
+                <strong>Forma de pago:</strong> {cargo?.metodoPago || (pagado > 0 ? '-' : 'No cobrado')}<br />
+                <strong>Cobrado:</strong> {pagado.toLocaleString('es-PY')} GS
+                {saldo > 0 && <><br /><strong>Saldo pendiente:</strong> {saldo.toLocaleString('es-PY')} GS</>}
+              </div>
+
+              <div className="ticket-signatures">
+                <div className="signature-line">Firma Cliente</div>
+              </div>
+
+              <div className="ticket-footer">
+                ¡Gracias por su preferencia!
+              </div>
+            </div>
+          )
+        })(),
+        document.body
+      )}
+
       {entregaParaImprimir && createPortal(
         <div className="print-ticket-container">
           <div className="ticket-header">
@@ -2886,9 +3095,11 @@ export default function RepartoPage() {
             </button>
             <button
               className="btn btn-primary"
-              onClick={() => ventaParaImprimir
-                ? imprimirVentaCamionBluetooth(ventaParaImprimir, selectedDeviceAddress)
-                : imprimirBluetooth(entregaParaImprimir || activeEntrega, selectedDeviceAddress)}
+              onClick={() => recargaParaImprimir
+                ? imprimirRecargaAlquilerBluetooth(recargaParaImprimir, selectedDeviceAddress)
+                : ventaParaImprimir
+                  ? imprimirVentaCamionBluetooth(ventaParaImprimir, selectedDeviceAddress)
+                  : imprimirBluetooth(entregaParaImprimir || activeEntrega, selectedDeviceAddress)}
               disabled={connectingPrinter || !selectedDeviceAddress}
               style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
             >
@@ -3466,6 +3677,55 @@ export default function RepartoPage() {
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
                   Se retira <strong className="td-code">{modalCompletarRecarga.tubo?.id}</strong> y queda con el cliente el tubo que escribas acá.
                 </div>
+              </div>
+            )}
+
+            {modalCompletarRecarga.tipoServicio === 'RECARGA_MISMO_TUBO' && (
+              <div style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={formCompletarRecarga.descontarCamion}
+                    onChange={e => setFormCompletarRecarga(f => ({ ...f, descontarCamion: e.target.checked }))}
+                    disabled={stockCamionRecarga.length === 0}
+                  />
+                  Descontar el gas del stock del camión
+                </label>
+                {stockCamionRecarga.length === 0 ? (
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    El camión asignado no tiene tubos con gas disponible — completá sin descuento.
+                  </div>
+                ) : formCompletarRecarga.descontarCamion && (
+                  <>
+                    <div className="form-group">
+                      <label className="form-label">Tubo del camión de donde sale el gas <span className="form-required">*</span></label>
+                      <select
+                        value={formCompletarRecarga.tuboOrigenId}
+                        onChange={e => setFormCompletarRecarga(f => ({ ...f, tuboOrigenId: e.target.value }))}
+                        required
+                      >
+                        <option value="">Seleccioná...</option>
+                        {stockCamionRecarga.map(t => (
+                          <option key={t.id} value={t.id}>
+                            {t.id} — {t.gas} ({formatNumberSpanish(t.cantidadActual)} disp.)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Cantidad de gas a descontar <span className="form-required">*</span></label>
+                      <input
+                        type="number" min="0" step="0.001"
+                        value={formCompletarRecarga.cantidadGas}
+                        onChange={e => setFormCompletarRecarga(f => ({ ...f, cantidadGas: e.target.value }))}
+                        required
+                      />
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                        Sugerido: capacidad del tubo del cliente. No cambia el monto que se cobra.
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             )}
 

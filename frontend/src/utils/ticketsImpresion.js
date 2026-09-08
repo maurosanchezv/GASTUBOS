@@ -355,6 +355,104 @@ export async function construirBufferTicketVentaCamion(carga, config) {
   return builder.getBuffer()
 }
 
+// Ticket del servicio de recarga/recambio a domicilio de un contrato de
+// alquiler (OrdenRecargaAlquiler ya COMPLETADA). Mismo formato que el de venta
+// en camión. `orden` viene con el include de detalle del backend
+// (cliente, alquiler.plan, tubo, tuboNuevo, tuboOrigen, cargoAlquiler).
+// config: { branding, nombreEmpresa, direccion, telefono, paperWidth }
+export async function construirBufferTicketRecargaAlquiler(orden, config) {
+  const { branding, nombreEmpresa, direccion, telefono, paperWidth } = config
+
+  let logoBytes = null
+  try {
+    logoBytes = await generarLogoEscPos(branding.isotipoSrc, branding.logoSrc)
+  } catch (e) {
+    console.warn('No se pudo generar el logo para la impresion:', e)
+  }
+
+  const builder = new EscPosBuilder()
+  const width = paperWidth
+  const { wrapText, justify, line, doubleLine } = crearHelpersTicket(width)
+
+  builder.initialize()
+  if (logoBytes) {
+    builder.addBytes(logoBytes)
+    builder.addTextLine('')
+  } else {
+    builder.alignCenter().boldOn().doubleSizeOn().addTextLine((nombreEmpresa || 'GASTUBOS').toUpperCase()).doubleSizeOff()
+  }
+
+  builder.alignCenter()
+  if (direccion) {
+    wrapText(direccion, width).forEach(l => builder.addTextLine(l))
+  }
+  if (telefono) {
+    wrapText('Tel: ' + telefono, width).forEach(l => builder.addTextLine(l))
+  }
+  builder.addTextLine(doubleLine())
+
+  builder.alignLeft().boldOn().addTextLine('RECARGA ALQUILER: ' + orden.numero).boldOff()
+  builder.addTextLine(line())
+
+  wrapText('Cliente: ' + (orden.cliente?.nombre || ''), width).forEach(l => builder.addTextLine(l))
+  builder.addTextLine('RUC/CI: ' + (orden.cliente?.ruc || '-'))
+  wrapText('Direccion: ' + (orden.direccion || ''), width).forEach(l => builder.addTextLine(l))
+  builder.addTextLine('Fecha: ' + new Date(orden.fechaFinalizacion || Date.now()).toLocaleString('es-PY'))
+  builder.addTextLine('Chofer: ' + (orden.repartidor?.nombre || orden.repartidor?.username || ''))
+  builder.addTextLine('Contrato: ' + (orden.alquiler?.numero || '-'))
+  if (orden.alquiler?.plan?.nombre) {
+    wrapText('Plan: ' + orden.alquiler.plan.nombre, width).forEach(l => builder.addTextLine(l))
+  }
+  builder.addTextLine(doubleLine())
+
+  builder.boldOn().addTextLine(justify('SERVICIO', 'MONTO')).boldOff()
+  builder.addTextLine(line())
+
+  const esRecambio = orden.tipoServicio === 'RECAMBIO_TUBO'
+  const montoStr = Number(orden.precioAplicado || 0).toLocaleString('es-PY') + ' GS'
+  builder.addTextLine((esRecambio ? 'Recambio de tubo' : 'Recarga del mismo tubo').slice(0, width))
+  if (esRecambio) {
+    wrapText(`  Retira ${orden.tubo?.id || '?'} / entrega ${orden.tuboNuevo?.id || '?'}`, width).forEach(l => builder.addTextLine(l))
+  } else {
+    builder.addTextLine(`  Tubo ${orden.tubo?.id || '?'} (${orden.tubo?.gas || ''})`.slice(0, width))
+  }
+  if (orden.cantidadGasRecargada != null) {
+    builder.addTextLine(justify(`  Gas recargado: ${formatNumberSpanish(orden.cantidadGasRecargada)}`, montoStr))
+  } else {
+    builder.addTextLine(justify('  Precio de recarga', montoStr))
+  }
+  builder.addTextLine(line())
+  builder.boldOn().addTextLine(justify('TOTAL:', montoStr)).boldOff()
+  builder.addTextLine(doubleLine())
+
+  const cargo = orden.cargoAlquiler
+  const pagado = Number(cargo?.montoPagado || 0)
+  const total = Number(cargo?.monto ?? orden.precioAplicado ?? 0)
+  const saldo = Math.max(0, total - pagado)
+  builder.addTextLine('Forma de pago: ' + (cargo?.metodoPago || (pagado > 0 ? '-' : 'No cobrado')))
+  builder.addTextLine('Cobrado: ' + pagado.toLocaleString('es-PY') + ' GS')
+  if (saldo > 0) {
+    builder.boldOn().addTextLine('SALDO PENDIENTE: ' + saldo.toLocaleString('es-PY') + ' GS').boldOff()
+  }
+  builder.addTextLine(doubleLine())
+
+  builder.addTextLine('').addTextLine('')
+  const lineLength = width >= 48 ? 18 : 13
+  const soloLine = '-'.repeat(lineLength)
+  const padCentro = Math.max(0, Math.floor((width - lineLength) / 2))
+  builder.addTextLine(' '.repeat(padCentro) + soloLine)
+  const labelFirma = 'Firma Cliente'
+  const padLabel = Math.max(0, Math.floor((width - labelFirma.length) / 2))
+  builder.addTextLine(' '.repeat(padLabel) + labelFirma)
+  builder.addTextLine('')
+
+  builder.alignCenter().boldOn().addTextLine('Gracias por su preferencia!').boldOff()
+
+  builder.addTextLine('').addTextLine('').addTextLine('').addTextLine('').addTextLine('').addTextLine('')
+  builder.feedLines(4)
+  return builder.getBuffer()
+}
+
 export async function construirBufferTicketCargaSalon(carga, config) {
   const { branding, nombreEmpresa, direccion, telefono, paperWidth } = config
 
