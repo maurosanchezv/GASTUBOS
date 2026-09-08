@@ -361,6 +361,7 @@ export default function RepartoPage() {
   const [completandoRecarga, setCompletandoRecarga] = useState(false)
   const [stockCamionRecarga, setStockCamionRecarga] = useState([]) // tubos RESERVADO del camión de la orden
   const [recargaParaImprimir, setRecargaParaImprimir] = useState(null)
+  const [modalTicketRecarga, setModalTicketRecarga] = useState(null) // previsualización del ticket tras completar
 
   const totalIds = activeEntrega?.detalles?.map(d => d.tuboId) || []
   const todosListos = totalIds.length > 0 && totalIds.every(id => scannedIds.includes(id))
@@ -502,12 +503,9 @@ export default function RepartoPage() {
       fetchRecargasAsignadas()
       fetchHistorialHoy()
       const ordenImpresa = res.data?.orden
-      if (ordenImpresa) {
-        setEntregaParaImprimir(null)
-        setVentaParaImprimir(null)
-        setRecargaParaImprimir(ordenImpresa)
-        setTimeout(() => dispararImpresion('recarga_alquiler', ordenImpresa), 150)
-      }
+      // Igual que en la entrega: no se imprime de una — se abre la
+      // previsualización del ticket con las opciones Imprimir / Continuar.
+      if (ordenImpresa) abrirTicketRecarga(ordenImpresa)
     } catch (err) {
       toast(err.response?.data?.error || 'Error al completar el servicio', 'error')
     } finally {
@@ -515,11 +513,13 @@ export default function RepartoPage() {
     }
   }
 
-  const reimprimirRecargaAlquiler = (orden) => {
+  // Prepara y abre la previsualización del ticket de una recarga completada.
+  // Usado tanto al terminar el servicio como al tocar una recarga del historial.
+  const abrirTicketRecarga = (orden) => {
     setEntregaParaImprimir(null)
     setVentaParaImprimir(null)
     setRecargaParaImprimir(orden)
-    setTimeout(() => dispararImpresion('recarga_alquiler', orden), 150)
+    setModalTicketRecarga(orden)
   }
 
   const imprimirRecargaAlquilerWebBluetooth = async (orden) => {
@@ -1606,7 +1606,12 @@ export default function RepartoPage() {
                       const total = Number(cargo?.monto ?? e.precioAplicado ?? 0)
                       const saldo = Math.max(0, total - pagado)
                       return (
-                        <div key={`recarga-${e.id}`} className="reparto-card" style={{ opacity: 0.9 }}>
+                        <div
+                          key={`recarga-${e.id}`}
+                          className="reparto-card"
+                          style={{ opacity: 0.9, cursor: 'pointer' }}
+                          onClick={() => abrirTicketRecarga(e)}
+                        >
                           <div className="reparto-card-head">
                             <span className="reparto-card-num">{e.numero}</span>
                             <span className="badge badge-tipo-ALQUILER">
@@ -1631,9 +1636,9 @@ export default function RepartoPage() {
                             <button
                               className="btn btn-sm btn-secondary"
                               style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
-                              onClick={() => reimprimirRecargaAlquiler(e)}
+                              onClick={(ev) => { ev.stopPropagation(); abrirTicketRecarga(e) }}
                             >
-                              <i className="ti ti-printer" /> Reimprimir
+                              <i className="ti ti-eye" /> Ver ticket
                             </button>
                           </div>
                         </div>
@@ -2996,6 +3001,104 @@ export default function RepartoPage() {
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* Modal de Previsualización del Ticket de Recarga de Alquiler */}
+      <Modal
+        open={!!modalTicketRecarga}
+        title={`Servicio completado: ${modalTicketRecarga?.numero || ''}`}
+        onClose={() => setModalTicketRecarga(null)}
+        width={400}
+        footer={
+          <div style={{ display: 'flex', gap: 10, width: '100%' }}>
+            <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setModalTicketRecarga(null)}>
+              Continuar
+            </button>
+            <button
+              className="btn btn-primary"
+              style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+              onClick={() => dispararImpresion('recarga_alquiler', modalTicketRecarga)}
+            >
+              <i className="ti ti-printer" /> Imprimir ticket
+            </button>
+          </div>
+        }
+      >
+        {modalTicketRecarga && (() => {
+          const o = modalTicketRecarga
+          const cargo = o.cargoAlquiler
+          const pagado = Number(cargo?.montoPagado || 0)
+          const total = Number(cargo?.monto ?? o.precioAplicado ?? 0)
+          const saldo = Math.max(0, total - pagado)
+          const esRecambio = o.tipoServicio === 'RECAMBIO_TUBO'
+          return (
+            <div className="ticket-preview">
+              <div className="ticket-header">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', marginBottom: '10px' }}>
+                  <img src={branding.isotipoSrc} alt="Isotipo" style={{ width: '40px', height: '40px', objectFit: 'contain' }} />
+                  <img src={branding.logoSrc} alt="Logo" style={{ width: '108px', height: '40px', objectFit: 'contain' }} />
+                </div>
+                {direccion ? <p style={{ margin: 0, fontSize: '10px', color: '#666' }}>{direccion}</p> : <p style={{ margin: 0, fontSize: '10px', color: '#666' }}>Gestión de Gases Industriales</p>}
+                {telefono && <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#666' }}>Tel: {telefono}</p>}
+                <p style={{ margin: '6px 0 0', fontSize: '11px', fontWeight: 'bold' }}>RECARGA ALQUILER: {o.numero}</p>
+              </div>
+
+              <div style={{ margin: '10px 0', fontSize: '11px', borderBottom: '1px dashed #ddd', paddingBottom: '8px' }}>
+                <strong>Cliente:</strong> {o.cliente?.nombre}<br />
+                <strong>RUC/CI:</strong> {o.cliente?.ruc || '—'}<br />
+                <strong>Dirección:</strong> {o.direccion}<br />
+                <strong>Fecha:</strong> {o.fechaFinalizacion ? new Date(o.fechaFinalizacion).toLocaleString('es-PY') : '—'}<br />
+                <strong>Chofer:</strong> {o.repartidor?.nombre || o.repartidor?.username || ''}<br />
+                <strong>Contrato:</strong> {o.alquiler?.numero || '—'}{o.alquiler?.plan?.nombre ? ` · ${o.alquiler.plan.nombre}` : ''}
+              </div>
+
+              <table className="ticket-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px dashed #000' }}>
+                    <th style={{ textAlign: 'left', paddingBottom: '4px' }}>Servicio</th>
+                    <th style={{ textAlign: 'right', paddingBottom: '4px' }}>Monto</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td style={{ paddingTop: '6px', paddingBottom: '4px' }}>
+                      <strong>{esRecambio ? 'Recambio de tubo' : 'Recarga del mismo tubo'}</strong><br />
+                      <span style={{ fontSize: '10px', color: '#555' }}>
+                        {esRecambio
+                          ? `Retira ${o.tubo?.id || '?'} / entrega ${o.tuboNuevo?.id || '?'}`
+                          : `Tubo ${o.tubo?.id || '?'} (${o.tubo?.gas || ''})`}
+                      </span>
+                      {o.cantidadGasRecargada != null && (
+                        <><br /><span style={{ fontSize: '10px', color: '#555' }}>Gas recargado: {formatNumberSpanish(o.cantidadGasRecargada)}{o.tuboOrigen ? ` (del ${o.tuboOrigen.id})` : ''}</span></>
+                      )}
+                    </td>
+                    <td style={{ textAlign: 'right', fontWeight: '500', paddingTop: '6px', paddingBottom: '4px' }}>{total.toLocaleString('es-PY')} GS</td>
+                  </tr>
+                  <tr style={{ borderTop: '1px dashed #000' }}>
+                    <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px', paddingTop: '6px' }}>TOTAL:</td>
+                    <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px', color: 'var(--blue)', paddingTop: '6px' }}>
+                      {total.toLocaleString('es-PY')} GS
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <div style={{ margin: '10px 0', fontSize: '11px', borderTop: '1px dashed #ddd', paddingTop: '8px' }}>
+                <strong>Forma de pago:</strong> {cargo?.metodoPago || (pagado > 0 ? '-' : 'No cobrado')}<br />
+                <strong>Cobrado:</strong> {pagado.toLocaleString('es-PY')} GS
+                {saldo > 0 && <><br /><strong style={{ color: 'var(--amber)' }}>Saldo pendiente:</strong> {saldo.toLocaleString('es-PY')} GS</>}
+              </div>
+
+              <div className="ticket-signatures" style={{ display: 'flex', justifyContent: 'center', marginTop: '24px', paddingTop: '10px' }}>
+                <div className="signature-line" style={{ width: '60%', borderTop: '1px solid #000', textAlign: 'center', fontSize: '10px', paddingTop: '4px' }}>Firma Cliente</div>
+              </div>
+
+              <div className="ticket-footer" style={{ textAlign: 'center', borderTop: '1px dashed #000', paddingTop: '8px', marginTop: '16px', fontSize: '10px' }}>
+                ¡Gracias por su preferencia!
+              </div>
+            </div>
+          )
+        })()}
       </Modal>
 
       {/* Modal de Detalle de Venta en Camión desde Historial */}
