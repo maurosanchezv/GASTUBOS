@@ -249,55 +249,116 @@ export default function AlquileresPage() {
           ))}
         </div>
 
-        {loading ? <Spinner /> : (
+        {loading ? <Spinner /> : lista.length === 0 ? (
           <div className="card" style={{ padding: 0 }}>
-            {lista.length === 0 ? <EmptyState icon="ti-calendar-time" message="Sin alquileres en este filtro" /> : (
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Nro</th><th>Cliente</th><th>Plan</th><th>Tubo</th><th>Inicio</th>
-                      <th>Próximo cobro</th><th>Mensualidad</th><th>Saldo</th>
-                      <th>Contrato</th><th>Financiero</th><th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {lista.map(a => {
-                      const alerta = NIVEL_ALERTA[a.nivelAlerta] || NIVEL_ALERTA.normal
-                      return (
-                        <tr key={a.id}>
-                          <td className="td-code" style={{ cursor: 'pointer' }} onClick={() => abrirDetalle(a.id)}>{a.numero}</td>
-                          <td style={{ fontWeight: 500 }}>{a.cliente?.nombre}</td>
-                          <td>{a.plan?.nombre || <span style={{ color: 'var(--text-muted)' }}>Legacy</span>}</td>
-                          <td className="td-code">{a.tubo?.id}</td>
-                          <td style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{fecha(a.fechaInicio)}</td>
-                          <td style={{ fontSize: 11, color: alerta.color, fontWeight: alerta.label ? 700 : 400 }} title={alerta.label || ''}>
-                            {fecha(a.fechaVencimiento)}
-                          </td>
-                          <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{a.precioMensualAplicado ? gs(a.precioMensualAplicado) : '—'}</td>
-                          <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: a.saldoPendiente > 0 ? 'var(--red)' : 'inherit', fontWeight: a.saldoPendiente > 0 ? 700 : 400 }}>
-                            {gs(a.saldoPendiente)}
-                          </td>
-                          <td><span className={`badge badge-${a.estado}`}>{a.estado.replace(/_/g, ' ')}</span></td>
-                          <td><span className={`badge badge-${a.estadoFinanciero}`}>{a.estadoFinanciero.replace(/_/g, ' ')}</span></td>
-                          <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                            <button className="btn-icon" title="Ver detalle" onClick={() => abrirDetalle(a.id)}>
-                              <i className="ti ti-eye" />
-                            </button>
-                            {a.estado === 'ACTIVO' && (
-                              <button className="btn-icon" title="Registrar devolución" onClick={() => registrarDevolucion(a)}>
-                                <i className="ti ti-arrow-back" />
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            <EmptyState icon="ti-calendar-time" message="Sin alquileres en este filtro" />
           </div>
+        ) : (
+          <>
+            {/* VISTA TABLE (Desktop) */}
+            <div className="card table-wrap hide-mobile" style={{ padding: 0 }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Nro</th><th>Cliente</th><th>Plan</th><th>Tubo</th><th>Inicio</th>
+                    <th>Próximo cobro</th><th>Mensualidad</th><th>Saldo</th>
+                    <th>Contrato</th><th>Financiero</th><th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lista.map(a => {
+                    const alerta = NIVEL_ALERTA[a.nivelAlerta] || NIVEL_ALERTA.normal
+                    return (
+                      <tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => abrirDetalle(a.id)}>
+                        <td className="td-code" style={{ color: 'var(--blue)' }}>{a.numero}</td>
+                        <td style={{ fontWeight: 500 }}>{a.cliente?.nombre}</td>
+                        <td>{a.plan?.nombre || <span style={{ color: 'var(--text-muted)' }}>Legacy</span>}</td>
+                        <td className="td-code">{a.tubo?.id}</td>
+                        <td style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{fecha(a.fechaInicio)}</td>
+                        <td style={{ fontSize: 11, color: alerta.color, fontWeight: alerta.label ? 700 : 400 }} title={alerta.label || ''}>
+                          {fecha(a.fechaVencimiento)}
+                        </td>
+                        <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{a.precioMensualAplicado ? gs(a.precioMensualAplicado) : '—'}</td>
+                        <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: a.saldoPendiente > 0 ? 'var(--red)' : 'inherit', fontWeight: a.saldoPendiente > 0 ? 700 : 400 }}>
+                          {gs(a.saldoPendiente)}
+                        </td>
+                        <td><span className={`badge badge-${a.estado}`}>{a.estado.replace(/_/g, ' ')}</span></td>
+                        <td><span className={`badge badge-${a.estadoFinanciero}`}>{a.estadoFinanciero.replace(/_/g, ' ')}</span></td>
+                        <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          <button className="btn-icon" title="Ver detalle" onClick={(e) => { e.stopPropagation(); abrirDetalle(a.id) }}>
+                            <i className="ti ti-eye" />
+                          </button>
+                          {a.estado === 'ACTIVO' && (
+                            <button className="btn-icon" title="Registrar devolución" onClick={(e) => { e.stopPropagation(); registrarDevolucion(a) }}>
+                              <i className="ti ti-arrow-back" />
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* VISTA CARDS (Mobile) */}
+            <div className="mobile-list">
+              {lista.map(a => {
+                const alerta = NIVEL_ALERTA[a.nivelAlerta] || NIVEL_ALERTA.normal
+                return (
+                  <div key={a.id} className="list-card" style={{ cursor: 'pointer' }} onClick={() => abrirDetalle(a.id)}>
+                    <div className="list-card-header">
+                      <div className="list-card-title">{a.numero}</div>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                        <span className={`badge badge-${a.estado}`}>{a.estado.replace(/_/g, ' ')}</span>
+                        <span className={`badge badge-${a.estadoFinanciero}`}>{a.estadoFinanciero.replace(/_/g, ' ')}</span>
+                      </div>
+                    </div>
+                    <div className="list-card-body">
+                      <div className="list-card-item">
+                        <span className="list-card-label">Cliente</span>
+                        <span className="list-card-value">{a.cliente?.nombre || '—'}</span>
+                      </div>
+                      <div className="list-card-item">
+                        <span className="list-card-label">Plan</span>
+                        <span className="list-card-value">{a.plan?.nombre || 'Legacy'}</span>
+                      </div>
+                      <div className="list-card-item">
+                        <span className="list-card-label">Tubo</span>
+                        <span className="list-card-value">{a.tubo?.id || '—'}</span>
+                      </div>
+                      <div className="list-card-item">
+                        <span className="list-card-label">Próximo cobro</span>
+                        <span className="list-card-value" style={{ color: alerta.color, fontWeight: alerta.label ? 700 : 500 }}>
+                          {fecha(a.fechaVencimiento)}
+                        </span>
+                      </div>
+                      <div className="list-card-item">
+                        <span className="list-card-label">Mensualidad</span>
+                        <span className="list-card-value">{a.precioMensualAplicado ? gs(a.precioMensualAplicado) : '—'}</span>
+                      </div>
+                      <div className="list-card-item">
+                        <span className="list-card-label">Saldo</span>
+                        <span className="list-card-value" style={{ color: a.saldoPendiente > 0 ? 'var(--red)' : 'inherit', fontWeight: a.saldoPendiente > 0 ? 700 : 500 }}>
+                          {gs(a.saldoPendiente)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="list-card-actions">
+                      <button className="btn btn-sm" style={{ flex: 1 }} onClick={(e) => { e.stopPropagation(); abrirDetalle(a.id) }}>
+                        <i className="ti ti-eye" /> Ver detalle
+                      </button>
+                      {a.estado === 'ACTIVO' && (
+                        <button className="btn btn-sm" onClick={(e) => { e.stopPropagation(); registrarDevolucion(a) }}>
+                          <i className="ti ti-arrow-back" /> Devolución
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </>
         )}
       </div>
 
