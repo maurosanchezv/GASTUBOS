@@ -285,12 +285,12 @@ export default function AlquileresPage() {
                         <td><span className={`badge badge-${a.estado}`}>{a.estado.replace(/_/g, ' ')}</span></td>
                         <td><span className={`badge badge-${a.estadoFinanciero}`}>{a.estadoFinanciero.replace(/_/g, ' ')}</span></td>
                         <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                          <button className="btn-icon" title="Ver detalle" onClick={(e) => { e.stopPropagation(); abrirDetalle(a.id) }}>
-                            <i className="ti ti-eye" />
+                          <button className="btn btn-sm" title="Ver detalle" onClick={(e) => { e.stopPropagation(); abrirDetalle(a.id) }}>
+                            <i className="ti ti-eye" /> <span className="btn-label-narrow">Detalle</span>
                           </button>
                           {a.estado === 'ACTIVO' && (
-                            <button className="btn-icon" title="Registrar devolución" onClick={(e) => { e.stopPropagation(); registrarDevolucion(a) }}>
-                              <i className="ti ti-arrow-back" />
+                            <button className="btn btn-sm" style={{ marginLeft: 6 }} title="Registrar devolución" onClick={(e) => { e.stopPropagation(); registrarDevolucion(a) }}>
+                              <i className="ti ti-arrow-back" /> <span className="btn-label-narrow">Devolución</span>
                             </button>
                           )}
                         </td>

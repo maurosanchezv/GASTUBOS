@@ -1029,6 +1029,12 @@ textarea { resize: vertical; min-height: 72px; }
   border: 0;
 }
 
+/* Texto de un botón que se esconde en pantallas medianas/angostas y deja
+   solo el ícono (patrón "Detalle + ojito" → "ojito"). */
+@media (max-width: 1200px) {
+  .btn-label-narrow { display: none; }
+}
+
 
 
 
