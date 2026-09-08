@@ -35,8 +35,10 @@ export default function AlquileresPage() {
   const [guardandoPago, setGuardandoPago] = useState(false)
 
   const [modalRecarga, setModalRecarga] = useState(false)
-  const [formRecarga, setFormRecarga] = useState({ tipoServicio: 'RECARGA_MISMO_TUBO', fechaProgramada: '', observaciones: '' })
+  const [formRecarga, setFormRecarga] = useState({ tipoServicio: 'RECARGA_MISMO_TUBO', repartidorId: '', camionId: '', fechaProgramada: '', observaciones: '' })
   const [solicitandoRecarga, setSolicitandoRecarga] = useState(false)
+  const [repartidores, setRepartidores] = useState([])
+  const [camiones, setCamiones] = useState([])
 
   const load = async () => {
     try {
@@ -51,6 +53,16 @@ export default function AlquileresPage() {
     } finally {
       setLoading(false)
     }
+    // Catálogos para asignar el chofer al solicitar una recarga — si fallan
+    // (permisos, red), el modal simplemente no ofrece opciones.
+    try {
+      const [rReps, rCam] = await Promise.all([
+        api.get('/usuarios/repartidores'),
+        api.get('/camiones'),
+      ])
+      setRepartidores(rReps.data)
+      setCamiones(rCam.data)
+    } catch { /* opcional */ }
   }
 
   useEffect(() => { load() }, [])
@@ -148,21 +160,24 @@ export default function AlquileresPage() {
   }
 
   function abrirModalRecarga() {
-    setFormRecarga({ tipoServicio: 'RECARGA_MISMO_TUBO', fechaProgramada: '', observaciones: '' })
+    setFormRecarga({ tipoServicio: 'RECARGA_MISMO_TUBO', repartidorId: '', camionId: '', fechaProgramada: '', observaciones: '' })
     setModalRecarga(true)
   }
 
   async function confirmarSolicitudRecarga(e) {
     e.preventDefault()
+    if (!formRecarga.repartidorId) return toast('Seleccioná el chofer que hará el servicio', 'error')
     setSolicitandoRecarga(true)
     try {
       await api.post('/recargas-alquiler', {
         alquilerId: detalle.id,
         tipoServicio: formRecarga.tipoServicio,
+        repartidorId: formRecarga.repartidorId,
+        camionId: formRecarga.camionId || undefined,
         fechaProgramada: formRecarga.fechaProgramada ? new Date(formRecarga.fechaProgramada).toISOString() : undefined,
         observaciones: formRecarga.observaciones || undefined,
       })
-      toast('Recarga solicitada correctamente', 'success')
+      toast('Recarga solicitada y asignada correctamente', 'success')
       setModalRecarga(false)
       abrirDetalle(detalle.id)
     } catch (err) {
@@ -297,16 +312,22 @@ export default function AlquileresPage() {
               <div><div style={{ color: 'var(--text-muted)', fontSize: 10 }}>CLIENTE</div><div style={{ fontWeight: 600 }}>{detalle.cliente.nombre}</div></div>
               <div><div style={{ color: 'var(--text-muted)', fontSize: 10 }}>PLAN</div><div style={{ fontWeight: 600 }}>{detalle.plan?.nombre || 'Legacy (sin plan)'}</div></div>
               <div><div style={{ color: 'var(--text-muted)', fontSize: 10 }}>TUBO ACTUAL</div><div className="td-code">{detalle.tubo?.id}</div></div>
-              <div><div style={{ color: 'var(--text-muted)', fontSize: 10 }}>INICIO</div><div>{fecha(detalle.fechaInicio)}</div></div>
-              <div><div style={{ color: 'var(--text-muted)', fontSize: 10 }}>PRIMER PERÍODO HASTA</div><div>{fecha(detalle.primerPeriodoHasta)}</div></div>
               <div><div style={{ color: 'var(--text-muted)', fontSize: 10 }}>PRÓXIMO VENCIMIENTO</div><div>{fecha(detalle.fechaVencimiento)}</div></div>
               <div><div style={{ color: 'var(--text-muted)', fontSize: 10 }}>ESTADO CONTRATO</div><span className={`badge badge-${detalle.estado}`}>{detalle.estado.replace(/_/g, ' ')}</span></div>
               <div><div style={{ color: 'var(--text-muted)', fontSize: 10 }}>ESTADO FINANCIERO</div><span className={`badge badge-${detalle.estadoFinanciero}`}>{detalle.estadoFinanciero.replace(/_/g, ' ')}</span></div>
               <div><div style={{ color: 'var(--text-muted)', fontSize: 10 }}>SALDO PENDIENTE</div><div style={{ fontWeight: 700, color: detalle.saldoPendiente > 0 ? 'var(--red)' : 'var(--green)' }}>{gs(detalle.saldoPendiente)}</div></div>
-              {detalle.entrega && (
-                <div><div style={{ color: 'var(--text-muted)', fontSize: 10 }}>ENTREGA ORIGEN</div><div className="td-code">{detalle.entrega.numero}</div></div>
-              )}
             </div>
+
+            {detalle.estado === 'ACTIVO' && (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button className="btn btn-primary" onClick={abrirModalRecarga}>
+                  <i className="ti ti-truck-delivery" /> Solicitar recarga
+                </button>
+                <button className="btn" onClick={() => registrarDevolucion(detalle)}>
+                  <i className="ti ti-arrow-back" /> Registrar devolución / finalizar
+                </button>
+              </div>
+            )}
 
             <div>
               <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 8 }}>Historial financiero</div>
@@ -426,16 +447,6 @@ export default function AlquileresPage() {
               </div>
             )}
 
-            {detalle.estado === 'ACTIVO' && (
-              <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button className="btn btn-primary" onClick={abrirModalRecarga}>
-                  <i className="ti ti-truck-delivery" /> Solicitar recarga
-                </button>
-                <button className="btn" onClick={() => registrarDevolucion(detalle)}>
-                  <i className="ti ti-arrow-back" /> Registrar devolución / finalizar
-                </button>
-              </div>
-            )}
           </div>
         )}
       </Modal>
@@ -478,6 +489,20 @@ export default function AlquileresPage() {
                   Recambio de tubo
                 </label>
               </div>
+            </FormGroup>
+
+            <FormGroup label="Chofer asignado" required>
+              <select value={formRecarga.repartidorId} onChange={e => setFormRecarga(f => ({ ...f, repartidorId: e.target.value }))} required>
+                <option value="">Seleccioná...</option>
+                {repartidores.map(r => <option key={r.id} value={r.id}>{r.nombre || r.username}</option>)}
+              </select>
+            </FormGroup>
+
+            <FormGroup label="Camión (opcional)" hint="Si no se elige, se usa el que el chofer tenga seleccionado">
+              <select value={formRecarga.camionId} onChange={e => setFormRecarga(f => ({ ...f, camionId: e.target.value }))}>
+                <option value="">Automático</option>
+                {camiones.map(c => <option key={c.id} value={c.id}>{c.placa}</option>)}
+              </select>
             </FormGroup>
 
             <FormGroup label="Fecha programada (opcional)">
