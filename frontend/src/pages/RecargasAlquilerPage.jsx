@@ -28,6 +28,7 @@ const ESTADO_BADGE = {
 
 const badgeEstado = (estado) => `badge badge-${ESTADO_BADGE[estado] || 'PENDIENTE'}`
 const puedeCancelar = (estado) => ['SOLICITADA', 'ASIGNADA'].includes(estado)
+const tipoCorto = (t) => t === 'RECAMBIO_TUBO' ? 'Recambio' : 'Recarga'
 
 function Campo({ label, children, span }) {
   return (
@@ -110,13 +111,13 @@ export default function RecargasAlquilerPage() {
           </div>
         ) : (
           <>
-            {/* VISTA TABLE (Desktop) */}
+            {/* VISTA TABLE (Desktop) — resumen; el detalle completo va en el modal */}
             <div className="card table-wrap hide-mobile" style={{ padding: 0 }}>
               <table>
                 <thead>
                   <tr>
-                    <th>Nro</th><th>Cliente</th><th>Contrato</th><th>Plan</th><th>Tipo</th><th>Tubo</th>
-                    <th>Solicitada</th><th>Repartidor</th><th>Camión</th><th>Monto</th><th>Estado</th><th></th>
+                    <th>Nro</th><th>Cliente</th><th>Plan</th><th>Tipo</th>
+                    <th>Repartidor</th><th>Solicitada</th><th>Estado</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -124,25 +125,11 @@ export default function RecargasAlquilerPage() {
                     <tr key={o.id} style={{ cursor: 'pointer' }} onClick={() => setDetalle(o)}>
                       <td className="td-code" style={{ color: 'var(--blue)' }}>{o.numero}</td>
                       <td style={{ fontWeight: 500 }}>{o.cliente?.nombre}</td>
-                      <td className="td-code">{o.alquiler?.numero}</td>
                       <td>{o.alquiler?.plan?.nombre || '—'}</td>
-                      <td style={{ fontSize: 11 }}>{o.tipoServicio.replace(/_/g, ' ')}</td>
-                      <td className="td-code">{o.tubo?.id}</td>
-                      <td style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-                        {fecha(o.fechaSolicitud)}
-                        {o.fechaProgramada && (
-                          <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Prog: {fechaDia(o.fechaProgramada)}</div>
-                        )}
-                      </td>
-                      <td style={{ fontSize: 11 }}>{o.repartidor?.nombre || o.repartidor?.username || '—'}</td>
-                      <td style={{ fontSize: 11 }}>{o.camion?.placa || '—'}</td>
-                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{gs(o.precioAplicado)}</td>
+                      <td style={{ fontSize: 12 }}>{tipoCorto(o.tipoServicio)}</td>
+                      <td style={{ fontSize: 12 }}>{o.repartidor?.nombre || o.repartidor?.username || '—'}</td>
+                      <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{fecha(o.fechaSolicitud)}</td>
                       <td><span className={badgeEstado(o.estado)}>{o.estado.replace(/_/g, ' ')}</span></td>
-                      <td style={{ whiteSpace: 'nowrap' }}>
-                        {puedeCancelar(o.estado) && (
-                          <button className="btn btn-sm" onClick={(e) => { e.stopPropagation(); cancelarOrden(o) }}>Cancelar</button>
-                        )}
-                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -163,39 +150,21 @@ export default function RecargasAlquilerPage() {
                       <span className="list-card-value">{o.cliente?.nombre || '—'}</span>
                     </div>
                     <div className="list-card-item">
-                      <span className="list-card-label">Contrato</span>
-                      <span className="list-card-value">{o.alquiler?.numero || '—'}</span>
+                      <span className="list-card-label">Plan</span>
+                      <span className="list-card-value">{o.alquiler?.plan?.nombre || '—'}</span>
                     </div>
                     <div className="list-card-item">
                       <span className="list-card-label">Tipo</span>
-                      <span className="list-card-value">{o.tipoServicio.replace(/_/g, ' ')}</span>
-                    </div>
-                    <div className="list-card-item">
-                      <span className="list-card-label">Tubo</span>
-                      <span className="list-card-value">{o.tubo?.id || '—'}</span>
+                      <span className="list-card-value">{tipoCorto(o.tipoServicio)}</span>
                     </div>
                     <div className="list-card-item">
                       <span className="list-card-label">Repartidor</span>
                       <span className="list-card-value">{o.repartidor?.nombre || o.repartidor?.username || '—'}</span>
                     </div>
-                    <div className="list-card-item">
-                      <span className="list-card-label">Monto</span>
-                      <span className="list-card-value">{gs(o.precioAplicado)}</span>
-                    </div>
                     <div className="list-card-item" style={{ gridColumn: 'span 2' }}>
                       <span className="list-card-label">Solicitada</span>
-                      <span className="list-card-value">
-                        {fecha(o.fechaSolicitud)}{o.fechaProgramada ? ` · Prog: ${fechaDia(o.fechaProgramada)}` : ''}
-                      </span>
+                      <span className="list-card-value">{fecha(o.fechaSolicitud)}</span>
                     </div>
-                  </div>
-                  <div className="list-card-actions">
-                    <button className="btn btn-sm" style={{ flex: 1 }} onClick={(e) => { e.stopPropagation(); setDetalle(o) }}>
-                      <i className="ti ti-eye" /> Ver detalle
-                    </button>
-                    {puedeCancelar(o.estado) && (
-                      <button className="btn btn-sm btn-danger" onClick={(e) => { e.stopPropagation(); cancelarOrden(o) }}>Cancelar</button>
-                    )}
                   </div>
                 </div>
               ))}
