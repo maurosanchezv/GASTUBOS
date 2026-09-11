@@ -7,6 +7,8 @@ import { requireAuth, requireRol } from '../middleware/auth.js'
 import {
   calcularNivelAlerta,
   generarMensualidadesPendientes,
+  generarMensualidadesSiCorresponde,
+  resumenCobranza,
   registrarPagoCargo,
   anularCargo,
   ErrorPagoAlquiler,
@@ -24,10 +26,18 @@ function saldoPendiente(cargos) {
 // GET /api/alquileres — con filtro por estado (contrato) y cliente
 router.get('/', async (req, res, next) => {
   try {
-    const { estado, clienteId } = req.query
+    // Generación automática de mensualidades (reemplaza al botón manual):
+    // corre como máximo 1 vez cada 6 h. Si falla, se loguea y se sigue
+    // sirviendo la lista igual.
+    await generarMensualidadesSiCorresponde(prisma).catch(err =>
+      console.error('[generarMensualidadesSiCorresponde]', err.message)
+    )
+
+    const { estado, clienteId, estadoFinanciero } = req.query
     const where = {}
-    if (estado)    where.estado    = estado
-    if (clienteId) where.clienteId = clienteId
+    if (estado)           where.estado           = estado
+    if (clienteId)        where.clienteId        = clienteId
+    if (estadoFinanciero) where.estadoFinanciero = estadoFinanciero
 
     const alquileres = await prisma.alquiler.findMany({
       where,
@@ -102,6 +112,19 @@ router.get('/indicadores', async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
+// GET /api/alquileres/cobranza — panorama de vencidos y próximos a vencer, con
+// los cargos impagos de cada contrato. Lo usa el pop-up de "Generar mensualidades"
+// para refrescarse después de registrar un pago, sin volver a generar nada.
+// (Va antes de GET /:id para que no lo capture como un id.)
+router.get('/cobranza', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
+  try {
+    await generarMensualidadesSiCorresponde(prisma).catch(err =>
+      console.error('[generarMensualidadesSiCorresponde]', err.message)
+    )
+    res.json(await resumenCobranza(prisma))
+  } catch (err) { next(err) }
+})
+
 // GET /api/alquileres/:id — detalle completo del contrato
 router.get('/:id', async (req, res, next) => {
   try {
@@ -147,12 +170,12 @@ router.get('/:id', async (req, res, next) => {
 })
 
 // POST /api/alquileres/generar-mensualidades
-// Función central idempotente: crea las mensualidades que falten y refresca
-// el estado financiero de todos los contratos. Pensada para invocarse desde
-// este botón administrativo hoy, y desde un cron más adelante — sin cambios.
+// La generación ahora es automática (ver generarMensualidadesSiCorresponde en
+// GET / y GET /cobranza). Este endpoint queda como disparo manual forzado
+// (ignora el throttle) para soporte/debug — ya no hay botón en la UI.
 router.post('/generar-mensualidades', requireRol('ADMIN', 'SUPERVISOR'), async (req, res, next) => {
   try {
-    const resumen = await prisma.$transaction(tx => generarMensualidadesPendientes(tx))
+    const resumen = await generarMensualidadesSiCorresponde(prisma, { forzar: true })
 
     if (resumen.mensualidadesCreadas > 0) {
       await prisma.auditoria.create({
@@ -226,7 +249,18 @@ router.post('/:id/cargos/:cargoId/pagar', requireRol('ADMIN', 'SUPERVISOR', 'OPE
       },
     })
 
-    res.json(resultado)
+    // Datos del contrato/cliente para armar el recibo imprimible en el front
+    // (mismo esquema que la remisión de entregas y recargas).
+    const alquiler = await prisma.alquiler.findUnique({
+      where: { id },
+      select: {
+        numero: true,
+        cliente: { select: { nombre: true, ruc: true, telefono: true, direccion: true } },
+        plan: { select: { nombre: true } },
+      },
+    })
+
+    res.json({ ...resultado, alquiler, cobradoPor: req.user.nombre || req.user.username || null })
   } catch (err) {
     if (err instanceof z.ZodError) return res.status(400).json({ error: err.errors })
     next(err)

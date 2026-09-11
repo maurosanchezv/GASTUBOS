@@ -38,6 +38,21 @@ export async function asignarTuboInicial(tx, { alquilerId, tuboId, fechaDesde })
   })
 }
 
+// Cierra el AlquilerTubo activo de un contrato al finalizarlo (devolución,
+// recambio con retorno, etc.). Sin esto, el índice único parcial
+// alquiler_tubos_un_activo_por_tubo deja el tubo físico "ocupado" para
+// siempre y falla el próximo asignarTuboInicial() de ese mismo tubo.
+// Idempotente: si el contrato no tiene tubo activo, no hace nada.
+export async function cerrarTuboActivo(tx, { alquilerId, fecha } = {}) {
+  const activo = await tx.alquilerTubo.findFirst({ where: { alquilerId, activo: true } })
+  if (!activo) return null
+
+  return tx.alquilerTubo.update({
+    where: { id: activo.id },
+    data: { activo: false, fechaHasta: fecha || new Date() },
+  })
+}
+
 // Recambia el tubo activo de un contrato: cierra la asignación vigente y abre
 // una nueva, en la misma transacción, sin tocar fechaInicio/plan/mensualidad/
 // historial financiero/número de contrato. Actualiza Alquiler.tuboId en paralelo.

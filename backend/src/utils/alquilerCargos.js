@@ -9,16 +9,21 @@
 
 import { sumarDias, aMedianocheUTC, diasHasta } from './fechas.js'
 
+// Días de antelación con los que un contrato sin deuda pasa a contar como
+// "próximo a vencer". Único lugar donde se define el umbral: lo usan tanto el
+// estado financiero persistido como el nivel de alerta visual de la lista.
+export const DIAS_PROXIMO_VENCIMIENTO = 7
+
 // ─── Estado financiero ─────────────────────────────────────────────────────
 // VENCIDO            > hay un cargo PENDIENTE/PARCIAL cuya fecha de vencimiento ya pasó
 // PAGO_PENDIENTE      > hay un cargo PENDIENTE/PARCIAL, todavía no vencido
-// PROXIMO_VENCIMIENTO > nada pendiente, pero faltan <= 7 días para el próximo cobro
-// AL_DIA              > nada pendiente y faltan > 7 días
+// PROXIMO_VENCIMIENTO > nada pendiente, pero faltan <= DIAS_PROXIMO_VENCIMIENTO para el próximo cobro
+// AL_DIA              > nada pendiente y faltan > DIAS_PROXIMO_VENCIMIENTO
 export function calcularEstadoFinanciero({ proximaFechaCobro, cargosPendientes }) {
   const hayVencido = cargosPendientes.some(c => aMedianocheUTC(c.fechaVencimiento) < aMedianocheUTC(new Date()))
   if (hayVencido) return 'VENCIDO'
   if (cargosPendientes.length > 0) return 'PAGO_PENDIENTE'
-  if (diasHasta(proximaFechaCobro) <= 7) return 'PROXIMO_VENCIMIENTO'
+  if (diasHasta(proximaFechaCobro) <= DIAS_PROXIMO_VENCIMIENTO) return 'PROXIMO_VENCIMIENTO'
   return 'AL_DIA'
 }
 
@@ -29,7 +34,7 @@ export function calcularNivelAlerta(proximaFechaCobro) {
   if (dias < 0)  return 'vencido'        // rojo crítico
   if (dias === 0) return 'hoy'           // rojo
   if (dias <= 3) return 'proximo3'       // naranja
-  if (dias <= 7) return 'proximo7'       // amarillo
+  if (dias <= DIAS_PROXIMO_VENCIMIENTO) return 'proximo7'  // amarillo
   return 'normal'
 }
 
@@ -320,10 +325,20 @@ export async function generarMensualidadesPendientes(tx) {
 
   const alquileresActivos = await tx.alquiler.findMany({
     where: { estado: 'ACTIVO' },
-    include: { plan: true },
+    include: { plan: true, cliente: { select: { nombre: true } } },
   })
 
-  const resumen = { mensualidadesCreadas: 0, alquileresActualizados: 0, alquileresSinPlan: [] }
+  // vencidos / porVencer: panorama de cobranza para el pop-up de resultado.
+  // alquileresSinPlan: ids de contratos ACTIVO que no se pudieron procesar.
+  const resumen = {
+    mensualidadesCreadas: 0,
+    alquileresActualizados: 0,
+    alquileresSinPlan: [],
+    porCobrar: [],
+  }
+
+  // Cuántas cuotas generó cada contrato en esta corrida.
+  const generadasPorAlquiler = new Map()
 
   for (const alquiler of alquileresActivos) {
     if (!alquiler.plan || !alquiler.diasIncluidosAplicados) {
@@ -368,6 +383,7 @@ export async function generarMensualidadesPendientes(tx) {
           },
         })
         resumen.mensualidadesCreadas++
+        generadasPorAlquiler.set(alquiler.id, (generadasPorAlquiler.get(alquiler.id) || 0) + 1)
       }
 
       periodoHastaActual = periodoHasta
@@ -399,5 +415,97 @@ export async function generarMensualidadesPendientes(tx) {
     await recalcularEstadoFinancieroAlquiler(tx, alquilerId)
   }
 
+  // Panorama de cobranza DESPUÉS de recalcular.
+  resumen.porCobrar = (await resumenCobranza(tx, { generadas: generadasPorAlquiler })).porCobrar
+
   return resumen
+}
+
+// ─── Disparo automático con throttle ──────────────────────────────────────
+// Reemplaza al botón "Generar mensualidades": se llama al abrir la lista de
+// alquileres o el panel de cobranza. Corre la generación+recálculo como
+// máximo 1 vez cada VENTANA_MS (en memoria del proceso, se resetea al
+// reiniciar la API). Si falla, deja que se reintente en la próxima llamada y
+// NO propaga el error salvo que el caller lo quiera (por defecto lo traga).
+const VENTANA_GENERACION_MS = 6 * 60 * 60 * 1000
+let ultimaGeneracion = 0
+
+export async function generarMensualidadesSiCorresponde(prisma, { forzar = false } = {}) {
+  if (!forzar && Date.now() - ultimaGeneracion < VENTANA_GENERACION_MS) return null
+  ultimaGeneracion = Date.now()
+  try {
+    return await prisma.$transaction(tx => generarMensualidadesPendientes(tx))
+  } catch (err) {
+    ultimaGeneracion = 0 // permitir reintento inmediato en la próxima request
+    throw err
+  }
+}
+
+// Panorama de cobranza: contratos ACTIVO con plata a cobrar AHORA — vencidos
+// (VENCIDO) o con un cargo impago todavía no vencido (PAGO_PENDIENTE). Los
+// PROXIMO_VENCIMIENTO sin deuda no entran. Lista plana, más urgente primero,
+// cada item con sus cargos impagos para poder cobrar directo desde el panel.
+//   - generadas: Map(alquilerId -> nº de cuotas creadas en la corrida actual)
+//     — solo lo pasa generarMensualidadesPendientes; desde la ruta va vacío.
+export async function resumenCobranza(db, { generadas = new Map() } = {}) {
+  const abiertos = await db.alquiler.findMany({
+    where: {
+      estado: 'ACTIVO', // los PENDIENTE_ENTREGA no tienen nada que cobrar todavía
+      estadoFinanciero: { in: ['VENCIDO', 'PAGO_PENDIENTE'] },
+    },
+    select: {
+      id: true, numero: true, fechaVencimiento: true, estadoFinanciero: true,
+      cliente: { select: { nombre: true, telefono: true } },
+      plan: { select: { nombre: true } },
+      cargos: {
+        where: { estado: { not: 'ANULADO' } },
+        select: { id: true, tipo: true, monto: true, montoPagado: true, estado: true, fechaVencimiento: true, periodoDesde: true, periodoHasta: true },
+        orderBy: { fechaVencimiento: 'asc' },
+      },
+    },
+  })
+
+  const porCobrar = []
+
+  for (const a of abiertos) {
+    const impagos = a.cargos.filter(c => ['PENDIENTE', 'PARCIAL', 'VENCIDO'].includes(c.estado))
+    if (impagos.length === 0) continue // sin deuda real, no se lista
+
+    const saldoPendiente = impagos.reduce((s, c) => s + (Number(c.monto) - Number(c.montoPagado)), 0)
+    // Fecha del cargo impago más viejo — desde cuándo se debe.
+    const desde = impagos.reduce((min, c) => (!min || c.fechaVencimiento < min ? c.fechaVencimiento : min), null)
+    const dias = desde ? diasHasta(desde) : 0 // >0 = falta / <=0 = vencido
+
+    porCobrar.push({
+      id: a.id,
+      numero: a.numero,
+      cliente: a.cliente?.nombre || '',
+      telefono: a.cliente?.telefono || '',
+      plan: a.plan?.nombre || '',
+      estadoFinanciero: a.estadoFinanciero,
+      proximaFechaCobro: a.fechaVencimiento,
+      venceDesde: desde,
+      dias,                       // negativo o 0 = vencido; positivo = faltan N días
+      diasAtraso: Math.max(0, -dias),
+      nivelAlerta: calcularNivelAlerta(desde),
+      saldoPendiente,
+      cuotasGeneradas: generadas.get(a.id) || 0,
+      cargosPendientes: impagos.map(c => ({
+        id: c.id,
+        tipo: c.tipo,
+        monto: Number(c.monto),
+        montoPagado: Number(c.montoPagado),
+        estado: c.estado,
+        fechaVencimiento: c.fechaVencimiento,
+        periodoDesde: c.periodoDesde,
+        periodoHasta: c.periodoHasta,
+      })),
+    })
+  }
+
+  // Vencidos primero (más atraso arriba), después los que aún no vencen (más
+  // cerca de vencer arriba).
+  porCobrar.sort((x, y) => x.dias - y.dias)
+
+  return { porCobrar }
 }

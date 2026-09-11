@@ -1,8 +1,12 @@
 // gastubos/frontend/src/pages/AlquileresPage.jsx
 import { Fragment, useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import api from '../services/api.js'
 import { PageHeader, Spinner, EmptyState, Modal, FormGroup, useToast } from '../components/ui.jsx'
-import { useAuthStore } from '../store/authStore.js'
+import { useConfigStore } from '../store/configStore.js'
+import { getBrandingSources } from '../utils/logosSvg.js'
+import { construirBufferTicketReciboAlquiler } from '../utils/ticketsImpresion.js'
+import { conectarImpresoraWebBluetooth, enviarBufferWebBluetooth, esNavegadorMovilConWebBluetooth } from '../utils/webBluetoothPrinter.js'
 
 const NIVEL_ALERTA = {
   normal:    { color: 'var(--text-secondary)', label: null },
@@ -14,17 +18,26 @@ const NIVEL_ALERTA = {
 
 const gs = (val) => Number(val || 0).toLocaleString('es-PY') + ' Gs'
 const fecha = (val) => val ? new Date(val).toLocaleDateString('es-PY') : '—'
+const fechaHora = (val) => val ? new Date(val).toLocaleString('es-PY') : '—'
+
+// Etiqueta legible del concepto de un cargo, para el recibo de pago.
+const CONCEPTO_LABEL = {
+  INICIAL: 'Pago inicial de alquiler',
+  MENSUALIDAD: 'Mensualidad de alquiler',
+  RECARGA_DOMICILIO: 'Recarga a domicilio',
+  OTRO: 'Otro concepto',
+}
 
 export default function AlquileresPage() {
-  const { user } = useAuthStore()
   const { toast } = useToast()
-  const puedeGestionar = ['ADMIN', 'SUPERVISOR'].includes(user?.rol)
+  const { nombre_empresa, direccion, telefono, isotipo_empresa, logo_empresa } = useConfigStore()
+  const branding = getBrandingSources(isotipo_empresa, logo_empresa)
 
   const [alquileres, setAlquileres] = useState([])
   const [indicadores, setIndicadores] = useState(null)
+  const [cobranza, setCobranza] = useState([]) // contratos con plata a cobrar ahora (panel derecho)
   const [loading, setLoading] = useState(true)
   const [filtro, setFiltro] = useState('todos')
-  const [generando, setGenerando] = useState(false)
 
   const [detalle, setDetalle] = useState(null)
   const [cargandoDetalle, setCargandoDetalle] = useState(false)
@@ -33,6 +46,7 @@ export default function AlquileresPage() {
   const [cargosExpandidos, setCargosExpandidos] = useState(new Set())
   const [formPago, setFormPago] = useState({ montoPagado: '', metodoPago: 'EFECTIVO' })
   const [guardandoPago, setGuardandoPago] = useState(false)
+  const [reciboPago, setReciboPago] = useState(null) // { cargo, pago, alquiler, cobradoPor } tras un pago exitoso
 
   const [modalRecarga, setModalRecarga] = useState(false)
   const [formRecarga, setFormRecarga] = useState({ tipoServicio: 'RECARGA_MISMO_TUBO', repartidorId: '', camionId: '', fechaProgramada: '', observaciones: '' })
@@ -42,12 +56,14 @@ export default function AlquileresPage() {
 
   const load = async () => {
     try {
-      const [rLista, rInd] = await Promise.all([
+      const [rLista, rInd, rCob] = await Promise.all([
         api.get('/alquileres'),
         api.get('/alquileres/indicadores'),
+        api.get('/alquileres/cobranza'),
       ])
       setAlquileres(rLista.data)
       setIndicadores(rInd.data)
+      setCobranza(rCob.data.porCobrar || [])
     } catch (err) {
       toast('Error al cargar alquileres', 'error')
     } finally {
@@ -70,6 +86,7 @@ export default function AlquileresPage() {
   const lista = alquileres.filter(a => {
     if (filtro === 'activos')            return a.estado === 'ACTIVO'
     if (filtro === 'pendiente_entrega')  return a.estado === 'PENDIENTE_ENTREGA'
+    if (filtro === 'por_vencer')         return a.estadoFinanciero === 'PROXIMO_VENCIMIENTO'
     if (filtro === 'vencidos')           return a.estadoFinanciero === 'VENCIDO'
     if (filtro === 'finalizados')        return ['FINALIZADO', 'CANCELADO'].includes(a.estado)
     return true
@@ -89,26 +106,6 @@ export default function AlquileresPage() {
     }
   }
 
-  async function generarMensualidades() {
-    setGenerando(true)
-    try {
-      const r = await api.post('/alquileres/generar-mensualidades')
-      const { mensualidadesCreadas } = r.data
-      toast(
-        mensualidadesCreadas > 0
-          ? `${mensualidadesCreadas} mensualidad(es) generada(s)`
-          : 'No había mensualidades pendientes de generar',
-        'success'
-      )
-      load()
-      if (detalle?.id) abrirDetalle(detalle.id)
-    } catch (err) {
-      toast(err.response?.data?.error || 'Error al generar mensualidades', 'error')
-    } finally {
-      setGenerando(false)
-    }
-  }
-
   function toggleCargoExpandido(cargoId) {
     setCargosExpandidos(prev => {
       const next = new Set(prev)
@@ -124,6 +121,47 @@ export default function AlquileresPage() {
     setModalPago({ alquilerId, cargo })
   }
 
+  // Reimprime el recibo de un cargo ya cobrado, desde el historial financiero
+  // del contrato. Arma el mismo objeto que deja un pago recién hecho.
+  function imprimirReciboCargo(c) {
+    const pagos = c.pagos || []
+    if (pagos.length === 0) return
+    const totalAbonado = pagos.reduce((s, p) => s + Number(p.monto), 0)
+    const ultimo = pagos[pagos.length - 1]
+    setReciboPago({
+      cargo: c,
+      pago: {
+        monto: totalAbonado,
+        metodoPago: pagos.length > 1 ? 'Varios' : ultimo.metodoPago,
+        fechaPago: ultimo.fechaPago,
+      },
+      alquiler: { numero: detalle.numero, cliente: detalle.cliente, plan: detalle.plan },
+      cobradoPor: ultimo.usuario?.nombre || ultimo.usuario?.username || null,
+      montoAbonado: totalAbonado,
+    })
+  }
+
+  // Impresión del recibo: en el celular manda a la térmica por Web Bluetooth
+  // (igual que el ticket de Entregas); en PC usa el diálogo del navegador.
+  async function handleImprimirRecibo() {
+    if (!reciboPago) return
+    if (esNavegadorMovilConWebBluetooth()) {
+      try {
+        const config = { branding, nombreEmpresa: nombre_empresa, direccion, telefono, paperWidth: 32 }
+        const buffer = await construirBufferTicketReciboAlquiler(reciboPago, config)
+        const conexion = await conectarImpresoraWebBluetooth()
+        await enviarBufferWebBluetooth(conexion, buffer)
+        toast('Impresión enviada correctamente', 'success')
+      } catch (err) {
+        if (err?.name !== 'NotFoundError') {
+          toast('Error al imprimir: ' + (err?.message || String(err)), 'error')
+        }
+      }
+    } else {
+      window.print()
+    }
+  }
+
   async function confirmarPago(e) {
     e.preventDefault()
     if (!formPago.montoPagado || Number(formPago.montoPagado) <= 0) {
@@ -131,13 +169,15 @@ export default function AlquileresPage() {
     }
     setGuardandoPago(true)
     try {
-      await api.post(`/alquileres/${modalPago.alquilerId}/cargos/${modalPago.cargo.id}/pagar`, {
+      const { data } = await api.post(`/alquileres/${modalPago.alquilerId}/cargos/${modalPago.cargo.id}/pagar`, {
         montoPagado: Number(formPago.montoPagado),
         metodoPago: formPago.metodoPago,
       })
       toast('Pago registrado correctamente', 'success')
       setModalPago(null)
-      load()
+      // Recibo imprimible del pago (mismo esquema que la remisión de entregas/recargas).
+      setReciboPago({ ...data, montoAbonado: Number(formPago.montoPagado) })
+      load() // refresca lista, indicadores y el panel de cobranza
       if (detalle?.id === modalPago.alquilerId) abrirDetalle(modalPago.alquilerId)
     } catch (err) {
       toast(err.response?.data?.error || 'Error al registrar el pago', 'error')
@@ -205,6 +245,7 @@ export default function AlquileresPage() {
     ['todos', 'Todos'],
     ['activos', 'Activos'],
     ['pendiente_entrega', 'Pendiente entrega'],
+    ['por_vencer', 'Próximos a vencer'],
     ['vencidos', 'Vencidos'],
     ['finalizados', 'Finalizados'],
   ]
@@ -214,14 +255,10 @@ export default function AlquileresPage() {
       <PageHeader
         title="Alquileres"
         subtitle="Panel de gestión de contratos de alquiler de equipos"
-        actions={puedeGestionar && (
-          <button className="btn btn-sm" onClick={generarMensualidades} disabled={generando}>
-            <i className={`ti ${generando ? 'ti-spin ti-refresh' : 'ti-refresh'}`} />
-            {generando ? 'Generando...' : 'Generar mensualidades'}
-          </button>
-        )}
       />
       <div className="app-content">
+       <div className="responsive-grid" style={{ gridTemplateColumns: '1fr 320px', flexDirection: 'column' }}>
+        <div>
         {indicadores && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 20 }}>
             <div className="stat-card">
@@ -349,6 +386,64 @@ export default function AlquileresPage() {
             </div>
           </>
         )}
+        </div>
+
+        {/* ── Panel derecho: Mensualidades a cobrar ── */}
+        <div className="card" style={{ height: 'fit-content', position: 'sticky', top: 16 }}>
+          <div className="card-title" style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span><i className="ti ti-cash" aria-hidden /> Mensualidades a cobrar ({cobranza.length})</span>
+          </div>
+          {cobranza.length === 0 ? (
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', padding: '16px 0' }}>
+              Nada por cobrar ahora mismo.
+            </p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {cobranza.map(c => {
+                const alerta = NIVEL_ALERTA[c.nivelAlerta] || NIVEL_ALERTA.normal
+                const textoDias = c.dias > 0
+                  ? `Vence en ${c.dias} día${c.dias === 1 ? '' : 's'}`
+                  : c.dias === 0
+                    ? 'Vence hoy'
+                    : `Vencido hace ${c.diasAtraso} día${c.diasAtraso === 1 ? '' : 's'}`
+                const cargo = c.cargosPendientes[0]
+                return (
+                  <div
+                    key={c.id}
+                    className="list-card"
+                    style={{ padding: '10px 12px', cursor: 'pointer', background: 'var(--surface-2)', border: '1px solid var(--border)', borderLeft: `3px solid ${alerta.color}`, borderRadius: 8 }}
+                    onClick={() => abrirDetalle(c.id)}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: 'var(--blue)' }}>{c.numero}</span>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: alerta.color, textAlign: 'right' }}>{textoDias}</span>
+                    </div>
+                    <div style={{ fontSize: 11, fontWeight: 500, marginBottom: 6 }}>{c.cliente || '—'}</div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: 'var(--red)' }}>
+                        {gs(c.saldoPendiente)}
+                        {c.cargosPendientes.length > 1 && (
+                          <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontFamily: 'inherit' }}> · {c.cargosPendientes.length} cuotas</span>
+                        )}
+                      </span>
+                      {cargo && (
+                        <button
+                          className="btn btn-sm btn-primary"
+                          style={{ flexShrink: 0 }}
+                          onClick={(e) => { e.stopPropagation(); abrirPago(c.id, cargo) }}
+                        >
+                          <i className="ti ti-cash" /> Cobrar
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+       </div>
       </div>
 
       {/* Modal de detalle del contrato */}
@@ -413,6 +508,11 @@ export default function AlquileresPage() {
                               <td style={{ whiteSpace: 'nowrap' }}>
                                 {['PENDIENTE', 'PARCIAL', 'VENCIDO'].includes(c.estado) && (
                                   <button className="btn btn-sm btn-primary" onClick={() => abrirPago(detalle.id, c)}>Registrar pago</button>
+                                )}
+                                {tienePagos && (
+                                  <button className="btn btn-sm" style={{ marginLeft: 6 }} onClick={() => imprimirReciboCargo(c)} title="Imprimir recibo de este cargo">
+                                    <i className="ti ti-printer" /> Recibo
+                                  </button>
                                 )}
                                 {c.estado !== 'ANULADO' && !tienePagos && (
                                   <button className="btn btn-sm" style={{ marginLeft: 6 }} onClick={() => anularCargoDetalle(detalle.id, c)}>Anular</button>
@@ -568,7 +668,8 @@ export default function AlquileresPage() {
         )}
       </Modal>
 
-      {/* Modal de registrar pago */}
+      {/* Modal de registrar pago — va último para que quede por encima del
+          pop-up de cobranza cuando se cobra desde ahí. */}
       <Modal
         open={!!modalPago}
         title={`Registrar pago — ${modalPago?.cargo?.tipo?.replace(/_/g, ' ') || ''}`}
@@ -599,6 +700,110 @@ export default function AlquileresPage() {
           </form>
         )}
       </Modal>
+
+      {/* Modal "Pago registrado" — con el recibo imprimible del pago */}
+      <Modal
+        open={!!reciboPago}
+        title="Pago registrado"
+        onClose={() => setReciboPago(null)}
+        width={420}
+        footer={
+          <>
+            <button className="btn" onClick={() => setReciboPago(null)}>Cerrar</button>
+            <button className="btn btn-primary" onClick={handleImprimirRecibo}>
+              <i className="ti ti-printer" /> Imprimir recibo
+            </button>
+          </>
+        }
+      >
+        {reciboPago && (() => {
+          const { cargo, alquiler, montoAbonado } = reciboPago
+          const saldoCargo = Number(cargo.monto) - Number(cargo.montoPagado)
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 13 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-muted)' }}>Contrato</span><span style={{ fontFamily: 'var(--font-mono)' }}>{alquiler?.numero || '—'}</span></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-muted)' }}>Concepto</span><span>{CONCEPTO_LABEL[cargo.tipo] || cargo.tipo}</span></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-muted)' }}>Período</span><span>{fecha(cargo.periodoDesde)} → {fecha(cargo.periodoHasta)}</span></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}><span>Abonado</span><span style={{ fontFamily: 'var(--font-mono)' }}>{gs(montoAbonado)}</span></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Saldo del cargo</span>
+                <span style={{ fontFamily: 'var(--font-mono)', color: saldoCargo > 0 ? 'var(--red)' : 'var(--green)', fontWeight: 700 }}>{gs(saldoCargo)}</span>
+              </div>
+            </div>
+          )
+        })()}
+      </Modal>
+
+      {/* Recibo imprimible (solo visible al imprimir; se dispara desde el modal de arriba) */}
+      {reciboPago && createPortal(
+        (() => {
+          const { cargo, pago, alquiler, cobradoPor, montoAbonado } = reciboPago
+          const saldoCargo = Number(cargo.monto) - Number(cargo.montoPagado)
+          return (
+            <div className="print-ticket-container">
+              <div className="ticket-header">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', marginBottom: '10px' }}>
+                  <img src={branding.isotipoSrc} alt="Isotipo" style={{ width: '40px', height: '40px', objectFit: 'contain' }} />
+                  <img src={branding.logoSrc} alt="Logo" style={{ width: '108px', height: '40px', objectFit: 'contain' }} />
+                </div>
+                {direccion ? <p style={{ margin: 0, fontSize: '10px' }}>{direccion}</p> : <p style={{ margin: 0, fontSize: '10px' }}>{nombre_empresa || 'GasTubos'}</p>}
+                {telefono && <p style={{ margin: '2px 0 0', fontSize: '10px' }}>Tel: {telefono}</p>}
+                <p style={{ margin: '4px 0 0', fontSize: '11px', fontWeight: 'bold' }}>RECIBO DE PAGO — ALQUILER</p>
+                <p style={{ margin: '2px 0 0', fontSize: '10px' }}>Contrato {alquiler?.numero || '—'}</p>
+              </div>
+
+              <div style={{ margin: '8px 0', fontSize: '11px' }}>
+                <strong>Cliente:</strong> {alquiler?.cliente?.nombre || '—'}<br />
+                <strong>RUC/CI:</strong> {alquiler?.cliente?.ruc || '—'}<br />
+                <strong>Dirección:</strong> {alquiler?.cliente?.direccion || '—'}<br />
+                <strong>Fecha:</strong> {fechaHora(pago?.fechaPago)}<br />
+                <strong>Cobrado por:</strong> {cobradoPor || '—'}<br />
+                <strong>Plan:</strong> {alquiler?.plan?.nombre || '—'}
+              </div>
+
+              <table className="ticket-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px dashed #000' }}>
+                    <th style={{ textAlign: 'left', paddingBottom: '4px' }}>Concepto</th>
+                    <th style={{ textAlign: 'right', paddingBottom: '4px' }}>Monto</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td style={{ paddingTop: '6px' }}>
+                      <strong>{CONCEPTO_LABEL[cargo.tipo] || cargo.tipo}</strong><br />
+                      <span style={{ fontSize: '10px', color: '#555' }}>
+                        Período {fecha(cargo.periodoDesde)} → {fecha(cargo.periodoHasta)}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'right', fontWeight: 500, paddingTop: '6px' }}>{gs(montoAbonado)}</td>
+                  </tr>
+                  <tr style={{ borderTop: '1px dashed #000' }}>
+                    <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px', paddingTop: '6px' }}>TOTAL ABONADO:</td>
+                    <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px', paddingTop: '6px' }}>{gs(montoAbonado)}</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <div style={{ margin: '8px 0', fontSize: '11px' }}>
+                <strong>Forma de pago:</strong> {pago?.metodoPago || '—'}<br />
+                <strong>Monto del cargo:</strong> {gs(cargo.monto)}
+                {saldoCargo > 0 && <><br /><strong>Saldo pendiente:</strong> {gs(saldoCargo)}</>}
+                {saldoCargo <= 0 && <><br /><strong>Estado:</strong> CANCELADO</>}
+              </div>
+
+              <div className="ticket-signatures" style={{ display: 'flex', justifyContent: 'center', marginTop: '24px', paddingTop: '10px' }}>
+                <div className="signature-line" style={{ width: '60%', borderTop: '1px solid #000', textAlign: 'center', fontSize: '10px', paddingTop: '4px' }}>Firma Cliente</div>
+              </div>
+
+              <div className="ticket-footer" style={{ textAlign: 'center', borderTop: '1px dashed #000', paddingTop: '8px', marginTop: '16px', fontSize: '10px' }}>
+                ¡Gracias por su preferencia!
+              </div>
+            </div>
+          )
+        })(),
+        document.body
+      )}
     </>
   )
 }

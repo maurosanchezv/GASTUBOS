@@ -453,6 +453,100 @@ export async function construirBufferTicketRecargaAlquiler(orden, config) {
   return builder.getBuffer()
 }
 
+// Recibo de un pago sobre un cargo de alquiler (mensualidad, inicial, etc.).
+// `recibo` = { cargo, pago, alquiler:{numero,cliente,plan}, cobradoPor, montoAbonado }
+// Mismo esquema que construirBufferTicketRecargaAlquiler.
+export async function construirBufferTicketReciboAlquiler(recibo, config) {
+  const { branding, nombreEmpresa, direccion, telefono, paperWidth } = config
+  const { cargo, pago, alquiler, cobradoPor, montoAbonado } = recibo
+
+  let logoBytes = null
+  try {
+    logoBytes = await generarLogoEscPos(branding.isotipoSrc, branding.logoSrc)
+  } catch (e) {
+    console.warn('No se pudo generar el logo para la impresion:', e)
+  }
+
+  const builder = new EscPosBuilder()
+  const width = paperWidth
+  const { wrapText, justify, line, doubleLine } = crearHelpersTicket(width)
+
+  const CONCEPTO = {
+    INICIAL: 'Pago inicial de alquiler',
+    MENSUALIDAD: 'Mensualidad de alquiler',
+    RECARGA_DOMICILIO: 'Recarga a domicilio',
+    OTRO: 'Otro concepto',
+  }
+  const gsStr = (v) => Number(v || 0).toLocaleString('es-PY') + ' GS'
+  const dia = (v) => v ? new Date(v).toLocaleDateString('es-PY') : '-'
+
+  const abonado = Number(montoAbonado ?? pago?.monto ?? 0)
+  const totalCargo = Number(cargo?.monto || 0)
+  const pagadoAcum = Number(cargo?.montoPagado || 0)
+  const saldo = Math.max(0, totalCargo - pagadoAcum)
+
+  builder.initialize()
+  if (logoBytes) {
+    builder.addBytes(logoBytes)
+    builder.addTextLine('')
+  } else {
+    builder.alignCenter().boldOn().doubleSizeOn().addTextLine((nombreEmpresa || 'GASTUBOS').toUpperCase()).doubleSizeOff()
+  }
+
+  builder.alignCenter()
+  if (direccion) wrapText(direccion, width).forEach(l => builder.addTextLine(l))
+  if (telefono) wrapText('Tel: ' + telefono, width).forEach(l => builder.addTextLine(l))
+  builder.addTextLine(doubleLine())
+
+  builder.alignLeft().boldOn().addTextLine('RECIBO DE PAGO - ALQUILER').boldOff()
+  builder.addTextLine('Contrato: ' + (alquiler?.numero || '-'))
+  builder.addTextLine(line())
+
+  wrapText('Cliente: ' + (alquiler?.cliente?.nombre || ''), width).forEach(l => builder.addTextLine(l))
+  builder.addTextLine('RUC/CI: ' + (alquiler?.cliente?.ruc || '-'))
+  wrapText('Direccion: ' + (alquiler?.cliente?.direccion || ''), width).forEach(l => builder.addTextLine(l))
+  builder.addTextLine('Fecha: ' + new Date(pago?.fechaPago || Date.now()).toLocaleString('es-PY'))
+  builder.addTextLine('Cobrado por: ' + (cobradoPor || '-'))
+  if (alquiler?.plan?.nombre) {
+    wrapText('Plan: ' + alquiler.plan.nombre, width).forEach(l => builder.addTextLine(l))
+  }
+  builder.addTextLine(doubleLine())
+
+  builder.boldOn().addTextLine(justify('CONCEPTO', 'MONTO')).boldOff()
+  builder.addTextLine(line())
+  builder.addTextLine((CONCEPTO[cargo?.tipo] || cargo?.tipo || 'Cargo').slice(0, width))
+  wrapText(`  Periodo ${dia(cargo?.periodoDesde)} - ${dia(cargo?.periodoHasta)}`, width).forEach(l => builder.addTextLine(l))
+  builder.addTextLine(justify('  Abonado', gsStr(abonado)))
+  builder.addTextLine(line())
+  builder.boldOn().addTextLine(justify('TOTAL ABONADO:', gsStr(abonado))).boldOff()
+  builder.addTextLine(doubleLine())
+
+  builder.addTextLine('Forma de pago: ' + (pago?.metodoPago || '-'))
+  builder.addTextLine('Monto del cargo: ' + gsStr(totalCargo))
+  if (saldo > 0) {
+    builder.boldOn().addTextLine('SALDO PENDIENTE: ' + gsStr(saldo)).boldOff()
+  } else {
+    builder.boldOn().addTextLine('CARGO CANCELADO').boldOff()
+  }
+  builder.addTextLine(doubleLine())
+
+  builder.addTextLine('').addTextLine('')
+  const lineLength = width >= 48 ? 18 : 13
+  const soloLine = '-'.repeat(lineLength)
+  const padCentro = Math.max(0, Math.floor((width - lineLength) / 2))
+  builder.addTextLine(' '.repeat(padCentro) + soloLine)
+  const labelFirma = 'Firma Cliente'
+  const padLabel = Math.max(0, Math.floor((width - labelFirma.length) / 2))
+  builder.addTextLine(' '.repeat(padLabel) + labelFirma)
+  builder.addTextLine('')
+
+  builder.alignCenter().boldOn().addTextLine('Gracias por su preferencia!').boldOff()
+
+  builder.addTextLine('').addTextLine('').addTextLine('').addTextLine('').addTextLine('').addTextLine('')
+  builder.feedLines(4)
+  return builder.getBuffer()
+}
+
 export async function construirBufferTicketCargaSalon(carga, config) {
   const { branding, nombreEmpresa, direccion, telefono, paperWidth } = config
 

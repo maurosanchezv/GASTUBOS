@@ -13,7 +13,7 @@ import { registrarAuditoria } from '../utils/auditoria.js'
 import { generarNumero, mapTuboGasToTipoGas } from '../utils/helpers.js'
 import { sumarDias, aMedianocheUTC } from '../utils/fechas.js'
 import { crearCargoInicial, crearCargoDelivery } from '../utils/alquilerCargos.js'
-import { asignarTuboInicial } from '../utils/alquilerTubos.js'
+import { asignarTuboInicial, cerrarTuboActivo } from '../utils/alquilerTubos.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -634,11 +634,21 @@ router.put('/:id/confirmar', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR', 'REPA
               }
             })
 
-            // Finalizar alquileres del tubo retornado si corresponden
-            await tx.alquiler.updateMany({
+            // Finalizar alquileres del tubo retornado si corresponden: el
+            // contrato pasa a FINALIZADO y se cierra su AlquilerTubo abierto,
+            // si no ese tubo queda trabado para futuros alquileres.
+            const fechaRetorno = new Date()
+            const alquileresDelTubo = await tx.alquiler.findMany({
               where: { tuboId: tuboRetornadoId, estado: { in: ['ACTIVO', 'VENCIDO'] } },
-              data:  { estado: 'FINALIZADO', fechaDevolucion: new Date() },
+              select: { id: true },
             })
+            for (const { id: alquilerId } of alquileresDelTubo) {
+              await tx.alquiler.update({
+                where: { id: alquilerId },
+                data:  { estado: 'FINALIZADO', fechaDevolucion: fechaRetorno },
+              })
+              await cerrarTuboActivo(tx, { alquilerId, fecha: fechaRetorno })
+            }
 
             // Crear registro de Recambio
             await tx.recambio.create({

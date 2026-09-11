@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { prisma } from '../utils/prisma.js'
 import { requireAuth, requireRol } from '../middleware/auth.js'
 import { registrarAuditoria } from '../utils/auditoria.js'
+import { cerrarTuboActivo } from '../utils/alquilerTubos.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -44,11 +45,21 @@ router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR', 'REPARTIDOR'), as
         },
       })
 
-      // Si tenía alquiler activo, cerrarlo
-      await tx.alquiler.updateMany({
+      // Si tenía alquiler activo, cerrarlo: el contrato pasa a FINALIZADO y
+      // además hay que cerrar su AlquilerTubo abierto, si no ese tubo queda
+      // trabado para futuros alquileres (índice único parcial por tubo activo).
+      const fechaDevolucion = new Date()
+      const alquileresActivos = await tx.alquiler.findMany({
         where: { tuboId, estado: { in: ['ACTIVO', 'VENCIDO'] } },
-        data:  { estado: 'FINALIZADO', fechaDevolucion: new Date() },
+        select: { id: true },
       })
+      for (const { id: alquilerId } of alquileresActivos) {
+        await tx.alquiler.update({
+          where: { id: alquilerId },
+          data:  { estado: 'FINALIZADO', fechaDevolucion },
+        })
+        await cerrarTuboActivo(tx, { alquilerId, fecha: fechaDevolucion })
+      }
 
       // Auditoría
       await tx.auditoria.create({
