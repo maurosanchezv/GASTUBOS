@@ -33,6 +33,8 @@ import DiagnosticoBluetoothPage from './pages/DiagnosticoBluetoothPage.jsx'  // 
 import CilindrosTercerosPage from './pages/CilindrosTercerosPage.jsx'
 import ProductosPage      from './pages/ProductosPage.jsx'
 import VentaProductosPage from './pages/VentaProductosPage.jsx'
+import PlanesAlquilerPage from './pages/PlanesAlquilerPage.jsx'
+import RecargasAlquilerPage from './pages/RecargasAlquilerPage.jsx'
 
 // El REPARTIDOR no debe ver el Dashboard administrativo; lo desviamos
 // directo a su hoja de ruta. El resto de los roles entra al Dashboard.
@@ -103,10 +105,16 @@ export default function App() {
           <Route path="venta-productos" element={
             <PrivateRoute roles={['ADMIN', 'SUPERVISOR', 'OPERADOR']}><VentaProductosPage /></PrivateRoute>
           } />
-          {/* Rutas temporalmente deshabilitadas
           <Route path="alquileres" element={
             <PrivateRoute roles={['ADMIN', 'SUPERVISOR', 'OPERADOR']}><AlquileresPage /></PrivateRoute>
           } />
+          <Route path="planes-alquiler" element={
+            <PrivateRoute roles={['ADMIN']}><PlanesAlquilerPage /></PrivateRoute>
+          } />
+          <Route path="recargas-alquiler" element={
+            <PrivateRoute roles={['ADMIN', 'SUPERVISOR', 'OPERADOR']}><RecargasAlquilerPage /></PrivateRoute>
+          } />
+          {/* Ruta temporalmente deshabilitada
           <Route path="ventas" element={
             <PrivateRoute roles={['ADMIN', 'SUPERVISOR', 'OPERADOR']}><VentasPage /></PrivateRoute>
           } /> */}

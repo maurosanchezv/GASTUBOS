@@ -5,6 +5,7 @@
 // desde el envío por Web Bluetooth (navegador, ver webBluetoothPrinter.js).
 import { EscPosBuilder, generarLogoEscPos } from './escPosBuilder.js'
 import { formatCapacidad } from '../components/ui.jsx'
+import { precioFilaDetalle, subtotalItemsTicket } from './ticketMontos.js'
 
 export const formatNumberSpanish = (val) => {
   const num = Number(val)
@@ -66,6 +67,57 @@ function crearHelpersTicket(width) {
   const line = () => '-'.repeat(width)
   const doubleLine = () => '='.repeat(width)
   return { wrapText, justify, line, doubleLine }
+}
+
+// Bloque "Detalle del plan de alquiler" para los tickets térmicos de remisión.
+// Solo imprime algo si la entrega es ALQUILER y tiene contratos con datos.
+// `opts`: { incluirEstado } — el estado del equipo solo aplica al comprobante
+// final (en la remisión de salida todavía no se cargó). Sin cláusula de
+// comodato ni línea de firma: el ticket es solo el desglose del equipo.
+function imprimirBloquePlanAlquiler(builder, entrega, helpers, width, opts = {}) {
+  if (!entrega || entrega.tipoOperacion !== 'ALQUILER') return
+  const { wrapText, line } = helpers
+  const alquileres = (entrega.alquileres || []).filter(a => a.estado !== 'CANCELADO')
+  if (alquileres.length === 0) return
+
+  const plan = alquileres[0].plan
+  builder.addTextLine(line())
+  builder.boldOn().addTextLine('DETALLE PLAN DE ALQUILER').boldOff()
+  builder.addTextLine('Operacion: Entrega de alquiler')
+  if (plan?.nombre) {
+    wrapText('Plan: ' + plan.nombre, width).forEach(l => builder.addTextLine(l))
+  }
+
+  const varios = alquileres.length > 1
+  alquileres.forEach((a, idx) => {
+    builder.addTextLine(line())
+    const cab = (varios ? `EQUIPO ${idx + 1} - ` : '') + `Contrato ${a.numero}`
+    wrapText(cab, width).forEach(l => builder.addTextLine(l))
+    if (a.tuboId) builder.addTextLine('Cilindro: ' + a.tuboId)
+
+    const items = (a.items || []).slice().sort((x, y) => (x.orden ?? 0) - (y.orden ?? 0))
+    if (items.length === 0) {
+      builder.addTextLine('  (sin items en el plan)')
+    } else {
+      items.forEach(it => {
+        const cant = `x${it.cantidad || 1}`
+        const marca = it.entregado === false ? ' [NO ENTREGADO]' : ''
+        wrapText(`- ${it.descripcion} ${cant}${marca}`, width).forEach(l => builder.addTextLine(l))
+        if (it.serie) {
+          builder.addTextLine('    Serie: ' + it.serie)
+        } else if (it.serializado) {
+          builder.addTextLine('    Serie: ____________________'.slice(0, width))
+        }
+      })
+    }
+  })
+
+  if (opts.incluirEstado && entrega.observacionEquipoAlquiler) {
+    builder.addTextLine(line())
+    wrapText('Estado del equipo: ' + entrega.observacionEquipoAlquiler, width).forEach(l => builder.addTextLine(l))
+  }
+
+  builder.addTextLine(line())
 }
 
 // config: { branding: {isotipoSrc, logoSrc}, nombreEmpresa, direccion, telefono,
@@ -131,7 +183,7 @@ export async function construirBufferTicketEntrega(entrega, config) {
     builder.boldOn().addTextLine(justify('PRODUCTO', 'SUBTOTAL')).boldOff()
     builder.addTextLine(line())
 
-    let subtotalItems = 0
+    const esAlquiler = entrega.tipoOperacion === 'ALQUILER'
     entrega.detalles?.forEach(d => {
       const capStr = d.tubo ? ` ${formatCapacidad(d.tubo)}` : ''
       let desc = `${d.tuboId} (${d.tubo?.gas || ''}${capStr})`
@@ -140,19 +192,25 @@ export async function construirBufferTicketEntrega(entrega, config) {
       }
       const cant = `${formatNumberSpanish(d.cantidadGas)} ${d.unidadGas}`
       const precioUnit = Number(d.precioUnitario).toLocaleString('es-PY')
-      const price = Number(d.subtotal).toLocaleString('es-PY') + ' GS'
+      const price = precioFilaDetalle(entrega, d).toLocaleString('es-PY') + ' GS'
 
       builder.addTextLine(desc.slice(0, width))
-      if (Number(d.cantidadGas) > 0) {
+      if (esAlquiler) {
+        const planNom = (entrega.alquileres || []).find(a => a.tuboId === d.tuboId)?.plan?.nombre || 'Plan'
+        builder.addTextLine(justify(`  Alquiler ${planNom}`.slice(0, width - 12), price))
+      } else if (Number(d.cantidadGas) > 0) {
         builder.addTextLine(justify(`  ${cant} x ${precioUnit}`, price))
       } else {
         builder.addTextLine(justify(`  1 Envase Vacío`, price))
       }
-      subtotalItems += Number(d.subtotal)
     })
     builder.addTextLine(line())
 
+    const subtotalItems = subtotalItemsTicket(entrega)
     const deliveryCost = Number(entrega.costoDelivery || 0)
+    if (esAlquiler) {
+      builder.addTextLine(justify('PAGO INICIAL PLAN:', subtotalItems.toLocaleString('es-PY') + ' GS'))
+    }
     builder.addTextLine(justify('DELIVERY:', deliveryCost.toLocaleString('es-PY') + ' GS'))
     builder.boldOn().addTextLine(justify('TOTAL:', (subtotalItems + deliveryCost).toLocaleString('es-PY') + ' GS')).boldOff()
     builder.addTextLine(doubleLine())
@@ -178,6 +236,11 @@ export async function construirBufferTicketEntrega(entrega, config) {
       wrapText(obsText, width).forEach(l => builder.addTextLine(l))
       builder.addTextLine(line())
     }
+
+    // Detalle del plan de alquiler (solo si la entrega es ALQUILER).
+    imprimirBloquePlanAlquiler(builder, entrega, { wrapText, line }, width, {
+      incluirEstado: true,
+    })
 
     builder.addTextLine('').addTextLine('')
     const lineLength = width >= 48 ? 18 : 13
@@ -273,6 +336,198 @@ export async function construirBufferTicketVentaCamion(carga, config) {
 
   builder.addTextLine('Forma de pago: ' + (carga.metodoPago || '-'))
   builder.addTextLine('Recibido: ' + Number(carga.montoRecibido || 0).toLocaleString('es-PY') + ' GS')
+  builder.addTextLine(doubleLine())
+
+  builder.addTextLine('').addTextLine('')
+  const lineLength = width >= 48 ? 18 : 13
+  const soloLine = '-'.repeat(lineLength)
+  const padCentro = Math.max(0, Math.floor((width - lineLength) / 2))
+  builder.addTextLine(' '.repeat(padCentro) + soloLine)
+  const labelFirma = 'Firma Cliente'
+  const padLabel = Math.max(0, Math.floor((width - labelFirma.length) / 2))
+  builder.addTextLine(' '.repeat(padLabel) + labelFirma)
+  builder.addTextLine('')
+
+  builder.alignCenter().boldOn().addTextLine('Gracias por su preferencia!').boldOff()
+
+  builder.addTextLine('').addTextLine('').addTextLine('').addTextLine('').addTextLine('').addTextLine('')
+  builder.feedLines(4)
+  return builder.getBuffer()
+}
+
+// Ticket del servicio de recarga/recambio a domicilio de un contrato de
+// alquiler (OrdenRecargaAlquiler ya COMPLETADA). Mismo formato que el de venta
+// en camión. `orden` viene con el include de detalle del backend
+// (cliente, alquiler.plan, tubo, tuboNuevo, tuboOrigen, cargoAlquiler).
+// config: { branding, nombreEmpresa, direccion, telefono, paperWidth }
+export async function construirBufferTicketRecargaAlquiler(orden, config) {
+  const { branding, nombreEmpresa, direccion, telefono, paperWidth } = config
+
+  let logoBytes = null
+  try {
+    logoBytes = await generarLogoEscPos(branding.isotipoSrc, branding.logoSrc)
+  } catch (e) {
+    console.warn('No se pudo generar el logo para la impresion:', e)
+  }
+
+  const builder = new EscPosBuilder()
+  const width = paperWidth
+  const { wrapText, justify, line, doubleLine } = crearHelpersTicket(width)
+
+  builder.initialize()
+  if (logoBytes) {
+    builder.addBytes(logoBytes)
+    builder.addTextLine('')
+  } else {
+    builder.alignCenter().boldOn().doubleSizeOn().addTextLine((nombreEmpresa || 'GASTUBOS').toUpperCase()).doubleSizeOff()
+  }
+
+  builder.alignCenter()
+  if (direccion) {
+    wrapText(direccion, width).forEach(l => builder.addTextLine(l))
+  }
+  if (telefono) {
+    wrapText('Tel: ' + telefono, width).forEach(l => builder.addTextLine(l))
+  }
+  builder.addTextLine(doubleLine())
+
+  builder.alignLeft().boldOn().addTextLine('RECARGA ALQUILER: ' + orden.numero).boldOff()
+  builder.addTextLine(line())
+
+  wrapText('Cliente: ' + (orden.cliente?.nombre || ''), width).forEach(l => builder.addTextLine(l))
+  builder.addTextLine('RUC/CI: ' + (orden.cliente?.ruc || '-'))
+  wrapText('Direccion: ' + (orden.direccion || ''), width).forEach(l => builder.addTextLine(l))
+  builder.addTextLine('Fecha: ' + new Date(orden.fechaFinalizacion || Date.now()).toLocaleString('es-PY'))
+  builder.addTextLine('Chofer: ' + (orden.repartidor?.nombre || orden.repartidor?.username || ''))
+  builder.addTextLine('Contrato: ' + (orden.alquiler?.numero || '-'))
+  if (orden.alquiler?.plan?.nombre) {
+    wrapText('Plan: ' + orden.alquiler.plan.nombre, width).forEach(l => builder.addTextLine(l))
+  }
+  builder.addTextLine(doubleLine())
+
+  builder.boldOn().addTextLine(justify('SERVICIO', 'MONTO')).boldOff()
+  builder.addTextLine(line())
+
+  const esRecambio = orden.tipoServicio === 'RECAMBIO_TUBO'
+  const montoStr = Number(orden.precioAplicado || 0).toLocaleString('es-PY') + ' GS'
+  builder.addTextLine((esRecambio ? 'Recambio de tubo' : 'Recarga del mismo tubo').slice(0, width))
+  if (esRecambio) {
+    wrapText(`  Retira ${orden.tubo?.id || '?'} / entrega ${orden.tuboNuevo?.id || '?'}`, width).forEach(l => builder.addTextLine(l))
+  } else {
+    builder.addTextLine(`  Tubo ${orden.tubo?.id || '?'} (${orden.tubo?.gas || ''})`.slice(0, width))
+  }
+  if (orden.cantidadGasRecargada != null) {
+    builder.addTextLine(justify(`  Gas recargado: ${formatNumberSpanish(orden.cantidadGasRecargada)}`, montoStr))
+  } else {
+    builder.addTextLine(justify('  Precio de recarga', montoStr))
+  }
+  builder.addTextLine(line())
+  builder.boldOn().addTextLine(justify('TOTAL:', montoStr)).boldOff()
+  builder.addTextLine(doubleLine())
+
+  const cargo = orden.cargoAlquiler
+  const pagado = Number(cargo?.montoPagado || 0)
+  const total = Number(cargo?.monto ?? orden.precioAplicado ?? 0)
+  const saldo = Math.max(0, total - pagado)
+  builder.addTextLine('Forma de pago: ' + (cargo?.metodoPago || (pagado > 0 ? '-' : 'No cobrado')))
+  builder.addTextLine('Cobrado: ' + pagado.toLocaleString('es-PY') + ' GS')
+  if (saldo > 0) {
+    builder.boldOn().addTextLine('SALDO PENDIENTE: ' + saldo.toLocaleString('es-PY') + ' GS').boldOff()
+  }
+  builder.addTextLine(doubleLine())
+
+  builder.addTextLine('').addTextLine('')
+  const lineLength = width >= 48 ? 18 : 13
+  const soloLine = '-'.repeat(lineLength)
+  const padCentro = Math.max(0, Math.floor((width - lineLength) / 2))
+  builder.addTextLine(' '.repeat(padCentro) + soloLine)
+  const labelFirma = 'Firma Cliente'
+  const padLabel = Math.max(0, Math.floor((width - labelFirma.length) / 2))
+  builder.addTextLine(' '.repeat(padLabel) + labelFirma)
+  builder.addTextLine('')
+
+  builder.alignCenter().boldOn().addTextLine('Gracias por su preferencia!').boldOff()
+
+  builder.addTextLine('').addTextLine('').addTextLine('').addTextLine('').addTextLine('').addTextLine('')
+  builder.feedLines(4)
+  return builder.getBuffer()
+}
+
+// Recibo de un pago sobre un cargo de alquiler (mensualidad, inicial, etc.).
+// `recibo` = { cargo, pago, alquiler:{numero,cliente,plan}, cobradoPor, montoAbonado }
+// Mismo esquema que construirBufferTicketRecargaAlquiler.
+export async function construirBufferTicketReciboAlquiler(recibo, config) {
+  const { branding, nombreEmpresa, direccion, telefono, paperWidth } = config
+  const { cargo, pago, alquiler, cobradoPor, montoAbonado } = recibo
+
+  let logoBytes = null
+  try {
+    logoBytes = await generarLogoEscPos(branding.isotipoSrc, branding.logoSrc)
+  } catch (e) {
+    console.warn('No se pudo generar el logo para la impresion:', e)
+  }
+
+  const builder = new EscPosBuilder()
+  const width = paperWidth
+  const { wrapText, justify, line, doubleLine } = crearHelpersTicket(width)
+
+  const CONCEPTO = {
+    INICIAL: 'Pago inicial de alquiler',
+    MENSUALIDAD: 'Mensualidad de alquiler',
+    RECARGA_DOMICILIO: 'Recarga a domicilio',
+    OTRO: 'Otro concepto',
+  }
+  const gsStr = (v) => Number(v || 0).toLocaleString('es-PY') + ' GS'
+  const dia = (v) => v ? new Date(v).toLocaleDateString('es-PY') : '-'
+
+  const abonado = Number(montoAbonado ?? pago?.monto ?? 0)
+  const totalCargo = Number(cargo?.monto || 0)
+  const pagadoAcum = Number(cargo?.montoPagado || 0)
+  const saldo = Math.max(0, totalCargo - pagadoAcum)
+
+  builder.initialize()
+  if (logoBytes) {
+    builder.addBytes(logoBytes)
+    builder.addTextLine('')
+  } else {
+    builder.alignCenter().boldOn().doubleSizeOn().addTextLine((nombreEmpresa || 'GASTUBOS').toUpperCase()).doubleSizeOff()
+  }
+
+  builder.alignCenter()
+  if (direccion) wrapText(direccion, width).forEach(l => builder.addTextLine(l))
+  if (telefono) wrapText('Tel: ' + telefono, width).forEach(l => builder.addTextLine(l))
+  builder.addTextLine(doubleLine())
+
+  builder.alignLeft().boldOn().addTextLine('RECIBO DE PAGO - ALQUILER').boldOff()
+  builder.addTextLine('Contrato: ' + (alquiler?.numero || '-'))
+  builder.addTextLine(line())
+
+  wrapText('Cliente: ' + (alquiler?.cliente?.nombre || ''), width).forEach(l => builder.addTextLine(l))
+  builder.addTextLine('RUC/CI: ' + (alquiler?.cliente?.ruc || '-'))
+  wrapText('Direccion: ' + (alquiler?.cliente?.direccion || ''), width).forEach(l => builder.addTextLine(l))
+  builder.addTextLine('Fecha: ' + new Date(pago?.fechaPago || Date.now()).toLocaleString('es-PY'))
+  builder.addTextLine('Cobrado por: ' + (cobradoPor || '-'))
+  if (alquiler?.plan?.nombre) {
+    wrapText('Plan: ' + alquiler.plan.nombre, width).forEach(l => builder.addTextLine(l))
+  }
+  builder.addTextLine(doubleLine())
+
+  builder.boldOn().addTextLine(justify('CONCEPTO', 'MONTO')).boldOff()
+  builder.addTextLine(line())
+  builder.addTextLine((CONCEPTO[cargo?.tipo] || cargo?.tipo || 'Cargo').slice(0, width))
+  wrapText(`  Periodo ${dia(cargo?.periodoDesde)} - ${dia(cargo?.periodoHasta)}`, width).forEach(l => builder.addTextLine(l))
+  builder.addTextLine(justify('  Abonado', gsStr(abonado)))
+  builder.addTextLine(line())
+  builder.boldOn().addTextLine(justify('TOTAL ABONADO:', gsStr(abonado))).boldOff()
+  builder.addTextLine(doubleLine())
+
+  builder.addTextLine('Forma de pago: ' + (pago?.metodoPago || '-'))
+  builder.addTextLine('Monto del cargo: ' + gsStr(totalCargo))
+  if (saldo > 0) {
+    builder.boldOn().addTextLine('SALDO PENDIENTE: ' + gsStr(saldo)).boldOff()
+  } else {
+    builder.boldOn().addTextLine('CARGO CANCELADO').boldOff()
+  }
   builder.addTextLine(doubleLine())
 
   builder.addTextLine('').addTextLine('')
@@ -499,27 +754,38 @@ export async function construirBufferTicketRemisionInicial(entrega, config) {
   builder.boldOn().addTextLine(justify('PRODUCTO', 'SUBTOTAL')).boldOff()
   builder.addTextLine(line())
 
-  let subtotalItems = 0
+  const esAlquilerRem = entrega.tipoOperacion === 'ALQUILER'
   entrega.detalles?.forEach(d => {
     const desc = `${d.tuboId} (${d.tubo?.gas || ''})`
     const cant = `${formatNumberSpanish(d.cantidadGas)} ${d.unidadGas}`
     const precioUnit = Number(d.precioUnitario).toLocaleString('es-PY')
-    const price = Number(d.subtotal).toLocaleString('es-PY') + ' GS'
+    const price = precioFilaDetalle(entrega, d).toLocaleString('es-PY') + ' GS'
 
     builder.addTextLine(desc.slice(0, width))
-    if (Number(d.cantidadGas) > 0) {
+    if (esAlquilerRem) {
+      const planNom = (entrega.alquileres || []).find(a => a.tuboId === d.tuboId)?.plan?.nombre || 'Plan'
+      builder.addTextLine(justify(`  Alquiler ${planNom}`.slice(0, width - 12), price))
+    } else if (Number(d.cantidadGas) > 0) {
       builder.addTextLine(justify(`  ${cant} x ${precioUnit}`, price))
     } else {
       builder.addTextLine(justify(`  1 Envase Vacío`, price))
     }
-    subtotalItems += Number(d.subtotal)
   })
   builder.addTextLine(line())
 
+  const subtotalItems = subtotalItemsTicket(entrega)
   const deliveryCost = Number(entrega.costoDelivery || 0)
+  if (esAlquilerRem) {
+    builder.addTextLine(justify('PAGO INICIAL PLAN:', subtotalItems.toLocaleString('es-PY') + ' GS'))
+  }
   builder.addTextLine(justify('DELIVERY:', deliveryCost.toLocaleString('es-PY') + ' GS'))
   builder.boldOn().addTextLine(justify('TOTAL ESTIMADO:', (subtotalItems + deliveryCost).toLocaleString('es-PY') + ' GS')).boldOff()
   builder.addTextLine(doubleLine())
+
+  // Detalle del plan de alquiler — sin estado del equipo (todavía no se entregó).
+  imprimirBloquePlanAlquiler(builder, entrega, { wrapText, line }, width, {
+    incluirEstado: false,
+  })
 
   builder.addTextLine('').addTextLine('')
   const lineLength2 = width >= 48 ? 18 : 13

@@ -36,6 +36,8 @@ const NAV = [
       { to: '/entregas',           icon: 'ti-truck',          label: 'Entregas',              restrictedTo: OFICINA },
       { to: '/cargas',             icon: 'ti-flame',          label: 'Cargas',                restrictedTo: OFICINA },
       { to: '/devoluciones',       icon: 'ti-arrow-back',     label: 'Devoluciones',          restrictedTo: OFICINA },
+      { to: '/alquileres',         icon: 'ti-calendar-time',  label: 'Alquileres',            restrictedTo: OFICINA },
+      { to: '/recargas-alquiler',  icon: 'ti-truck-delivery', label: 'Recargas de Alquiler',  restrictedTo: OFICINA },
     ],
   },
   {
@@ -58,6 +60,7 @@ const NAV = [
       { to: '/movimiento-dinero', icon: 'ti-cash-banknote', label: 'Movimiento de Dinero', restrictedTo: ['ADMIN', 'SUPERVISOR'] },
       { to: '/auditoria',     icon: 'ti-file-text', label: 'Auditoría',     restrictedTo: ['ADMIN', 'SUPERVISOR'] },
       { to: '/usuarios',      icon: 'ti-user-cog',  label: 'Usuarios',      restrictedTo: ['ADMIN', 'SUPERVISOR'] },
+      { to: '/planes-alquiler', icon: 'ti-file-invoice', label: 'Planes de Alquiler', restrictedTo: ['ADMIN'] },
       { to: '/configuracion', icon: 'ti-settings',  label: 'Configuración', restrictedTo: ['ADMIN'] },
     ],
   },

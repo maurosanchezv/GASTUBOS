@@ -51,6 +51,7 @@
 /* ── Reset ──────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0 }
 html, body, #root { height: 100%; }
+html, body { overflow-x: hidden; }
 body {
   font-family: var(--font-sans);
   font-size: 14px;
@@ -278,6 +279,22 @@ input, select, textarea { font-family: inherit; }
 .badge-tipo-ENTREGA_SIMPLE { background: var(--blue-light);   color: var(--blue-dark); }
 .badge-tipo-ALQUILER       { background: var(--amber-light);  color: var(--amber); }
 .badge-tipo-VENTA          { background: var(--purple-light); color: var(--purple); }
+
+/* Alquileres: estado del contrato */
+.badge-PENDIENTE_ENTREGA { background: var(--blue-light);   color: var(--blue-dark); }
+.badge-FINALIZADO        { background: var(--gray-light);   color: var(--gray); }
+.badge-CANCELADO         { background: var(--red-light);    color: var(--red); }
+
+/* Alquileres: estado financiero del contrato */
+.badge-AL_DIA              { background: var(--green-light); color: var(--green); }
+.badge-PROXIMO_VENCIMIENTO { background: var(--amber-light); color: var(--amber); }
+.badge-PAGO_PENDIENTE      { background: var(--coral-light); color: var(--coral); }
+
+/* Alquileres: estado de un cargo individual */
+.badge-PENDIENTE { background: var(--amber-light);  color: var(--amber); }
+.badge-PARCIAL   { background: var(--coral-light);  color: var(--coral); }
+.badge-PAGADO    { background: var(--green-light);  color: var(--green); }
+.badge-ANULADO   { background: var(--gray-light);   color: var(--gray); }
 
 /* ── Reparto (Hoja de Ruta) ──────────────────────────────────── */
 .reparto-wrap { max-width: 1200px; margin: 0 auto; padding: 8px; }
@@ -533,7 +550,12 @@ textarea { resize: vertical; min-height: 72px; }
   border-radius: var(--radius-md);
   margin-bottom: 16px;
   width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
 }
+.tabs::-webkit-scrollbar { display: none; }
 .tab {
   padding: 5px 14px;
   border-radius: 6px;
@@ -1004,6 +1026,19 @@ textarea { resize: vertical; min-height: 72px; }
 .launcher-card-desc {
   font-size: 11px;
   color: var(--text-muted);
+}
+
+/* Pin coloreado del mapa de historial (L.divIcon): sin el recuadro blanco
+   que Leaflet le pone por defecto a los div-icon. */
+.map-pin-tipo {
+  background: transparent;
+  border: 0;
+}
+
+/* Texto de un botón que se esconde en pantallas medianas/angostas y deja
+   solo el ícono (patrón "Detalle + ojito" → "ojito"). */
+@media (max-width: 1200px) {
+  .btn-label-narrow { display: none; }
 }
 
 

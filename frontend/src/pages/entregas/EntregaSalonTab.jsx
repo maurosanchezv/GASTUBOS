@@ -40,7 +40,8 @@ export default function EntregaSalonTab({ toast, onFinish }) {
   const [tubosIds, setTubosIds] = useState([])
   const [tubosDetalles, setTubosDetalles] = useState([])
   const [metodoPago, setMetodoPago] = useState('')
-  const [fechaVencimiento, setFechaVencimiento] = useState('')
+  const [planId, setPlanId] = useState('')
+  const [planesAlquiler, setPlanesAlquiler] = useState([])
   const [referencia, setReferencia] = useState('')
   const [observaciones, setObservaciones] = useState('')
   const [tuboBusq, setTuboBusq] = useState('')
@@ -101,6 +102,10 @@ export default function EntregaSalonTab({ toast, onFinish }) {
     }
   }, [])
 
+  useEffect(() => {
+    api.get('/planes-alquiler', { params: { activo: true } }).then(r => setPlanesAlquiler(r.data)).catch(() => {})
+  }, [])
+
   function resetWizard() {
     setPaso('datos')
     setClienteSeleccionado(null)
@@ -108,7 +113,7 @@ export default function EntregaSalonTab({ toast, onFinish }) {
     setTubosIds([])
     setTubosDetalles([])
     setMetodoPago('')
-    setFechaVencimiento('')
+    setPlanId('')
     setReferencia('')
     setObservaciones('')
     setTuboBusq('')
@@ -233,7 +238,7 @@ export default function EntregaSalonTab({ toast, onFinish }) {
     if (!clienteSeleccionado) return toast('Seleccioná un cliente', 'error')
     if (tubosIds.length === 0) return toast('Agregá al menos un tubo', 'error')
     if (!metodoPago) return toast('Seleccioná la forma de pago', 'error')
-    if (tipoOperacion === 'ALQUILER' && !fechaVencimiento) return toast('Ingresá la fecha de vencimiento del alquiler', 'error')
+    if (tipoOperacion === 'ALQUILER' && !planId) return toast('Seleccioná el plan de alquiler', 'error')
 
     setCreando(true)
     try {
@@ -248,7 +253,7 @@ export default function EntregaSalonTab({ toast, onFinish }) {
         tubosDetalles,
         costoDelivery: 0,
         metodoPago,
-        fechaVencimiento: tipoOperacion === 'ALQUILER' ? new Date(fechaVencimiento).toISOString() : undefined,
+        planId: tipoOperacion === 'ALQUILER' ? planId : undefined,
         referencia: tipoOperacion === 'VENTA' ? referencia : undefined,
         observaciones: observaciones || undefined,
       })
@@ -256,7 +261,13 @@ export default function EntregaSalonTab({ toast, onFinish }) {
       // para poder mostrar gas/capacidad en el paso de verificación.
       const { data: completa } = await api.get(`/entregas/numero/${creada.numero}`)
       setEntregaCreada(completa)
-      const subtotal = (completa.detalles || []).reduce((acc, d) => acc + Number(d.subtotal || 0), 0)
+      // En ALQUILER el subtotal de los detalles es 0 a propósito (el cobro
+      // real es el pago inicial del plan, vía CargoAlquiler) — se prefillea
+      // con el precio inicial del plan elegido en vez del subtotal de gas.
+      const planElegido = planesAlquiler.find(p => p.id === planId)
+      const subtotal = tipoOperacion === 'ALQUILER'
+        ? Number(planElegido?.precioInicial || 0) * tubosIds.length
+        : (completa.detalles || []).reduce((acc, d) => acc + Number(d.subtotal || 0), 0)
       setMontoRecibido(String(subtotal))
       toast('Entrega creada — verificá los tubos', 'success')
       setPaso('verificar')
@@ -471,8 +482,13 @@ export default function EntregaSalonTab({ toast, onFinish }) {
               </div>
               {tipoOperacion === 'ALQUILER' && (
                 <div className="form-group">
-                  <label className="form-label">Fecha vencimiento alquiler <span className="form-required">*</span></label>
-                  <input type="date" value={fechaVencimiento} onChange={e => setFechaVencimiento(e.target.value)} required />
+                  <label className="form-label">Plan de alquiler <span className="form-required">*</span></label>
+                  <select value={planId} onChange={e => setPlanId(e.target.value)} required>
+                    <option value="">Seleccioná un plan...</option>
+                    {planesAlquiler.map(p => (
+                      <option key={p.id} value={p.id}>{p.nombre} — Gs. {Number(p.precioInicial).toLocaleString('es-PY')} inicial</option>
+                    ))}
+                  </select>
                 </div>
               )}
               {tipoOperacion === 'VENTA' && (
@@ -558,6 +574,7 @@ export default function EntregaSalonTab({ toast, onFinish }) {
                   detail={tubosDetalles.find(d => d.tuboId === tuboId)}
                   onChange={updateTuboDetailSalon}
                   onRemove={quitarTuboSalon}
+                  esAlquiler={tipoOperacion === 'ALQUILER'}
                 />
               ))
             )}

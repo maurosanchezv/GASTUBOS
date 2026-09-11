@@ -62,10 +62,60 @@ enum CanalEntrega {
 }
 
 enum EstadoAlquiler {
+  PENDIENTE_ENTREGA // orden creada, tubo aún no confirmado en manos del cliente
   ACTIVO
-  VENCIDO
+  VENCIDO           // deprecado como estado de contrato: se mantiene por compatibilidad
+                     // de datos existentes, pero la app ya no lo asigna — el "vencido"
+                     // ahora vive en EstadoFinancieroAlquiler, ver abajo.
   FINALIZADO
   CANCELADO
+}
+
+// Estado económico del contrato, independiente del estado del contrato en sí
+// (un alquiler puede estar ACTIVO y a la vez VENCIDO financieramente).
+enum EstadoFinancieroAlquiler {
+  AL_DIA
+  PROXIMO_VENCIMIENTO
+  PAGO_PENDIENTE
+  VENCIDO
+}
+
+enum TipoCargoAlquiler {
+  INICIAL
+  MENSUALIDAD
+  RECARGA_DOMICILIO
+  OTRO
+}
+
+enum EstadoCargoAlquiler {
+  PENDIENTE
+  PARCIAL
+  PAGADO
+  VENCIDO
+  ANULADO
+}
+
+// ETAPA 2 — operativa del alquiler (historial de tubos + recargas/recambios)
+
+enum MotivoAsignacionTubo {
+  ENTREGA_INICIAL
+  RECAMBIO
+  REEMPLAZO
+  OTRO
+}
+
+enum TipoServicioRecarga {
+  RECARGA_MISMO_TUBO
+  RECAMBIO_TUBO
+}
+
+enum EstadoOrdenRecarga {
+  SOLICITADA
+  ASIGNADA
+  EN_RUTA
+  EN_SERVICIO
+  COMPLETADA
+  CANCELADA
 }
 
 enum EstadoTercero {
@@ -116,6 +166,9 @@ model Usuario {
   cilindrosTercerosRecibidos CilindroTerceroInfo[]
   camionesEnUso              Camion[]    @relation("CamionRepartidorActual")
   ventasProductos            VentaProducto[]
+  pagosCargoAlquiler         PagoCargoAlquiler[]
+  ordenesRecargaComoRepartidor OrdenRecargaAlquiler[] @relation("OrdenRecargaRepartidor")
+  ordenesRecargaCreadas       OrdenRecargaAlquiler[] @relation("OrdenRecargaCreadaPor")
 
   @@map("usuarios")
 }
@@ -145,6 +198,7 @@ model Cliente {
   cilindrosTerceros CilindroTerceroInfo[]
   sucursales  SucursalCliente[]
   ventasProductos VentaProducto[]
+  ordenesRecargaAlquiler OrdenRecargaAlquiler[]
 
   @@map("clientes")
 }
@@ -213,6 +267,10 @@ model Tubo {
   cargas                     Carga[]
   recambiosComoEntregado     Recambio[]       @relation("TuboRetornado")
   cilindrosTercerosAdquiridos CilindroTerceroInfo[]
+  alquilerTubos              AlquilerTubo[]
+  ordenesRecargaComoActual   OrdenRecargaAlquiler[] @relation("OrdenRecargaTuboActual")
+  ordenesRecargaComoNuevo    OrdenRecargaAlquiler[] @relation("OrdenRecargaTuboNuevo")
+  ordenesRecargaComoOrigen   OrdenRecargaAlquiler[] @relation("OrdenRecargaTuboOrigen")
 
   @@map("tubos")
 }
@@ -250,6 +308,10 @@ model Entrega {
   motivoCancelacion String?
   metodoPago      String?
   montoRecibido   Decimal?      @db.Decimal(10, 2)
+  // Nota general de estado/verificación física del equipo de alquiler que
+  // deja el repartidor al confirmar la entrega (una sola nota para todo el
+  // equipo, no por ítem). Solo aplica a tipoOperacion = ALQUILER.
+  observacionEquipoAlquiler String?
 
   createdAt       DateTime      @default(now())
 
@@ -282,19 +344,270 @@ model Alquiler {
   numero        String         @unique  // AL-2025-001
   clienteId     String
   cliente       Cliente        @relation(fields: [clienteId], references: [id])
+  // "Tubo actual" — se mantiene por compatibilidad con código que ya lo lee
+  // directo (evita romperlo), pero desde ETAPA 2 la fuente histórica real es
+  // AlquilerTubo. Cada vez que cambia el tubo (recambio), este campo se
+  // actualiza también, en la misma transacción que cierra/abre AlquilerTubo.
   tuboId        String
   tubo          Tubo           @relation(fields: [tuboId], references: [id])
+  tubosHistorial   AlquilerTubo[]
+  ordenesRecarga   OrdenRecargaAlquiler[]
   entregaId     String?        // la entrega que originó este alquiler
   entrega       Entrega?       @relation(fields: [entregaId], references: [id])
-  fechaInicio   DateTime
-  fechaVencimiento DateTime
+  fechaInicio   DateTime       // real: se fija cuando el repartidor confirma la entrega
+  fechaVencimiento DateTime    // próxima fecha de cobro (fin del período cubierto vigente)
   fechaDevolucion DateTime?
-  estado        EstadoAlquiler @default(ACTIVO)
+  estado        EstadoAlquiler @default(PENDIENTE_ENTREGA)
   observaciones String?
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
+  // ── Plan contratado ──────────────────────────────────────────────────────
+  // planId nullable: alquileres creados antes de este maestro quedan sin plan
+  // (no se inventan precios históricos que no existen).
+  planId                 String?
+  plan                   PlanAlquiler? @relation(fields: [planId], references: [id])
+  // Snapshot de los valores del plan al momento de contratar: si el plan cambia
+  // de precio después, estos contratos no se ven afectados.
+  precioInicialAplicado  Decimal?  @db.Decimal(10, 2)
+  precioMensualAplicado  Decimal?  @db.Decimal(10, 2)
+  precioRecargaAplicado  Decimal?  @db.Decimal(10, 2)
+  diasIncluidosAplicados Int?
+  // Fin del primer período (30 días incluidos en el pago inicial), fijado en
+  // la confirmación de entrega. Se conserva aunque fechaVencimiento avance con
+  // las mensualidades, para poder mostrar "incluye hasta el 05/10" en el detalle.
+  primerPeriodoHasta     DateTime?
+
+  estadoFinanciero EstadoFinancieroAlquiler @default(AL_DIA)
+  cargos           CargoAlquiler[]
+
+  // Snapshot de los ítems/equipos que componen el plan al momento de contratar
+  // (regulador, flujómetro, vaso humidificador, carrito, etc.). Se copian de
+  // PlanAlquilerItem al crear la entrega; el repartidor completa la serie/código
+  // de los serializados al confirmar. Ver REMISIONES-ALQUILER.
+  items            ItemAlquiler[]
+
   @@map("alquileres")
+}
+
+model PlanAlquiler {
+  id                     String   @id @default(cuid())
+  codigo                 String   @unique // CHICO | MEDIANO | GRANDE
+  nombre                 String
+  precioInicial          Decimal  @db.Decimal(10, 2)
+  diasIncluidos          Int      @default(30)
+  precioMensual          Decimal  @db.Decimal(10, 2)
+  precioRecargaDomicilio Decimal  @db.Decimal(10, 2)
+  descripcion            String?
+  activo                 Boolean  @default(true)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  alquileres Alquiler[]
+  items      PlanAlquilerItem[]
+
+  @@map("planes_alquiler")
+}
+
+// Maestro de ítems/equipos que incluye un plan. Es solo la plantilla: lo que
+// realmente se entrega (con su serie) vive en ItemAlquiler, que se copia de acá
+// al crear la remisión. Cambiar la plantilla no afecta contratos ya creados.
+model PlanAlquilerItem {
+  id          String   @id @default(cuid())
+  planId      String
+  plan        PlanAlquiler @relation(fields: [planId], references: [id], onDelete: Cascade)
+  descripcion String   // "Cilindro O2 6m³", "Regulador con flujómetro", "Vaso humidificador"
+  cantidad    Int      @default(1)
+  // Si el ítem lleva número de serie / código de activo que el repartidor debe
+  // registrar al entregar. Los cilindros de oxígeno normalmente sí; accesorios no.
+  serializado Boolean  @default(false)
+  orden       Int      @default(0) // orden de aparición en la remisión
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([planId])
+  @@map("plan_alquiler_items")
+}
+
+// Ítem efectivamente asociado a un contrato de alquiler (snapshot del plan al
+// momento de la remisión + la serie/código que carga el repartidor al entregar).
+// Se duplica por cada contrato de la entrega: 1 tubo = 1 equipo completo.
+model ItemAlquiler {
+  id          String   @id @default(cuid())
+  alquilerId  String
+  alquiler    Alquiler @relation(fields: [alquilerId], references: [id], onDelete: Cascade)
+  descripcion String
+  cantidad    Int      @default(1)
+  serializado Boolean  @default(false)
+  orden       Int      @default(0)
+  // Serie / código de activo que registra el repartidor al confirmar la entrega.
+  // Nullable: "recomendado pero no bloquea" — puede quedar pendiente.
+  serie       String?
+  // Marca si el ítem se dejó efectivamente al cliente (el repartidor puede
+  // destildar uno que finalmente no se entregó).
+  entregado   Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([alquilerId])
+  @@map("items_alquiler")
+}
+
+// Controla económicamente el contrato: qué se cobró, cuándo, por qué concepto
+// y qué período cubre. Fuente única de verdad para el dinero del alquiler
+// (ver backend/src/routes/movimientosDinero.js).
+model CargoAlquiler {
+  id               String              @id @default(cuid())
+  alquilerId       String
+  alquiler         Alquiler            @relation(fields: [alquilerId], references: [id])
+  tipo             TipoCargoAlquiler
+  periodoDesde     DateTime
+  periodoHasta     DateTime
+  fechaEmision     DateTime            @default(now())
+  fechaVencimiento DateTime
+  monto            Decimal             @db.Decimal(10, 2)
+  montoPagado      Decimal             @db.Decimal(10, 2) @default(0.00)
+  estado           EstadoCargoAlquiler @default(PENDIENTE)
+  // Legacy de ETAPA 1: reflejan el último pago nada más. Se mantienen sin
+  // borrar (compatibilidad hacia atrás con cargos ya creados), pero desde
+  // ETAPA 1.1 dejan de ser la fuente de verdad — eso pasa a ser la suma de
+  // PagoCargoAlquiler (ver abajo). No confiar en estos dos campos para nada
+  // que necesite reflejar más de un pago sobre el mismo cargo.
+  metodoPago       String?
+  fechaPago        DateTime?
+  observacion      String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  pagos            PagoCargoAlquiler[]
+  ordenRecarga     OrdenRecargaAlquiler?
+
+  // Un mismo alquiler no puede tener dos cargos del mismo tipo para el mismo
+  // período de inicio — esto es lo que hace imposible duplicar una mensualidad
+  // por accidente, a nivel de base de datos (no solo en la lógica de la app).
+  @@unique([alquilerId, tipo, periodoDesde])
+  @@index([alquilerId])
+  @@index([estado])
+  @@index([fechaVencimiento])
+  @@map("cargos_alquiler")
+}
+
+// Historial real de cobros sobre un CargoAlquiler — puede haber más de uno
+// (pagos parciales). Es la fuente de verdad del dinero; CargoAlquiler.montoPagado
+// es un acumulado/cache que se mantiene en sincronía con SUM(PagoCargoAlquiler.monto).
+model PagoCargoAlquiler {
+  id              String        @id @default(cuid())
+  cargoAlquilerId String
+  cargoAlquiler   CargoAlquiler @relation(fields: [cargoAlquilerId], references: [id])
+  monto           Decimal       @db.Decimal(10, 2)
+  metodoPago      String
+  fechaPago       DateTime      @default(now())
+  observacion     String?
+  usuarioId       String
+  usuario         Usuario       @relation(fields: [usuarioId], references: [id])
+  createdAt       DateTime      @default(now())
+
+  @@index([cargoAlquilerId])
+  @@index([fechaPago])
+  @@map("pagos_cargo_alquiler")
+}
+
+// Historial de qué tubo físico estuvo asignado a un contrato y cuándo. El
+// contrato (Alquiler) nunca cambia de número por un recambio — lo que cambia
+// es cuál AlquilerTubo está `activo`. Alquiler.tuboId se sigue actualizando
+// en paralelo como "tubo actual" de compatibilidad (ver comentario en Alquiler).
+//
+// Invariantes reforzados por índices únicos parciales (no expresables en el
+// DSL de Prisma, agregados a mano en la migración — ver migration.sql):
+//   - un mismo alquiler no puede tener dos AlquilerTubo activos a la vez
+//   - un mismo tubo no puede estar activo en dos alquileres a la vez
+model AlquilerTubo {
+  id               String                @id @default(cuid())
+  alquilerId       String
+  alquiler         Alquiler              @relation(fields: [alquilerId], references: [id])
+  tuboId           String
+  tubo             Tubo                  @relation(fields: [tuboId], references: [id])
+  fechaDesde       DateTime
+  fechaHasta       DateTime?
+  motivoAsignacion MotivoAsignacionTubo
+  activo           Boolean               @default(true)
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  @@index([alquilerId])
+  @@index([tuboId])
+  @@map("alquiler_tubos")
+}
+
+// Servicio operativo de recarga/recambio a domicilio para un contrato de
+// alquiler activo. No reutiliza Entrega/Recambio (ver notas de implementación):
+// Recambio.entregaId es obligatorio y este flujo no pasa por Entrega, así que
+// forzarlo ahí mezclaría semánticas distintas sin necesidad real.
+model OrdenRecargaAlquiler {
+  id         String   @id @default(cuid())
+  numero     String   @unique // OR-2026-001
+  alquilerId String
+  alquiler   Alquiler @relation(fields: [alquilerId], references: [id])
+  clienteId  String
+  cliente    Cliente  @relation(fields: [clienteId], references: [id])
+
+  // Tubo actual del contrato al momento de solicitar el servicio.
+  tuboId String
+  tubo   Tubo   @relation("OrdenRecargaTuboActual", fields: [tuboId], references: [id])
+
+  // Solo se completa para RECAMBIO_TUBO, al ejecutar el servicio (no se
+  // elige de antemano — se escanea/selecciona en el momento, en terreno).
+  tuboNuevoId String?
+  tuboNuevo   Tubo?   @relation("OrdenRecargaTuboNuevo", fields: [tuboNuevoId], references: [id])
+
+  repartidorId String?
+  repartidor   Usuario? @relation("OrdenRecargaRepartidor", fields: [repartidorId], references: [id])
+  camionId     String?
+  camion       Camion?  @relation(fields: [camionId], references: [id])
+
+  // Descuento opcional del stock de gas del camión al completar una
+  // RECARGA_MISMO_TUBO: de qué tubo RESERVADO salió el gas y cuántos kg/m³.
+  // Null cuando el repartidor cargó de una fuente no trazada (o en recambios).
+  tuboOrigenId         String?
+  tuboOrigen           Tubo?    @relation("OrdenRecargaTuboOrigen", fields: [tuboOrigenId], references: [id])
+  cantidadGasRecargada Decimal? @db.Decimal(10, 3)
+
+  tipoServicio TipoServicioRecarga
+  estado       EstadoOrdenRecarga  @default(SOLICITADA)
+  // Snapshot del contrato (Alquiler.precioRecargaAplicado) al momento de
+  // solicitar — no se recalcula si el plan cambia de precio después.
+  precioAplicado Decimal @db.Decimal(10, 2)
+
+  direccion String
+  latitud   Float?
+  longitud  Float?
+
+  fechaSolicitud      DateTime  @default(now())
+  fechaProgramada     DateTime?
+  fechaAsignacion     DateTime?
+  fechaInicioServicio DateTime?
+  fechaFinalizacion   DateTime?
+
+  observaciones     String?
+  motivoCancelacion String?
+
+  createdById String
+  createdBy   Usuario @relation("OrdenRecargaCreadaPor", fields: [createdById], references: [id])
+
+  // Cargo generado al completar el servicio (si el precio fue > 0). Único:
+  // una orden nunca genera más de un CargoAlquiler.
+  cargoAlquilerId String?        @unique
+  cargoAlquiler   CargoAlquiler? @relation(fields: [cargoAlquilerId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([alquilerId])
+  @@index([estado])
+  @@index([repartidorId])
+  @@index([tuboOrigenId])
+  @@map("ordenes_recarga_alquiler")
 }
 
 // ─── VENTAS ───────────────────────────────────────────────────────────────────
@@ -417,8 +730,10 @@ model Carga {
 
 model Auditoria {
   id             String     @id @default(cuid())
-  tuboId         String
-  tubo           Tubo       @relation(fields: [tuboId], references: [id])
+  // Nullable: eventos que no son de un tubo puntual (cambio de precio de un
+  // PlanAlquiler, anulación de un CargoAlquiler, etc.) usan metadata en su lugar.
+  tuboId         String?
+  tubo           Tubo?      @relation(fields: [tuboId], references: [id])
   usuarioId      String
   usuario        Usuario    @relation(fields: [usuarioId], references: [id])
   accion         String     // "Cambio de estado", "Tubo creado", "QR impreso", etc.
@@ -485,6 +800,8 @@ model Camion {
   // Repartidor que tiene este camión seleccionado ahora mismo (null = nadie lo tiene)
   repartidorActualId String?
   repartidorActual   Usuario? @relation("CamionRepartidorActual", fields: [repartidorActualId], references: [id])
+
+  ordenesRecargaAlquiler OrdenRecargaAlquiler[]
 
   @@map("camiones")
 }
