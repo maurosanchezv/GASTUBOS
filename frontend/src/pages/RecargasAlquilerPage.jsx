@@ -9,6 +9,8 @@ import api from '../services/api.js'
 import { PageHeader, Spinner, EmptyState, Modal, useToast } from '../components/ui.jsx'
 import { useConfigStore } from '../store/configStore.js'
 import { getBrandingSources } from '../utils/logosSvg.js'
+import { construirBufferTicketRecargaAlquiler } from '../utils/ticketsImpresion.js'
+import { conectarImpresoraWebBluetooth, enviarBufferWebBluetooth, esNavegadorMovilConWebBluetooth } from '../utils/webBluetoothPrinter.js'
 
 const gs = (val) => Number(val || 0).toLocaleString('es-PY') + ' Gs'
 const fecha = (val) => val ? new Date(val).toLocaleString('es-PY') : '—'
@@ -80,6 +82,27 @@ export default function RecargasAlquilerPage() {
       load()
     } catch (err) {
       toast(err.response?.data?.error || 'Error al cancelar', 'error')
+    }
+  }
+
+  // Impresión de la remisión: en el celular manda a la térmica por Web Bluetooth
+  // (igual que el recibo de alquileres); en PC usa el diálogo del navegador.
+  async function handleImprimirRemision() {
+    if (!detalle) return
+    if (esNavegadorMovilConWebBluetooth()) {
+      try {
+        const config = { branding, nombreEmpresa: nombre_empresa, direccion, telefono, paperWidth: 32 }
+        const buffer = await construirBufferTicketRecargaAlquiler(detalle, config)
+        const conexion = await conectarImpresoraWebBluetooth()
+        await enviarBufferWebBluetooth(conexion, buffer)
+        toast('Impresión enviada correctamente', 'success')
+      } catch (err) {
+        if (err?.name !== 'NotFoundError') {
+          toast('Error al imprimir: ' + (err?.message || String(err)), 'error')
+        }
+      }
+    } else {
+      window.print()
     }
   }
 
@@ -185,7 +208,7 @@ export default function RecargasAlquilerPage() {
             {puedeCancelar(detalle.estado) && (
               <button className="btn btn-danger" onClick={() => cancelarOrden(detalle)}>Cancelar orden</button>
             )}
-            <button className="btn btn-primary" onClick={() => window.print()}>
+            <button className="btn btn-primary" onClick={handleImprimirRemision}>
               <i className="ti ti-printer" /> Imprimir remisión
             </button>
           </>

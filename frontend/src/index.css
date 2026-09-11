@@ -51,6 +51,7 @@
 /* ── Reset ──────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0 }
 html, body, #root { height: 100%; }
+html, body { overflow-x: hidden; }
 body {
   font-family: var(--font-sans);
   font-size: 14px;
@@ -549,7 +550,12 @@ textarea { resize: vertical; min-height: 72px; }
   border-radius: var(--radius-md);
   margin-bottom: 16px;
   width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
 }
+.tabs::-webkit-scrollbar { display: none; }
 .tab {
   padding: 5px 14px;
   border-radius: 6px;
