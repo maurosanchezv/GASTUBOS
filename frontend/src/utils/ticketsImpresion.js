@@ -279,6 +279,18 @@ export async function construirBufferTicketEntrega(entrega, config) {
   return builder.getBuffer()
 }
 
+// Una venta de camión nueva trae `lineas` (una por tubo); una carga vieja es una sola línea.
+// Así el mismo código de ticket sirve para ambas sin migrar el historial.
+export function lineasVentaCamion(venta) {
+  if (Array.isArray(venta?.lineas)) return venta.lineas
+  return [{
+    tuboId: venta.tuboId, tubo: venta.tubo, cantidad: venta.cantidad,
+    unidad: venta.unidad, precioUnitario: venta.precioUnitario,
+  }]
+}
+export const subtotalLineaVentaCamion = (l) => Math.round(Number(l.cantidad) * Number(l.precioUnitario))
+export const totalVentaCamion = (v) => lineasVentaCamion(v).reduce((s, l) => s + subtotalLineaVentaCamion(l), 0)
+
 // config: { branding: {isotipoSrc, logoSrc}, nombreEmpresa, direccion, telefono, paperWidth }
 export async function construirBufferTicketVentaCamion(carga, config) {
   const { branding, nombreEmpresa, direccion, telefono, paperWidth } = config
@@ -324,15 +336,17 @@ export async function construirBufferTicketVentaCamion(carga, config) {
   builder.boldOn().addTextLine(justify('PRODUCTO', 'SUBTOTAL')).boldOff()
   builder.addTextLine(line())
 
-  const cantStr = `${formatNumberSpanish(carga.cantidad)} ${carga.unidad}`
-  const precioUnitStr = Number(carga.precioUnitario).toLocaleString('es-PY')
-  const subtotal = Number(carga.cantidad) * Number(carga.precioUnitario)
-  const subtotalStr = subtotal.toLocaleString('es-PY') + ' GS'
-
-  builder.addTextLine(`${carga.tubo?.gas || ''} (Tubo ${carga.tuboId})`.slice(0, width))
-  builder.addTextLine(justify(`  ${cantStr} x ${precioUnitStr}`, subtotalStr))
+  const lineas = lineasVentaCamion(carga)
+  lineas.forEach((l, i) => {
+    const cantStr = `${formatNumberSpanish(l.cantidad)} ${l.unidad}`
+    const precioUnitStr = Number(l.precioUnitario).toLocaleString('es-PY')
+    const subtotalStr = subtotalLineaVentaCamion(l).toLocaleString('es-PY') + ' GS'
+    if (i > 0) builder.addTextLine('')
+    builder.addTextLine(`${l.tubo?.gas || ''} (Tubo ${l.tuboId})`.slice(0, width))
+    builder.addTextLine(justify(`  ${cantStr} x ${precioUnitStr}`, subtotalStr))
+  })
   builder.addTextLine(line())
-  builder.boldOn().addTextLine(justify('TOTAL:', subtotalStr)).boldOff()
+  builder.boldOn().addTextLine(justify('TOTAL:', totalVentaCamion(carga).toLocaleString('es-PY') + ' GS')).boldOff()
   builder.addTextLine(doubleLine())
 
   builder.addTextLine('Forma de pago: ' + (carga.metodoPago || '-'))

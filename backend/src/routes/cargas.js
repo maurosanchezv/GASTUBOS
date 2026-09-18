@@ -36,6 +36,20 @@ const ventaCamionSchema = z.object({
   observaciones: z.string().optional(),
 })
 
+const ventaCamionMultipleSchema = z.object({
+  clienteId:     z.string().min(1),
+  metodoPago:    z.string().min(1),
+  montoRecibido: z.coerce.number().nonnegative().optional().nullable(), // si falta = total válido
+  observaciones: z.string().optional(),
+  lineas: z.array(z.object({
+    tuboId:         z.string().min(1),
+    cantidad:       z.number().positive(),
+    precioUnitario: z.number().nonnegative(),
+  })).min(1),
+})
+
+const redondearGs = (n) => Math.round(n)
+
 // ─── GET /api/cargas ──────────────────────────────────────────────────────────
 router.get('/', async (req, res, next) => {
   try {
@@ -58,6 +72,7 @@ router.get('/', async (req, res, next) => {
           tubo:     { select: { id: true, serie: true, gas: true } },
           operador: { select: { id: true, username: true, nombre: true } },
           cliente:  { select: { id: true, nombre: true, ruc: true } },
+          ventaCamion: { select: { id: true, numero: true, metodoPago: true, total: true, montoRecibido: true, fechaVenta: true } },
         },
         orderBy: { fechaCarga: 'desc' },
         skip: (Number(page) - 1) * Number(limit),
@@ -254,6 +269,167 @@ router.post('/venta-camion', requireRol('REPARTIDOR'), async (req, res, next) =>
     })
 
     res.status(201).json(carga)
+  } catch (err) {
+    if (err instanceof z.ZodError) return res.status(400).json({ error: err.errors })
+    next(err)
+  }
+})
+
+// ─── POST /api/cargas/venta-camion-multiple ───────────────────────────────────
+// Venta de varios tubos del camión en un solo comprobante (VentaCamion). Cada tubo
+// sigue siendo una Carga que descuenta su stock. Las líneas inválidas no abortan la
+// venta: se devuelven en `fallos` y se guardan solo las válidas.
+router.post('/venta-camion-multiple', requireRol('REPARTIDOR'), async (req, res, next) => {
+  try {
+    const data = ventaCamionMultipleSchema.parse(req.body)
+
+    const cliente = await prisma.cliente.findUnique({ where: { id: data.clienteId, activo: true } })
+    if (!cliente) return res.status(404).json({ error: 'Cliente no encontrado' })
+
+    const resultado = await prisma.$transaction(async (tx) => {
+      const fallos = []
+      const validas = []
+      const vistos = new Set()
+
+      // Fase 1: validar cada línea sin abortar
+      for (const linea of data.lineas) {
+        const fallar = (serie, error) => fallos.push({ tuboId: linea.tuboId, serie, error })
+
+        if (vistos.has(linea.tuboId)) { fallar(null, 'El tubo está repetido en la venta'); continue }
+        vistos.add(linea.tuboId)
+
+        const tubo = await tx.tubo.findUnique({
+          where: { id: linea.tuboId, activo: true },
+          include: { camion: true },
+        })
+        if (!tubo) { fallar(null, 'Tubo no encontrado'); continue }
+        if (!tubo.camionId || tubo.camion?.repartidorActualId !== req.user.id) {
+          fallar(tubo.serie, 'Este tubo no está en el camión que tenés seleccionado'); continue
+        }
+        if (tubo.estado !== 'RESERVADO') {
+          fallar(tubo.serie, `El tubo está en estado ${tubo.estado}, no se puede vender`); continue
+        }
+        const cantidadActual = Number(tubo.cantidadActual || 0)
+        if (cantidadActual <= 0) { fallar(tubo.serie, 'El tubo no tiene gas disponible para vender'); continue }
+        if (linea.cantidad > cantidadActual) {
+          fallar(tubo.serie, `Solo quedan ${cantidadActual} disponibles en este tubo`); continue
+        }
+
+        // Hereda tipo de gas/unidad de la última carga NORMAL del tubo
+        const ultimaCargaNormal = await tx.carga.findFirst({
+          where: { tuboId: tubo.id, tipoCarga: 'NORMAL' },
+          orderBy: { fechaCarga: 'desc' },
+        })
+        validas.push({
+          tubo,
+          cantidadActual,
+          cantidad: linea.cantidad,
+          precioUnitario: linea.precioUnitario,
+          tipoGas: ultimaCargaNormal?.tipoGas || mapTuboGasToTipoGas(tubo.gas),
+          unidad:  ultimaCargaNormal?.unidad || (tubo.capacidadKg ? 'KG' : 'M3'),
+          subtotal: redondearGs(linea.cantidad * linea.precioUnitario),
+        })
+      }
+
+      if (validas.length === 0) return { venta: null, fallos, validas }
+
+      // Fase 2: escritura
+      const total = validas.reduce((sum, v) => sum + v.subtotal, 0)
+      const montoRecibido = data.montoRecibido ?? total
+
+      const cabecera = await tx.ventaCamion.create({
+        data: {
+          numero: await generarNumero('VC', tx),
+          clienteId: data.clienteId,
+          operadorId: req.user.id,
+          metodoPago: data.metodoPago,
+          total,
+          montoRecibido,
+        },
+      })
+
+      // Reportes y caja suman Carga.montoRecibido: se reparte el cobro entre las cargas
+      // (cada una hasta su subtotal, el sobrante a la última) para no contarlo N veces.
+      let restanteCobro = montoRecibido
+      const lineas = []
+      for (let i = 0; i < validas.length; i++) {
+        const v = validas[i]
+        const esUltima = i === validas.length - 1
+        const parte = esUltima ? restanteCobro : Math.min(v.subtotal, restanteCobro)
+        restanteCobro -= parte
+
+        const carga = await tx.carga.create({
+          data: {
+            numero: await generarNumero('CG', tx),
+            tuboId: v.tubo.id,
+            tipoGas: v.tipoGas,
+            unidad: v.unidad,
+            tipoCarga: 'CAMION',
+            cantidad: v.cantidad,
+            precioUnitario: v.precioUnitario,
+            fechaCarga: cabecera.fechaVenta,
+            operadorId: req.user.id,
+            observaciones: data.observaciones,
+            clienteId: data.clienteId,
+            metodoPago: data.metodoPago,
+            montoRecibido: parte,
+            ventaCamionId: cabecera.id,
+          },
+        })
+
+        const restante = v.cantidadActual - v.cantidad
+        v.seAgota = restante <= 0
+        v.restante = v.seAgota ? 0 : restante
+        await tx.tubo.update({
+          where: { id: v.tubo.id },
+          data: v.seAgota
+            ? { cantidadActual: 0, estado: 'VACIO', camionId: null, ubicacion: 'Depósito' }
+            : { cantidadActual: restante },
+        })
+
+        lineas.push({
+          cargaId: carga.id,
+          numero: carga.numero,
+          tuboId: v.tubo.id,
+          tubo: { id: v.tubo.id, serie: v.tubo.serie, gas: v.tubo.gas },
+          cantidad: v.cantidad,
+          unidad: v.unidad,
+          precioUnitario: v.precioUnitario,
+        })
+      }
+
+      return { venta: { ...cabecera, lineas }, fallos, validas }
+    })
+
+    const { venta, fallos, validas } = resultado
+    if (!venta) return res.status(400).json({ error: 'Ningún tubo se pudo vender', fallos })
+
+    for (const v of validas) {
+      await registrarAuditoria({
+        tuboId:         v.tubo.id,
+        usuarioId:      req.user.id,
+        accion:         'Venta desde camión',
+        estadoAnterior: v.seAgota ? 'RESERVADO' : null,
+        estadoNuevo:    v.seAgota ? 'VACIO' : null,
+        observaciones:  data.observaciones,
+        metadata:       { ventaCamion: venta.numero, clienteId: data.clienteId, cantidad: v.cantidad, restante: v.restante },
+      })
+    }
+
+    // req.user es solo el payload del JWT (sin nombre)
+    const operador = await prisma.usuario.findUnique({
+      where: { id: req.user.id },
+      select: { id: true, username: true, nombre: true },
+    })
+
+    res.status(201).json({
+      venta: {
+        ...venta,
+        cliente: { id: cliente.id, nombre: cliente.nombre, ruc: cliente.ruc, telefono: cliente.telefono, direccion: cliente.direccion },
+        operador,
+      },
+      fallos,
+    })
   } catch (err) {
     if (err instanceof z.ZodError) return res.status(400).json({ error: err.errors })
     next(err)

@@ -171,6 +171,7 @@ model Usuario {
   pagosVentaProducto         PagoVentaProducto[]
   ordenesRecargaComoRepartidor OrdenRecargaAlquiler[] @relation("OrdenRecargaRepartidor")
   ordenesRecargaCreadas       OrdenRecargaAlquiler[] @relation("OrdenRecargaCreadaPor")
+  ventasCamion               VentaCamion[]
 
   @@map("usuarios")
 }
@@ -197,6 +198,7 @@ model Cliente {
   entregas    Entrega[]
   recambios   Recambio[]
   cargas      Carga[]     // ventas fraccionadas de gas desde camión
+  ventasCamion VentaCamion[]
   cilindrosTerceros CilindroTerceroInfo[]
   sucursales  SucursalCliente[]
   ventasProductos VentaProducto[]
@@ -749,11 +751,38 @@ model Carga {
   cliente       Cliente?  @relation(fields: [clienteId], references: [id])
   montoRecibido Decimal?  @db.Decimal(10, 2)
 
+  // Venta de camión con varios tubos: la cabecera agrupa las cargas (una por tubo).
+  // null en ventas viejas o en cargas que no son venta de camión.
+  ventaCamionId String?
+  ventaCamion   VentaCamion? @relation(fields: [ventaCamionId], references: [id], onDelete: SetNull)
+
   @@index([tuboId])
   @@index([operadorId])
   @@index([fechaCarga])
   @@index([clienteId])
+  @@index([ventaCamionId])
   @@map("cargas")
+}
+
+// Cabecera de una venta de gas desde el camión: un número, un cliente y un cobro
+// para varios tubos. Cada tubo sigue siendo una Carga (tipoCarga CAMION).
+model VentaCamion {
+  id            String   @id @default(cuid())
+  numero        String   @unique  // VC-2026-001
+  clienteId     String
+  cliente       Cliente  @relation(fields: [clienteId], references: [id])
+  operadorId    String
+  operador      Usuario  @relation(fields: [operadorId], references: [id])
+  metodoPago    String
+  total         Decimal  @db.Decimal(10, 2)
+  montoRecibido Decimal  @db.Decimal(10, 2)
+  fechaVenta    DateTime @default(now())
+  createdAt     DateTime @default(now())
+  cargas        Carga[]
+
+  @@index([operadorId])
+  @@index([fechaVenta])
+  @@map("ventas_camion")
 }
 
 // ─── AUDITORÍA ────────────────────────────────────────────────────────────────

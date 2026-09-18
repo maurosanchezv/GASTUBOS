@@ -8,7 +8,7 @@ import { useConfigStore } from '../store/configStore.js'
 import { PageHeader, Spinner, EmptyState, StateBadge, Modal, formatCapacidad, formatUnidadGas, ObservacionCell } from '../components/ui.jsx'
 import { useToast } from '../components/ui.jsx'
 import { LOGO_TUBOS_SVG, LOGO_PMS_SVG, getBrandingSources } from '../utils/logosSvg.js'
-import { formatNumberSpanish, getObservacionesLimpias, construirBufferTicketEntrega, construirBufferTicketVentaCamion, construirBufferTicketRecargaAlquiler } from '../utils/ticketsImpresion.js'
+import { formatNumberSpanish, getObservacionesLimpias, construirBufferTicketEntrega, construirBufferTicketVentaCamion, construirBufferTicketRecargaAlquiler, lineasVentaCamion, subtotalLineaVentaCamion, totalVentaCamion } from '../utils/ticketsImpresion.js'
 import { conectarImpresoraWebBluetooth, enviarBufferWebBluetooth, esNavegadorMovilConWebBluetooth } from '../utils/webBluetoothPrinter.js'
 import PlanAlquilerTicketBlock from '../components/PlanAlquilerTicketBlock.jsx'
 import { precioFilaDetalle, totalTicket } from '../utils/ticketMontos.js'
@@ -31,6 +31,30 @@ const addDias = (dateStr, dias) => {
 // Calcula desde/hasta a mandarle a la API según el filtro elegido.
 // hasta se manda como el día siguiente para incluir el día completo sin
 // pelearse con husos horarios (el backend compara timestamps con `lte`).
+// Une en una sola entrada las cargas de una misma venta de camión (ventaCamion);
+// las cargas viejas, sin cabecera, pasan tal cual.
+function agruparCargasCamion(cargas) {
+  const grupos = new Map()
+  const resultado = []
+  for (const c of cargas) {
+    if (!c.ventaCamion) { resultado.push(c); continue }
+    const linea = { cargaId: c.id, numero: c.numero, tuboId: c.tuboId, tubo: c.tubo, cantidad: c.cantidad, unidad: c.unidad, precioUnitario: c.precioUnitario }
+    const g = grupos.get(c.ventaCamion.id)
+    if (g) { g.lineas.push(linea); continue }
+    const nuevo = {
+      ...c,
+      numero: c.ventaCamion.numero,
+      metodoPago: c.ventaCamion.metodoPago,
+      montoRecibido: c.ventaCamion.montoRecibido,
+      fechaCarga: c.ventaCamion.fechaVenta,
+      lineas: [linea],
+    }
+    grupos.set(c.ventaCamion.id, nuevo)
+    resultado.push(nuevo)
+  }
+  return resultado
+}
+
 function getRangoHistorial(filtro, desdePersonalizado, hastaPersonalizado) {
   const hoyStr = toDateStr(new Date())
   if (filtro === '7d')  return { desde: addDias(hoyStr, -6),  hasta: addDias(hoyStr, 1) }
@@ -350,6 +374,8 @@ export default function RepartoPage() {
   const [ventaConfirmOpen, setVentaConfirmOpen] = useState(false)
   const [ventaGuardando, setVentaGuardando] = useState(false)
   const [ventaParaImprimir, setVentaParaImprimir] = useState(null)
+  const [carrito, setCarrito] = useState([])          // [{ tubo, cantidad, precio }]
+  const [ventaFallos, setVentaFallos] = useState([])  // tubos que el servidor rechazó
   const [cargaCamionSeleccionada, setCargaCamionSeleccionada] = useState(null)
   const [modalDetalleCamion, setModalDetalleCamion] = useState(false)
 
@@ -423,7 +449,7 @@ export default function RepartoPage() {
       const cargasCamion = resCargasCamion.status === 'fulfilled' ? (resCargasCamion.value.data.cargas || []) : []
       const recargas = resRecargas.status === 'fulfilled' ? (resRecargas.value.data || []) : []
       const entregasNorm = [...entregasConf, ...entregasCanc].map(e => ({ ...e, _tipo: 'entrega' }))
-      const cargasNorm = cargasCamion.map(c => ({ ...c, _tipo: 'carga_camion' }))
+      const cargasNorm = agruparCargasCamion(cargasCamion).map(c => ({ ...c, _tipo: 'carga_camion' }))
       const recargasNorm = recargas.map(o => ({ ...o, _tipo: 'recarga_alquiler' }))
       const sorted = [...entregasNorm, ...cargasNorm, ...recargasNorm].sort(
         (a, b) => new Date(b.updatedAt || b.fechaCarga || b.fechaFinalizacion) - new Date(a.updatedAt || a.fechaCarga || a.fechaFinalizacion)
@@ -839,17 +865,12 @@ export default function RepartoPage() {
 
   // --- Venta de gas fraccionada desde el camión ("Carga en Camión") ---
   const abrirModalVenta = (tubo) => {
+    const existente = carrito.find(l => l.tubo.id === tubo.id)
     setTuboVenta(tubo)
-    setVentaClienteQuery('')
-    setVentaClienteResultados([])
-    setVentaClienteSeleccionado(null)
-    setVentaCantidad('')
-    setVentaPrecio('')
-    setVentaMontoCalc('')
+    setVentaCantidad(existente ? String(existente.cantidad) : '')
+    setVentaPrecio(existente ? String(existente.precio) : '')
+    setVentaMontoCalc(existente ? String(Math.round(existente.cantidad * existente.precio)) : '')
     setVentaModoCalculo('PRECIO')
-    setVentaMetodoPago('EFECTIVO')
-    setVentaMontoRecibido('')
-    setVentaConfirmOpen(false)
     setVentaModalOpen(true)
   }
 
@@ -923,12 +944,8 @@ export default function RepartoPage() {
     }
   }
 
-  const validarVenta = () => {
+  const validarLinea = () => {
     if (!tuboVenta) return false
-    if (!ventaClienteSeleccionado) {
-      toast('Selecciona un cliente', 'warning')
-      return false
-    }
     const restante = Number(tuboVenta.cantidadActual || 0)
     const cant = Number(ventaCantidad)
     if (!cant || cant <= 0) {
@@ -946,36 +963,64 @@ export default function RepartoPage() {
     return true
   }
 
-  const abrirConfirmacionVenta = () => {
-    if (validarVenta()) setVentaConfirmOpen(true)
+  const agregarAlCarrito = () => {
+    if (!validarLinea()) return
+    const linea = { tubo: tuboVenta, cantidad: Number(ventaCantidad), precio: Number(ventaPrecio) }
+    setCarrito(prev => prev.some(l => l.tubo.id === linea.tubo.id)
+      ? prev.map(l => l.tubo.id === linea.tubo.id ? linea : l)
+      : [...prev, linea])
+    setVentaModalOpen(false)
+  }
+
+  const quitarDelCarrito = (tuboId) => setCarrito(prev => prev.filter(l => l.tubo.id !== tuboId))
+
+  const totalCarrito = carrito.reduce((sum, l) => sum + Math.round(l.cantidad * l.precio), 0)
+
+  const abrirRevisionVenta = () => {
+    setVentaMetodoPago('EFECTIVO')
+    setVentaMontoRecibido('')
+    setVentaConfirmOpen(true)
   }
 
   const confirmarVenta = async () => {
-    if (!validarVenta()) { setVentaConfirmOpen(false); return }
-    const cant = Number(ventaCantidad)
-    const precio = Number(ventaPrecio)
+    if (!ventaClienteSeleccionado) { toast('Selecciona un cliente', 'warning'); return }
+    if (carrito.length === 0) { toast('No hay tubos en la venta', 'warning'); return }
 
     setVentaGuardando(true)
     try {
-      const res = await api.post('/cargas/venta-camion', {
-        tuboId: tuboVenta.id,
+      const res = await api.post('/cargas/venta-camion-multiple', {
         clienteId: ventaClienteSeleccionado.id,
-        cantidad: cant,
-        precioUnitario: precio,
         metodoPago: ventaMetodoPago,
-        montoRecibido: ventaMontoRecibido === '' ? cant * precio : Number(ventaMontoRecibido),
+        montoRecibido: ventaMontoRecibido === '' ? undefined : Number(ventaMontoRecibido),
+        lineas: carrito.map(l => ({ tuboId: l.tubo.id, cantidad: l.cantidad, precioUnitario: l.precio })),
       })
-      toast('Venta registrada', 'success')
+      const { venta, fallos } = res.data
       setVentaConfirmOpen(false)
-      setVentaModalOpen(false)
       setEntregaParaImprimir(null)
       setRecargaParaImprimir(null)
-      setVentaParaImprimir(res.data)
+      const ventaTicket = { ...venta, fechaCarga: venta.fechaVenta }
+      setVentaParaImprimir(ventaTicket)
       fetchCamionStock(selectedCamionId)
       fetchHistorialHoy()
-      setTimeout(() => dispararImpresion('ventaCamion', res.data), 150)
+      setTimeout(() => dispararImpresion('ventaCamion', ventaTicket), 150)
+      if (fallos?.length) {
+        const fallidos = new Set(fallos.map(f => f.tuboId))
+        setCarrito(prev => prev.filter(l => fallidos.has(l.tubo.id)))
+        setVentaFallos(fallos)
+      } else {
+        setCarrito([])
+        setVentaClienteSeleccionado(null)
+        setVentaClienteQuery('')
+        toast('Venta registrada', 'success')
+      }
     } catch (err) {
-      toast(err.response?.data?.error || 'Error al registrar la venta', 'error')
+      const fallos = err.response?.data?.fallos
+      if (fallos?.length) {
+        setVentaConfirmOpen(false)
+        setVentaFallos(fallos)
+      } else {
+        toast(err.response?.data?.error || 'Error al registrar la venta', 'error')
+      }
     } finally {
       setVentaGuardando(false)
     }
@@ -1645,7 +1690,8 @@ export default function RepartoPage() {
                       )
                     }
                     if (e._tipo === 'carga_camion') {
-                      const monto = Math.round(Number(e.cantidad) * Number(e.precioUnitario))
+                      const monto = totalVentaCamion(e)
+      const lineasE = lineasVentaCamion(e)
                       return (
                         <div
                           key={`carga-${e.id}`}
@@ -1665,11 +1711,11 @@ export default function RepartoPage() {
 
                           <div className="reparto-card-addr">
                             <i className="ti ti-cylinder" style={{ color: 'var(--text-muted)', marginTop: 2 }} />
-                            <span>{e.tubo?.gas} — Tubo {e.tuboId}</span>
+                            <span>{lineasE.length > 1 ? `${lineasE.length} tubos` : `${e.tubo?.gas} — Tubo ${e.tuboId}`}</span>
                           </div>
 
                           <div className="reparto-card-meta">
-                            <span><i className="ti ti-scale" /> {formatNumberSpanish(e.cantidad)} {e.unidad}</span>
+                            {lineasE.length === 1 && <span><i className="ti ti-scale" /> {formatNumberSpanish(e.cantidad)} {e.unidad}</span>}
                             {e.metodoPago && <span><i className="ti ti-credit-card" /> {e.metodoPago}</span>}
                             <span><i className="ti ti-currency-dollar" /> {monto.toLocaleString('es-PY')} GS</span>
                           </div>
@@ -1847,6 +1893,17 @@ export default function RepartoPage() {
                         )
                       })()}
 
+                      {carrito.length > 0 && (
+                        <div className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', padding: '10px 14px' }}>
+                          <div style={{ fontSize: 13 }}>
+                            <strong>{carrito.length} {carrito.length === 1 ? 'tubo' : 'tubos'}</strong> · {totalCarrito.toLocaleString('es-PY')} Gs.
+                          </div>
+                          <button className="btn btn-primary btn-sm" onClick={abrirRevisionVenta}>
+                            <i className="ti ti-cash" /> Revisar y cobrar
+                          </button>
+                        </div>
+                      )}
+
                       <div className="card" style={{ padding: 0 }}>
                         <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)' }}>
                           CILINDROS EN EL VEHÍCULO
@@ -1878,8 +1935,12 @@ export default function RepartoPage() {
                                     </div>
                                   </div>
                                   {puedeVender ? (
-                                    <button className="btn btn-primary btn-sm" onClick={() => abrirModalVenta(t)}>
-                                      <i className="ti ti-cash" /> Vender
+                                    <button
+                                      className={`btn btn-sm ${carrito.some(l => l.tubo.id === t.id) ? 'btn-secondary' : 'btn-primary'}`}
+                                      onClick={() => abrirModalVenta(t)}
+                                    >
+                                      <i className={`ti ${carrito.some(l => l.tubo.id === t.id) ? 'ti-check' : 'ti-cash'}`} />
+                                      {carrito.some(l => l.tubo.id === t.id) ? ' En la venta' : ' Vender'}
                                     </button>
                                   ) : (
                                     <span className={`badge badge-${t.estado}`} style={{ fontSize: 10 }}>
@@ -2631,25 +2692,27 @@ export default function RepartoPage() {
               </tr>
             </thead>
             <tbody>
-              <tr>
-                <td>
-                  <strong>{ventaParaImprimir.tubo?.gas}</strong>
-                  <span style={{ fontSize: '10px', color: '#555', display: 'block' }}>Tubo: {ventaParaImprimir.tuboId}</span>
-                </td>
-                <td style={{ textAlign: 'center' }}>
-                  {formatNumberSpanish(ventaParaImprimir.cantidad)} {ventaParaImprimir.unidad}<br />
-                  <span style={{ fontSize: '9px', color: '#888' }}>
-                    x {Number(ventaParaImprimir.precioUnitario).toLocaleString('es-PY')}
-                  </span>
-                </td>
-                <td style={{ textAlign: 'right', fontWeight: '500' }}>
-                  {Math.round(Number(ventaParaImprimir.cantidad) * Number(ventaParaImprimir.precioUnitario)).toLocaleString('es-PY')} GS
-                </td>
-              </tr>
+              {lineasVentaCamion(ventaParaImprimir).map((l, i) => (
+                <tr key={l.tuboId || i}>
+                  <td>
+                    <strong>{l.tubo?.gas}</strong>
+                    <span style={{ fontSize: '10px', color: '#555', display: 'block' }}>Tubo: {l.tuboId}</span>
+                  </td>
+                  <td style={{ textAlign: 'center' }}>
+                    {formatNumberSpanish(l.cantidad)} {l.unidad}<br />
+                    <span style={{ fontSize: '9px', color: '#888' }}>
+                      x {Number(l.precioUnitario).toLocaleString('es-PY')}
+                    </span>
+                  </td>
+                  <td style={{ textAlign: 'right', fontWeight: '500' }}>
+                    {subtotalLineaVentaCamion(l).toLocaleString('es-PY')} GS
+                  </td>
+                </tr>
+              ))}
               <tr>
                 <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px', paddingTop: '6px' }}>TOTAL:</td>
                 <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px', color: 'var(--blue)', paddingTop: '6px' }}>
-                  {Math.round(Number(ventaParaImprimir.cantidad) * Number(ventaParaImprimir.precioUnitario)).toLocaleString('es-PY')} GS
+                  {totalVentaCamion(ventaParaImprimir).toLocaleString('es-PY')} GS
                 </td>
               </tr>
             </tbody>
@@ -3149,16 +3212,24 @@ export default function RepartoPage() {
                 </tr>
               </thead>
               <tbody>
+                {lineasVentaCamion(cargaCamionSeleccionada).map((l, i) => (
+                  <tr key={l.tuboId || i}>
+                    <td style={{ paddingTop: '6px' }}>
+                      <strong>{l.tuboId}</strong><br />
+                      <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>{l.tubo?.gas}</span>
+                    </td>
+                    <td style={{ textAlign: 'center', paddingTop: '6px' }}>
+                      {formatNumberSpanish(l.cantidad)} {l.unidad}
+                    </td>
+                    <td style={{ textAlign: 'right', paddingTop: '6px', fontWeight: 600 }}>
+                      {subtotalLineaVentaCamion(l).toLocaleString('es-PY')} GS
+                    </td>
+                  </tr>
+                ))}
                 <tr>
-                  <td style={{ paddingTop: '6px' }}>
-                    <strong>{cargaCamionSeleccionada.tuboId}</strong><br />
-                    <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>{cargaCamionSeleccionada.tubo?.gas}</span>
-                  </td>
-                  <td style={{ textAlign: 'center', paddingTop: '6px' }}>
-                    {formatNumberSpanish(cargaCamionSeleccionada.cantidad)} {cargaCamionSeleccionada.unidad}
-                  </td>
-                  <td style={{ textAlign: 'right', paddingTop: '6px', fontWeight: 600 }}>
-                    {Math.round(Number(cargaCamionSeleccionada.cantidad) * Number(cargaCamionSeleccionada.precioUnitario)).toLocaleString('es-PY')} GS
+                  <td colSpan="2" style={{ textAlign: 'right', paddingTop: '8px', fontWeight: 'bold' }}>TOTAL:</td>
+                  <td style={{ textAlign: 'right', paddingTop: '8px', fontWeight: 'bold' }}>
+                    {totalVentaCamion(cargaCamionSeleccionada).toLocaleString('es-PY')} GS
                   </td>
                 </tr>
               </tbody>
@@ -3300,7 +3371,7 @@ export default function RepartoPage() {
       {/* Modal de Venta de Gas desde el Camión */}
       <Modal
         open={ventaModalOpen}
-        title={`Vender gas — ${tuboVenta?.id || ''}`}
+        title={`Agregar a la venta — ${tuboVenta?.id || ''}`}
         onClose={() => setVentaModalOpen(false)}
         footer={
           <div style={{ display: 'flex', gap: 10, width: '100%' }}>
@@ -3310,10 +3381,10 @@ export default function RepartoPage() {
             <button
               className="btn btn-primary"
               style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
-              onClick={abrirConfirmacionVenta}
+              onClick={agregarAlCarrito}
             >
-              <i className="ti ti-cash" />
-              Revisar Venta
+              <i className="ti ti-plus" />
+              {carrito.some(l => l.tubo.id === tuboVenta?.id) ? 'Actualizar en la venta' : 'Agregar a la venta'}
             </button>
           </div>
         }
@@ -3323,45 +3394,6 @@ export default function RepartoPage() {
             <div className="card" style={{ padding: 10, fontSize: 12 }}>
               <strong>{tuboVenta.gas}</strong> · {formatCapacidad(tuboVenta)}<br />
               Disponible: <strong>{formatNumberSpanish(tuboVenta.cantidadActual)} {formatUnidadGas(tuboVenta.gas)}</strong>
-            </div>
-
-            <div>
-              <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Cliente</label>
-              {ventaClienteSeleccionado ? (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 10, border: '1px solid var(--border)', borderRadius: 8, background: 'var(--surface-2)' }}>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{ventaClienteSeleccionado.nombre}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{ventaClienteSeleccionado.ruc}</div>
-                  </div>
-                  <button className="btn btn-sm" onClick={() => { setVentaClienteSeleccionado(null); setVentaClienteQuery('') }}>
-                    Cambiar
-                  </button>
-                </div>
-              ) : (
-                <>
-                  <input
-                    type="text"
-                    placeholder="Buscar por nombre o RUC/CI..."
-                    value={ventaClienteQuery}
-                    onChange={e => buscarClientesVenta(e.target.value)}
-                    style={{ width: '100%', height: 40 }}
-                  />
-                  {ventaClienteResultados.length > 0 && (
-                    <div style={{ marginTop: 6, maxHeight: 160, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
-                      {ventaClienteResultados.map(c => (
-                        <div
-                          key={c.id}
-                          onClick={() => { setVentaClienteSeleccionado(c); setVentaClienteResultados([]) }}
-                          style={{ padding: '8px 10px', cursor: 'pointer', borderBottom: '1px solid var(--border-light)' }}
-                        >
-                          <div style={{ fontSize: 13 }}>{c.nombre}</div>
-                          <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{c.ruc}</div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
             </div>
 
             <div>
@@ -3485,36 +3517,14 @@ export default function RepartoPage() {
               )}
             </div>
 
-            <div style={{ display: 'flex', gap: 10 }}>
-              <div style={{ flex: 1 }}>
-                <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Forma de pago</label>
-                <select value={ventaMetodoPago} onChange={e => setVentaMetodoPago(e.target.value)} style={{ width: '100%', height: 40 }}>
-                  <option value="EFECTIVO">Efectivo</option>
-                  <option value="TRANSFERENCIA">Transferencia</option>
-                  <option value="OTRO">Otro</option>
-                </select>
-              </div>
-              <div style={{ flex: 1 }}>
-                <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Monto recibido</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  placeholder={ventaMontoCalc ? Number(ventaMontoCalc).toLocaleString('es-PY') : '0'}
-                  value={ventaMontoRecibido}
-                  onChange={e => setVentaMontoRecibido(e.target.value)}
-                  style={{ width: '100%', height: 40 }}
-                />
-              </div>
-            </div>
           </div>
         )}
       </Modal>
 
-      {/* Modal de confirmación de Venta de Gas desde el Camión */}
+      {/* Modal de revisión y cobro de la venta de camión (carrito) */}
       <Modal
         open={ventaConfirmOpen}
-        title="¿Confirmar Venta?"
+        title="Revisar y cobrar"
         onClose={() => setVentaConfirmOpen(false)}
         footer={
           <div style={{ display: 'flex', gap: 10, width: '100%' }}>
@@ -3525,50 +3535,128 @@ export default function RepartoPage() {
               className="btn btn-primary"
               style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
               onClick={confirmarVenta}
-              disabled={ventaGuardando}
+              disabled={ventaGuardando || carrito.length === 0}
             >
               {ventaGuardando ? <Spinner size="sm" /> : <i className="ti ti-check" />}
-              {ventaGuardando ? 'Registrando...' : 'Sí, Registrar Venta'}
+              {ventaGuardando ? 'Registrando...' : 'Registrar Venta'}
             </button>
           </div>
         }
       >
-        {tuboVenta && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}>
-              Por favor, verificá que los datos ingresados sean correctos antes de guardar:
-            </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Cliente</label>
+              {ventaClienteSeleccionado ? (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 10, border: '1px solid var(--border)', borderRadius: 8, background: 'var(--surface-2)' }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{ventaClienteSeleccionado.nombre}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{ventaClienteSeleccionado.ruc}</div>
+                  </div>
+                  <button className="btn btn-sm" onClick={() => { setVentaClienteSeleccionado(null); setVentaClienteQuery('') }}>
+                    Cambiar
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <input
+                    type="text"
+                    placeholder="Buscar por nombre o RUC/CI..."
+                    value={ventaClienteQuery}
+                    onChange={e => buscarClientesVenta(e.target.value)}
+                    style={{ width: '100%', height: 40 }}
+                  />
+                  {ventaClienteResultados.length > 0 && (
+                    <div style={{ marginTop: 6, maxHeight: 160, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
+                      {ventaClienteResultados.map(c => (
+                        <div
+                          key={c.id}
+                          onClick={() => { setVentaClienteSeleccionado(c); setVentaClienteResultados([]) }}
+                          style={{ padding: '8px 10px', cursor: 'pointer', borderBottom: '1px solid var(--border-light)' }}
+                        >
+                          <div style={{ fontSize: 13 }}>{c.nombre}</div>
+                          <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{c.ruc}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
 
-            <div style={{ background: 'var(--bg-subtle)', borderRadius: 8, padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
-                <span style={{ color: 'var(--text-muted)' }}>Cliente:</span>
-                <span style={{ fontWeight: 600 }}>{ventaClienteSeleccionado?.nombre}</span>
+          <div style={{ background: 'var(--bg-subtle)', borderRadius: 8, padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {carrito.length === 0 && (
+              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>No hay tubos en la venta.</span>
+            )}
+            {carrito.map(l => (
+              <div key={l.tubo.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, fontSize: 13 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 600 }}>{l.tubo.gas} <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 400, fontSize: 11 }}>({l.tubo.id})</span></div>
+                  <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                    {formatNumberSpanish(l.cantidad)} {formatUnidadGas(l.tubo.gas)} x {l.precio.toLocaleString('es-PY')}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                  <strong>{Math.round(l.cantidad * l.precio).toLocaleString('es-PY')} Gs.</strong>
+                  <button className="btn btn-sm" onClick={() => quitarDelCarrito(l.tubo.id)} aria-label="Quitar de la venta">
+                    <i className="ti ti-trash" />
+                  </button>
+                </div>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
-                <span style={{ color: 'var(--text-muted)' }}>Gas:</span>
-                <span style={{ fontWeight: 600 }}>{tuboVenta.gas}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, borderBottom: '1px dashed var(--border)', paddingBottom: 8 }}>
-                <span style={{ color: 'var(--text-muted)' }}>Cantidad:</span>
-                <span style={{ fontWeight: 700, color: 'var(--blue)' }}>{formatNumberSpanish(ventaCantidad)} {formatUnidadGas(tuboVenta.gas)}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, paddingTop: 4 }}>
-                <span style={{ color: 'var(--text-muted)' }}>Precio Unitario:</span>
-                <span style={{ fontWeight: 600 }}>{Number(ventaPrecio || 0).toLocaleString('es-PY')} Gs.</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
-                <span style={{ color: 'var(--text-muted)' }}>Forma de pago:</span>
-                <span style={{ fontWeight: 600 }}>{ventaMetodoPago === 'TRANSFERENCIA' ? 'Transferencia' : ventaMetodoPago === 'OTRO' ? 'Otro' : 'Efectivo'}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
-                <span style={{ fontWeight: 600 }}>Monto a cobrar:</span>
-                <span style={{ fontWeight: 800, fontSize: 15, color: 'var(--green)' }}>
-                  {Math.round(ventaMontoRecibido === '' ? Number(ventaCantidad) * Number(ventaPrecio) : Number(ventaMontoRecibido)).toLocaleString('es-PY')} Gs.
-                </span>
-              </div>
+            ))}
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+              <span style={{ fontWeight: 600 }}>Total:</span>
+              <span style={{ fontWeight: 800, fontSize: 15, color: 'var(--green)' }}>{totalCarrito.toLocaleString('es-PY')} Gs.</span>
             </div>
           </div>
-        )}
+
+          <div style={{ display: 'flex', gap: 10 }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Forma de pago</label>
+              <select value={ventaMetodoPago} onChange={e => setVentaMetodoPago(e.target.value)} style={{ width: '100%', height: 40 }}>
+                <option value="EFECTIVO">Efectivo</option>
+                <option value="TRANSFERENCIA">Transferencia</option>
+                <option value="OTRO">Otro</option>
+              </select>
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Monto recibido</label>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                placeholder={totalCarrito.toLocaleString('es-PY')}
+                value={ventaMontoRecibido}
+                onChange={e => setVentaMontoRecibido(e.target.value)}
+                style={{ width: '100%', height: 40 }}
+              />
+            </div>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Aviso de tubos que el servidor rechazó (solo en pantalla, nunca en el ticket) */}
+      <Modal
+        open={ventaFallos.length > 0}
+        title="⚠️ Algunos tubos no se registraron"
+        onClose={() => setVentaFallos([])}
+        width={440}
+        footer={
+          <button className="btn btn-primary" style={{ width: '100%' }} onClick={() => setVentaFallos([])}>
+            Entendido
+          </button>
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}>
+            Estos tubos no se vendieron y no aparecen en el ticket. Siguen en la venta para que los revises.
+          </p>
+          {ventaFallos.map(f => (
+            <div key={f.tuboId} style={{ fontSize: 13 }}>
+              <strong style={{ fontFamily: 'var(--font-mono)' }}>{f.tuboId}</strong>
+              <div style={{ color: 'var(--red)', fontSize: 12 }}>{f.error}</div>
+            </div>
+          ))}
+        </div>
       </Modal>
 
       {/* Modal de Advertencia por Tubos No Escaneados */}
