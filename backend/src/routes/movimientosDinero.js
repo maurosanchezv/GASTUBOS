@@ -42,6 +42,7 @@ const TIPO_CARGO_A_MOVIMIENTO = {
 
 function normalizarFormaPago(metodoPago) {
   const m = (metodoPago || '').toUpperCase()
+  if (m.includes('CREDITO')) return 'CREDITO'
   if (m.includes('TRANSFERENCIA') || m.includes('BANCO')) return 'TRANSFERENCIA'
   return 'EFECTIVO'
 }
@@ -82,7 +83,7 @@ router.get('/', async (req, res, next) => {
     const { periodo = 'hoy', desde, hasta } = req.query
     const { startDate, endDate } = resolveDateRange(periodo, desde, hasta)
 
-    const [entregas, cargas, ventasProductos, pagosCargoAlquiler] = await Promise.all([
+    const [entregas, cargas, ventasProductos, pagosCargoAlquiler, pagosVentaProducto] = await Promise.all([
       prisma.entrega.findMany({
         // ALQUILER se excluye acá: su dinero se representa a través de
         // CargoAlquiler (ver abajo) — es la fuente única para no duplicar
@@ -110,6 +111,12 @@ router.get('/', async (req, res, next) => {
       }),
 
       prisma.ventaProducto.findMany({
+        // A diferencia de CargoAlquiler (que no aparece acá, solo sus
+        // pagos), la venta a crédito SÍ se incluye como su propio movimiento
+        // — representa una operación puntual con saldo pendiente, no una
+        // cuenta corriente con muchos cargos futuros. Su monto es el saldo
+        // (total - montoCobrado), no el total de la venta; los cobros
+        // posteriores llegan aparte por PagoVentaProducto (ver abajo).
         where: { fechaVenta: { gte: startDate, lte: endDate } },
         include: {
           usuario: { select: { id: true, nombre: true, username: true } },
@@ -131,6 +138,18 @@ router.get('/', async (req, res, next) => {
               alquiler: { select: { numero: true, clienteId: true, cliente: { select: { nombre: true } } } },
             },
           },
+          usuario: { select: { id: true, nombre: true, username: true } },
+        },
+        orderBy: { fechaPago: 'desc' },
+      }),
+
+      // Cada PagoVentaProducto es un cobro real e independiente — si una
+      // venta a crédito se cobró en dos partes, esto trae las dos filas por
+      // separado (fecha, monto y forma de pago propios de cada una).
+      prisma.pagoVentaProducto.findMany({
+        where: { fechaPago: { gte: startDate, lte: endDate } },
+        include: {
+          ventaProducto: { select: { numero: true, clienteId: true, cliente: { select: { nombre: true } } } },
           usuario: { select: { id: true, nombre: true, username: true } },
         },
         orderBy: { fechaPago: 'desc' },
@@ -214,7 +233,20 @@ router.get('/', async (req, res, next) => {
     }
 
     for (const v of ventasProductos) {
-      const estado = v.cancelada ? 'CANCELADA' : 'CONFIRMADO'
+      let estado, monto
+      if (v.cancelada) {
+        estado = 'CANCELADA'
+        monto = Number(v.total)
+      } else if (v.metodoPago === 'CREDITO') {
+        const cobrado = Number(v.montoCobrado)
+        const total = Number(v.total)
+        estado = cobrado <= 0 ? 'PENDIENTE' : cobrado >= total ? 'COBRADO' : 'PARCIAL'
+        monto = total - cobrado
+      } else {
+        estado = 'CONFIRMADO'
+        monto = Number(v.total)
+      }
+
       movimientos.push({
         id: `venta-producto-${v.id}`,
         tipo: 'VENTA_PRODUCTO',
@@ -224,17 +256,42 @@ router.get('/', async (req, res, next) => {
         usuario: v.usuario?.nombre || v.usuario?.username || 'Sin asignar',
         cliente: v.cliente?.nombre || 'Sin cliente',
         formaPago: normalizarFormaPago(v.metodoPago),
-        monto: Number(v.total),
+        monto,
         estado,
         estadoLabel: ESTADO_LABEL[estado],
+        // Solo tiene sentido mostrar el vencimiento mientras haya saldo
+        // pendiente — una vez cobrada o cancelada, ya no hay nada que vencer.
+        fechaVencimiento: (estado === 'PENDIENTE' || estado === 'PARCIAL') ? v.fechaVencimiento : null,
+      })
+    }
+
+    for (const p of pagosVentaProducto) {
+      // Cada pago es, en sí mismo, un cobro confirmado — no hereda el estado
+      // (PARCIAL/COBRADO) de la venta, que es agregado de varios pagos.
+      movimientos.push({
+        id: `pago-venta-producto-${p.id}`,
+        tipo: 'VENTA_PRODUCTO',
+        tipoLabel: TIPO_LABEL.VENTA_PRODUCTO,
+        referencia: p.ventaProducto?.numero || '—',
+        fecha: p.fechaPago,
+        usuario: p.usuario?.nombre || p.usuario?.username || 'Sin asignar',
+        cliente: p.ventaProducto?.cliente?.nombre || 'Sin cliente',
+        formaPago: normalizarFormaPago(p.metodoPago),
+        monto: Number(p.monto),
+        estado: 'COBRADO',
+        estadoLabel: ESTADO_LABEL.COBRADO,
       })
     }
 
     movimientos.sort((a, b) => new Date(b.fecha) - new Date(a.fecha))
 
-    const resumen = { efectivo: 0, transferencia: 0, total: 0, cantidad: movimientos.length }
+    const resumen = { efectivo: 0, transferencia: 0, credito: 0, total: 0, cantidad: movimientos.length }
     for (const m of movimientos) {
       if (m.estado === 'CANCELADA') continue
+      // El crédito pendiente nunca suma a la caja — se expone aparte como
+      // "pendiente de cobro"; cuando se cobra, entra por su propia fila
+      // (PagoVentaProducto) con formaPago EFECTIVO/TRANSFERENCIA.
+      if (m.formaPago === 'CREDITO') { resumen.credito += m.monto; continue }
       if (m.formaPago === 'TRANSFERENCIA') resumen.transferencia += m.monto
       else resumen.efectivo += m.monto
       resumen.total += m.monto

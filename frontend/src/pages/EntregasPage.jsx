@@ -13,7 +13,7 @@ import { PageHeader, StateBadge, Spinner, GasDot, EmptyState, Modal, formatCapac
 import { useToast } from '../components/ui.jsx'
 import { useConfigStore } from '../store/configStore.js'
 import { LOGO_TUBOS_SVG, LOGO_PMS_SVG, getBrandingSources } from '../utils/logosSvg.js'
-import { isGoogleMapsLink, isShortGoogleMapsLink, parseGoogleMapsLink, resolveShortMapsLink } from '../utils/googleMapsLink.js'
+import { isGoogleMapsLink, parseGoogleMapsLink, resolveGoogleMapsLocation } from '../utils/googleMapsLink.js'
 import { construirBufferTicketEntrega, construirBufferTicketRemisionInicial } from '../utils/ticketsImpresion.js'
 import { precioFilaDetalle, totalTicket } from '../utils/ticketMontos.js'
 import { conectarImpresoraWebBluetooth, enviarBufferWebBluetooth, esNavegadorMovilConWebBluetooth } from '../utils/webBluetoothPrinter.js'
@@ -388,24 +388,16 @@ export default function EntregasPage() {
 
   // Pegar un link de ubicación (WhatsApp comparte vía Google Maps) en el campo
   // de dirección: si trae coordenadas las usamos directo; si es un link corto
-  // (maps.app.goo.gl) lo resolvemos contra el backend para leer el destino real.
+  // (maps.app.goo.gl) o de "lugar" sin coordenadas, se resuelve contra el
+  // backend y, si hace falta, se geocodifica el nombre del lugar.
   const handleAddressPaste = async (e) => {
     const text = e.clipboardData?.getData('text') || ''
     if (!isGoogleMapsLink(text) && !parseGoogleMapsLink(text)) return
     e.preventDefault()
 
-    const direct = parseGoogleMapsLink(text)
-    if (direct) {
-      aplicarUbicacionPegada(direct)
-      return
-    }
-    if (!isShortGoogleMapsLink(text)) {
-      toast('No se encontraron coordenadas en ese link', 'error')
-      return
-    }
     setAddrBuscando(true)
     try {
-      const resolved = await resolveShortMapsLink(api, text.trim())
+      const resolved = await resolveGoogleMapsLocation(api, text)
       if (resolved) aplicarUbicacionPegada(resolved)
       else toast('No se pudo leer la ubicación de ese link', 'error')
     } catch (err) {

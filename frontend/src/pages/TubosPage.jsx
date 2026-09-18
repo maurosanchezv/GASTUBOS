@@ -197,7 +197,7 @@ export default function TubosPage() {
           <div className="search-bar" style={{ flex: 1, minWidth: 200, marginBottom: 0 }}>
             <i className="ti ti-search" />
             <input
-              placeholder="Buscar por código, cilindro, gas..."
+              placeholder="Buscar por código, cilindro, gas, cliente..."
               value={q}
               onChange={e => handleFiltroChange(setQ)(e.target.value)}
             />

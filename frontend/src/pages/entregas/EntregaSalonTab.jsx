@@ -18,6 +18,8 @@ import { useAuthStore } from '../../store/authStore.js'
 import { GASES_RETORNO, capacidadesParaGas, capacidadInicialParaGas, nextRecambioDescripcion } from '../../utils/recambiosCalculadora.js'
 import TuboChip from '../../components/TuboChip.jsx'
 import ClienteAutocomplete from '../../components/ClienteAutocomplete.jsx'
+import MiniMapaPicker from '../../components/MiniMapaPicker.jsx'
+import { isGoogleMapsLink, parseGoogleMapsLink, resolveGoogleMapsLocation } from '../../utils/googleMapsLink.js'
 
 const SCANNER_VERIFICAR_ID = 'entrega-salon-verificar-qr-reader'
 const SCANNER_RETORNO_ID = 'entrega-salon-retorno-qr-reader'
@@ -44,6 +46,16 @@ export default function EntregaSalonTab({ toast, onFinish }) {
   const [planesAlquiler, setPlanesAlquiler] = useState([])
   const [referencia, setReferencia] = useState('')
   const [observaciones, setObservaciones] = useState('')
+  const [sucursalId, setSucursalId] = useState('')
+  const [direccionEntrega, setDireccionEntrega] = useState('')
+  const [latitud, setLatitud] = useState(null)
+  const [longitud, setLongitud] = useState(null)
+  const [gpsLoading, setGpsLoading] = useState(false)
+  // Sugerencias de dirección (mismo mecanismo que "Nueva Entrega": Photon + Nominatim)
+  const [addrSugs, setAddrSugs] = useState([])
+  const [addrBuscando, setAddrBuscando] = useState(false)
+  const addrRef = useRef(null)
+  const lastSelectedAddress = useRef('')
   const [tuboBusq, setTuboBusq] = useState('')
   const [tuboSugs, setTuboSugs] = useState([])
   const [tuboBuscando, setTuboBuscando] = useState(false)
@@ -90,6 +102,7 @@ export default function EntregaSalonTab({ toast, onFinish }) {
   useEffect(() => {
     const handler = e => {
       if (busqRef.current && !busqRef.current.contains(e.target)) setTuboSugs([])
+      if (addrRef.current && !addrRef.current.contains(e.target)) setAddrSugs([])
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
@@ -116,6 +129,12 @@ export default function EntregaSalonTab({ toast, onFinish }) {
     setPlanId('')
     setReferencia('')
     setObservaciones('')
+    setSucursalId('')
+    setDireccionEntrega('')
+    setLatitud(null)
+    setLongitud(null)
+    setAddrSugs([])
+    lastSelectedAddress.current = ''
     setTuboBusq('')
     setTuboSugs([])
     setEntregaCreada(null)
@@ -140,6 +159,11 @@ export default function EntregaSalonTab({ toast, onFinish }) {
     setTipoOperacion(pendienteExistente.tipoOperacion || 'ENTREGA_SIMPLE')
     setMetodoPago(pendienteExistente.metodoPago || '')
     setObservaciones(pendienteExistente.observaciones || '')
+    setSucursalId(pendienteExistente.sucursalId || '')
+    setDireccionEntrega(pendienteExistente.direccionEntrega || '')
+    setLatitud(pendienteExistente.latitud ?? null)
+    setLongitud(pendienteExistente.longitud ?? null)
+    lastSelectedAddress.current = pendienteExistente.direccionEntrega || ''
     const detalles = pendienteExistente.detalles || []
     setTubosIds(detalles.map(d => d.tuboId))
     setTubosDetalles(detalles.map(d => ({
@@ -166,6 +190,147 @@ export default function EntregaSalonTab({ toast, onFinish }) {
       toast(err.response?.data?.error || 'Error al cancelar la entrega pendiente', 'error')
     } finally {
       setCancelandoPendiente(false)
+    }
+  }
+
+  // ── Paso 1: cliente → ubicación precargada (igual que "Nueva Entrega") ───
+  function handleClienteSalonChange(c) {
+    setClienteSeleccionado(c)
+    if (!c) {
+      setSucursalId('')
+      setDireccionEntrega('')
+      setLatitud(null)
+      setLongitud(null)
+      lastSelectedAddress.current = ''
+      return
+    }
+    const sucs = c.sucursales || []
+    if (sucs.length > 0) {
+      const principal = sucs.find(s => s.esPrincipal) || sucs[0]
+      lastSelectedAddress.current = principal.direccion || ''
+      setSucursalId(principal.id)
+      setDireccionEntrega(principal.direccion || '')
+      setLatitud(principal.latitud || null)
+      setLongitud(principal.longitud || null)
+    } else {
+      lastSelectedAddress.current = c.direccion || ''
+      setSucursalId('')
+      setDireccionEntrega(c.direccion || '')
+      setLatitud(c.latitud || null)
+      setLongitud(c.longitud || null)
+    }
+  }
+
+  function handleSucursalSalonChange(e) {
+    const sid = e.target.value
+    if (!clienteSeleccionado) return
+    const suc = (clienteSeleccionado.sucursales || []).find(s => s.id === sid)
+    if (suc) {
+      lastSelectedAddress.current = suc.direccion || ''
+      setSucursalId(suc.id)
+      setDireccionEntrega(suc.direccion || '')
+      setLatitud(suc.latitud || null)
+      setLongitud(suc.longitud || null)
+    } else {
+      setSucursalId('')
+    }
+  }
+
+  // Búsqueda de direcciones con Photon (Komoot) + Nominatim (Paraguay), igual
+  // mecanismo que en "Nueva Entrega" (EntregasPage.jsx).
+  const fetchDirecciones = async (query) => {
+    if (!query || query.trim().length < 2) {
+      setAddrSugs([])
+      return
+    }
+    setAddrBuscando(true)
+    try {
+      const photonUrl = `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&lat=-25.2867&lon=-57.6474&limit=6&bbox=-62.65,-27.6,-54.2,-19.3`
+      const resPhoton = await fetch(photonUrl)
+      const dataPhoton = await resPhoton.json()
+
+      let sugs = []
+      if (dataPhoton && dataPhoton.features && dataPhoton.features.length > 0) {
+        sugs = dataPhoton.features
+          .filter(f => !(f.properties || {}).countrycode || (f.properties || {}).countrycode === 'PY')
+          .map(f => {
+            const p = f.properties || {}
+            const coords = f.geometry?.coordinates || []
+            const nameParts = [p.name, p.street, p.housing, p.district, p.city || p.town || p.county, p.state || p.country]
+              .filter(Boolean)
+            const name = Array.from(new Set(nameParts)).join(', ')
+            return { display_name: name || p.name || query, lat: coords[1], lon: coords[0] }
+          }).filter(item => item.lat && item.lon)
+      }
+
+      if (sugs.length < 3) {
+        const nomUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5&countrycodes=py&viewbox=-58.5,-27.5,-54.0,-19.3`
+        const resNom = await fetch(nomUrl, { headers: { 'Accept-Language': 'es' } })
+        const dataNom = await resNom.json()
+        if (dataNom && Array.isArray(dataNom)) {
+          const nomSugs = dataNom.map(item => ({
+            display_name: item.display_name,
+            lat: parseFloat(item.lat),
+            lon: parseFloat(item.lon),
+          }))
+          for (const ns of nomSugs) {
+            if (!sugs.some(s => s.display_name === ns.display_name)) sugs.push(ns)
+          }
+        }
+      }
+
+      setAddrSugs(sugs.slice(0, 6))
+    } catch {
+      setAddrSugs([])
+    } finally {
+      setAddrBuscando(false)
+    }
+  }
+
+  useEffect(() => {
+    const q = direccionEntrega || ''
+    if (q === lastSelectedAddress.current) return
+    if (q.trim().length < 2) { setAddrSugs([]); return }
+    const t = setTimeout(() => fetchDirecciones(q), 300)
+    return () => clearTimeout(t)
+  }, [direccionEntrega])
+
+  async function reverseGeocodeDireccion(lat, lng) {
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`)
+      const data = await res.json()
+      if (data.display_name) {
+        lastSelectedAddress.current = data.display_name
+        setDireccionEntrega(data.display_name)
+      }
+    } catch { /* la dirección de texto es solo de apoyo, seguimos con lat/lng igual */ }
+  }
+
+  function aplicarUbicacionPegada({ lat, lon }) {
+    const placeholder = 'Ubicación de WhatsApp/Google Maps (obteniendo dirección...)'
+    lastSelectedAddress.current = placeholder
+    setDireccionEntrega(placeholder)
+    setLatitud(lat)
+    setLongitud(lon)
+    setAddrSugs([])
+    reverseGeocodeDireccion(lat, lon)
+    toast('Ubicación detectada desde el link', 'success')
+  }
+
+  async function handleAddressPaste(e) {
+    const text = e.clipboardData?.getData('text') || ''
+    if (!isGoogleMapsLink(text) && !parseGoogleMapsLink(text)) return
+    e.preventDefault()
+
+    setAddrBuscando(true)
+    try {
+      const resolved = await resolveGoogleMapsLocation(api, text)
+      if (resolved) aplicarUbicacionPegada(resolved)
+      else toast('No se pudo leer la ubicación de ese link', 'error')
+    } catch {
+      toast('No se pudo resolver el link de Google Maps', 'error')
+    } finally {
+      setAddrBuscando(false)
     }
   }
 
@@ -234,18 +399,47 @@ export default function EntregaSalonTab({ toast, onFinish }) {
     setTubosDetalles(prev => prev.map(d => d.tuboId === tuboId ? { ...d, [key]: value } : d))
   }
 
+  function obtenerGPS() {
+    if (!navigator.geolocation) {
+      toast('Tu navegador no soporta geolocalización', 'error')
+      return
+    }
+    setGpsLoading(true)
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        const lat = parseFloat(pos.coords.latitude.toFixed(6))
+        const lng = parseFloat(pos.coords.longitude.toFixed(6))
+        setLatitud(lat)
+        setLongitud(lng)
+        reverseGeocodeDireccion(lat, lng)
+        setGpsLoading(false)
+        toast('Ubicación GPS obtenida', 'success')
+      },
+      () => {
+        toast('No se pudo obtener la ubicación GPS', 'error')
+        setGpsLoading(false)
+      },
+      { enableHighAccuracy: true, timeout: 12000 }
+    )
+  }
+
   async function crearEntregaSalon() {
     if (!clienteSeleccionado) return toast('Seleccioná un cliente', 'error')
     if (tubosIds.length === 0) return toast('Agregá al menos un tubo', 'error')
     if (!metodoPago) return toast('Seleccioná la forma de pago', 'error')
     if (tipoOperacion === 'ALQUILER' && !planId) return toast('Seleccioná el plan de alquiler', 'error')
+    if (clienteSeleccionado.sucursales?.length > 0 && !sucursalId) return toast('Seleccioná el local/sucursal de destino', 'error')
+    if (!direccionEntrega.trim()) return toast('Ingresá la dirección de entrega', 'error')
+    if (latitud == null || longitud == null) return toast('Marcá en el mapa dónde queda el tubo', 'error')
 
     setCreando(true)
     try {
       const { data: creada } = await api.post('/entregas', {
         clienteId: clienteSeleccionado.id,
-        sucursalId: null,
-        direccionEntrega: 'Retiro en Salón',
+        sucursalId: sucursalId || null,
+        direccionEntrega,
+        latitud,
+        longitud,
         tipoOperacion,
         canal: 'SALON',
         repartidorId: user?.id,
@@ -462,7 +656,7 @@ export default function EntregaSalonTab({ toast, onFinish }) {
             <div className="form-grid">
               <div className="form-group">
                 <label className="form-label">Cliente <span className="form-required">*</span></label>
-                <ClienteAutocomplete value={clienteSeleccionado} onChange={setClienteSeleccionado} />
+                <ClienteAutocomplete value={clienteSeleccionado} onChange={handleClienteSalonChange} />
               </div>
               <div className="form-group">
                 <label className="form-label">Tipo de operación <span className="form-required">*</span></label>
@@ -472,6 +666,24 @@ export default function EntregaSalonTab({ toast, onFinish }) {
                   <option value="VENTA">Venta</option>
                 </select>
               </div>
+
+              {clienteSeleccionado?.sucursales?.length > 0 && (
+                <div className="form-group col-span-2" style={{ background: 'var(--surface-2)', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)' }}>
+                  <label className="form-label" style={{ margin: 0, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <i className="ti ti-building-store" style={{ color: 'var(--blue)' }} />
+                    Local / Sucursal de Destino <span className="form-required">*</span>
+                  </label>
+                  <select value={sucursalId || ''} onChange={handleSucursalSalonChange} required>
+                    <option value="">-- Seleccionar local de destino --</option>
+                    {clienteSeleccionado.sucursales.map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.nombre} {s.esPrincipal ? '(Matriz)' : ''} — {s.direccion} {s.ciudad ? `(${s.ciudad})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div className="form-group">
                 <label className="form-label">Forma de pago <span className="form-required">*</span></label>
                 <select value={metodoPago} onChange={e => setMetodoPago(e.target.value)} required>
@@ -501,6 +713,112 @@ export default function EntregaSalonTab({ toast, onFinish }) {
                 <label className="form-label">Observaciones</label>
                 <textarea value={observaciones} onChange={e => setObservaciones(e.target.value)} style={{ height: 56 }} />
               </div>
+            </div>
+          </div>
+
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div className="card-title" style={{ marginBottom: 4 }}>
+              Dirección de entrega <span className="form-required">*</span>
+            </div>
+            <div ref={addrRef} style={{ position: 'relative' }}>
+              <input
+                type="text"
+                value={direccionEntrega}
+                onChange={e => setDireccionEntrega(e.target.value)}
+                placeholder={clienteSeleccionado?.direccion || 'Ej: Av. San Martín, Asunción... o pegá el link de ubicación de WhatsApp'}
+                onKeyDown={e => { if (e.key === 'Escape') setAddrSugs([]) }}
+                onPaste={handleAddressPaste}
+                style={{ paddingRight: addrBuscando ? 30 : 10 }}
+              />
+
+              {addrBuscando && (
+                <div style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', zIndex: 10, display: 'flex', alignItems: 'center' }}>
+                  <span className="spinner" style={{ width: 14, height: 14 }} />
+                </div>
+              )}
+
+              {addrSugs.length > 0 && (
+                <div style={{
+                  position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 1000,
+                  background: 'var(--bg-card, #fff)', border: '1px solid var(--border)', borderRadius: 8,
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.15)', marginTop: 4, maxHeight: 260, overflowY: 'auto',
+                }}>
+                  {addrSugs.map((item, i) => (
+                    <div key={i}
+                      onClick={() => {
+                        lastSelectedAddress.current = item.display_name
+                        setDireccionEntrega(item.display_name)
+                        setLatitud(item.lat)
+                        setLongitud(item.lon)
+                        setAddrSugs([])
+                      }}
+                      style={{
+                        padding: '10px 12px', cursor: 'pointer',
+                        borderBottom: i < addrSugs.length - 1 ? '1px solid var(--border-light, #eee)' : 'none',
+                        fontSize: 12, display: 'flex', alignItems: 'flex-start', gap: 8,
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2, #f5f5f5)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                    >
+                      <i className="ti ti-map-pin" style={{ color: 'var(--blue)', marginTop: 2, flexShrink: 0, fontSize: 14 }} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 600, lineHeight: 1.3 }}>{item.display_name}</div>
+                        {item.lat && item.lon && (
+                          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+                            GPS vinculado ({item.lat.toFixed(4)}, {item.lon.toFixed(4)})
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+              <i className="ti ti-brand-whatsapp" style={{ marginRight: 4 }} />
+              Tip: pegá aquí el link de ubicación que te comparte el cliente por WhatsApp para cargar el GPS exacto.
+            </div>
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8, alignItems: 'center' }}>
+              <button type="button" className="btn btn-sm" onClick={obtenerGPS} disabled={gpsLoading} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <i className="ti ti-current-location" style={{ fontSize: 14 }} />
+                {gpsLoading ? 'Obteniendo GPS...' : 'Usar mi GPS'}
+              </button>
+              {latitud != null && longitud != null && (
+                <>
+                  <span style={{ fontSize: 11, color: 'var(--green)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <i className="ti ti-circle-check" />
+                    {Number(latitud).toFixed(5)}, {Number(longitud).toFixed(5)}
+                  </span>
+                  <a href={`https://www.google.com/maps?q=${latitud},${longitud}`} target="_blank" rel="noopener noreferrer"
+                    style={{ fontSize: 11, color: 'var(--blue)', textDecoration: 'underline' }}>
+                    Ver en Google Maps ↗
+                  </a>
+                  <button type="button" onClick={() => { setLatitud(null); setLongitud(null) }}
+                    style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--text-muted)', fontSize: 13, lineHeight: 1 }}>
+                    <i className="ti ti-x" />
+                  </button>
+                </>
+              )}
+            </div>
+
+            <div style={{ marginTop: 10 }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
+                Hacé clic o arrastrá el marcador para fijar dónde queda el tubo, para dejar precedente en el mapa.
+              </div>
+              <MiniMapaPicker
+                latitud={latitud}
+                longitud={longitud}
+                onChange={({ latitud: la, longitud: lo, direccion }) => {
+                  setLatitud(la)
+                  setLongitud(lo)
+                  if (direccion) {
+                    lastSelectedAddress.current = direccion
+                    setDireccionEntrega(direccion)
+                  }
+                }}
+              />
             </div>
           </div>
 

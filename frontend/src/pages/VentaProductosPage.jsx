@@ -2,20 +2,51 @@
 import { useState, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import api from '../services/api.js'
-import { PageHeader, Modal, Confirm, Spinner, EmptyState, useToast, ObservacionCell } from '../components/ui.jsx'
+import { PageHeader, Modal, Confirm, Spinner, EmptyState, useToast, ObservacionCell, FormGroup } from '../components/ui.jsx'
 import { useAuthStore } from '../store/authStore.js'
 import { useConfigStore } from '../store/configStore.js'
 import { getBrandingSources } from '../utils/logosSvg.js'
 import { conectarImpresoraWebBluetooth, enviarBufferWebBluetooth, esNavegadorMovilConWebBluetooth } from '../utils/webBluetoothPrinter.js'
 import { construirBufferTicketVentaProductos } from '../utils/ticketsImpresion.js'
 import ClienteAutocomplete from '../components/ClienteAutocomplete.jsx'
+import { METODO_PAGO_INFO, metodoPagoLabel, fmtVencimiento, hoyLocalStr, sumarDiasStr, estaVencida } from '../utils/metodoPago.js'
 
 const fmtGs = (v) => `${Math.round(Number(v) || 0).toLocaleString('es-PY')} Gs.`
 
 const METODOS = [
-  { value: 'EFECTIVO',     label: 'Efectivo',     icon: 'ti-cash' },
+  { value: 'EFECTIVO',      label: 'Efectivo',      icon: 'ti-cash' },
   { value: 'TRANSFERENCIA', label: 'Transferencia', icon: 'ti-building-bank' },
+  { value: 'CREDITO',       label: 'Crédito',       icon: 'ti-credit-card' },
 ]
+
+// Estado derivado del crédito de una venta — igual criterio que el backend
+// (estadoCreditoVenta en utils/ventaProducto.js): no se guarda, se calcula.
+function estadoCreditoVenta(venta) {
+  const cobrado = Number(venta.montoCobrado || 0)
+  const total = Number(venta.total)
+  if (cobrado <= 0) return 'PENDIENTE'
+  if (cobrado >= total) return 'COBRADO'
+  return 'PARCIAL'
+}
+
+const CREDITO_ESTADO_INFO = {
+  PENDIENTE: { label: 'Pendiente', bg: 'var(--red-light)',    color: 'var(--red)' },
+  PARCIAL:   { label: 'Parcial',   bg: 'var(--amber-light)',  color: 'var(--amber)' },
+  COBRADO:   { label: 'Cobrado',   bg: 'var(--green-light)',  color: 'var(--green)' },
+}
+
+function CreditoEstadoBadge({ venta }) {
+  const estado = estadoCreditoVenta(venta)
+  const saldo = Number(venta.total) - Number(venta.montoCobrado || 0)
+  const vencida = estaVencida(venta)
+  const info = vencida ? { label: 'Vencida', bg: 'var(--red-light)', color: 'var(--red)' } : CREDITO_ESTADO_INFO[estado]
+  return (
+    <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 10, background: info.bg, color: info.color, whiteSpace: 'nowrap' }}>
+      {estado === 'COBRADO' ? 'Cobrado' : `${info.label} ${fmtGs(saldo)}`}
+      {estado !== 'COBRADO' && venta.fechaVencimiento && ` · vence ${fmtVencimiento(venta.fechaVencimiento)}`}
+    </span>
+  )
+}
 
 let cartKeySeq = 0
 
@@ -36,6 +67,7 @@ export default function VentaProductosPage() {
   const [librePrecio, setLibrePrecio] = useState('')
   const [libreCantidad, setLibreCantidad] = useState('1')
   const [metodoPago, setMetodoPago] = useState('')
+  const [fechaVencimiento, setFechaVencimiento] = useState('')
   const [clienteVenta, setClienteVenta] = useState(null)
   const [observaciones, setObservaciones] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -44,6 +76,14 @@ export default function VentaProductosPage() {
   const [ventaRegistrada, setVentaRegistrada] = useState(null)
   const [ventaParaImprimir, setVentaParaImprimir] = useState(null)
   const [confirmVentaOpen, setConfirmVentaOpen] = useState(false)
+
+  const [modalPago, setModalPago] = useState(null) // venta seleccionada para cobrar
+  const [formPago, setFormPago] = useState({ monto: '', metodoPago: 'EFECTIVO', observacion: '' })
+  const [guardandoPago, setGuardandoPago] = useState(false)
+
+  const [modalVencimiento, setModalVencimiento] = useState(null) // venta seleccionada para editar vencimiento
+  const [formVencimiento, setFormVencimiento] = useState('')
+  const [guardandoVencimiento, setGuardandoVencimiento] = useState(false)
 
   useEffect(() => {
     api.get('/productos', { params: { activo: true } }).then(r => setProductos(r.data)).catch(() => {})
@@ -124,6 +164,7 @@ export default function VentaProductosPage() {
   const resetVenta = () => {
     setCarrito([])
     setMetodoPago('')
+    setFechaVencimiento('')
     setClienteVenta(null)
     setObservaciones('')
     setBusqueda('')
@@ -132,6 +173,7 @@ export default function VentaProductosPage() {
   const intentarRegistrarVenta = () => {
     if (carrito.length === 0) return toast('Agregá al menos un producto o ítem a la venta', 'error')
     if (!metodoPago) return toast('Seleccioná una forma de pago', 'error')
+    if (metodoPago === 'CREDITO' && !clienteVenta) return toast('Seleccioná un cliente para vender a crédito', 'error')
     if (carrito.some(l => !l.cantidad || l.cantidad <= 0)) return toast('Revisá las cantidades cargadas', 'error')
     setConfirmVentaOpen(true)
   }
@@ -143,6 +185,7 @@ export default function VentaProductosPage() {
       const payload = {
         clienteId: clienteVenta?.id || null,
         metodoPago,
+        fechaVencimiento: metodoPago === 'CREDITO' ? (fechaVencimiento || null) : null,
         observaciones: observaciones || null,
         detalles: carrito.map(l => ({
           productoId: l.productoId,
@@ -204,6 +247,57 @@ export default function VentaProductosPage() {
   }
 
   const puedeCancelar = user?.rol === 'ADMIN' || user?.rol === 'SUPERVISOR'
+  const puedeCobrar = (venta) => !venta.cancelada && venta.metodoPago === 'CREDITO'
+    && Number(venta.total) - Number(venta.montoCobrado || 0) > 0
+
+  const abrirModalPago = (venta) => {
+    const saldo = Number(venta.total) - Number(venta.montoCobrado || 0)
+    setFormPago({ monto: saldo, metodoPago: 'EFECTIVO', observacion: '' })
+    setModalPago(venta)
+  }
+
+  const confirmarPago = async (e) => {
+    e?.preventDefault?.()
+    setGuardandoPago(true)
+    try {
+      const r = await api.post(`/venta-productos/${modalPago.id}/pagar`, {
+        monto: Number(formPago.monto),
+        metodoPago: formPago.metodoPago,
+        observacion: formPago.observacion || null,
+      })
+      setVentas(prev => prev.map(v => v.id === r.data.venta.id ? r.data.venta : v))
+      if (detalleVenta?.id === r.data.venta.id) setDetalleVenta(r.data.venta)
+      toast('Cobro registrado correctamente', 'success')
+      setModalPago(null)
+    } catch (err) {
+      toast(err.response?.data?.error || 'Error al registrar el cobro', 'error')
+    } finally {
+      setGuardandoPago(false)
+    }
+  }
+
+  const abrirModalVencimiento = (venta) => {
+    setFormVencimiento(venta.fechaVencimiento ? venta.fechaVencimiento.slice(0, 10) : '')
+    setModalVencimiento(venta)
+  }
+
+  const confirmarVencimiento = async (e) => {
+    e?.preventDefault?.()
+    setGuardandoVencimiento(true)
+    try {
+      const r = await api.patch(`/venta-productos/${modalVencimiento.id}/vencimiento`, {
+        fechaVencimiento: formVencimiento || null,
+      })
+      setVentas(prev => prev.map(v => v.id === r.data.id ? r.data : v))
+      if (detalleVenta?.id === r.data.id) setDetalleVenta(r.data)
+      toast('Vencimiento actualizado', 'success')
+      setModalVencimiento(null)
+    } catch (err) {
+      toast(err.response?.data?.error || 'Error al actualizar el vencimiento', 'error')
+    } finally {
+      setGuardandoVencimiento(false)
+    }
+  }
 
   return (
     <>
@@ -385,7 +479,7 @@ export default function VentaProductosPage() {
                     <button
                       key={m.value}
                       type="button"
-                      onClick={() => setMetodoPago(m.value)}
+                      onClick={() => { setMetodoPago(m.value); if (m.value !== 'CREDITO') setFechaVencimiento('') }}
                       className="btn"
                       style={{
                         flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '12px 8px',
@@ -401,6 +495,31 @@ export default function VentaProductosPage() {
                   ))}
                 </div>
               </div>
+
+              {metodoPago === 'CREDITO' && (
+                <div>
+                  <label className="form-label">Fecha de vencimiento (opcional)</label>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <input
+                      type="date"
+                      min={hoyLocalStr()}
+                      value={fechaVencimiento}
+                      onChange={e => setFechaVencimiento(e.target.value)}
+                      style={{ flex: 1, minWidth: 140 }}
+                    />
+                    {[[7, '7 días'], [15, '15 días'], [30, '30 días']].map(([dias, label]) => (
+                      <button key={dias} type="button" className="btn btn-sm" onClick={() => setFechaVencimiento(sumarDiasStr(dias))}>
+                        {label}
+                      </button>
+                    ))}
+                    {fechaVencimiento && (
+                      <button type="button" className="btn btn-sm" onClick={() => setFechaVencimiento('')}>
+                        Sin fecha
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="form-label">Cliente (opcional)</label>
@@ -449,26 +568,31 @@ export default function VentaProductosPage() {
                           <td>
                             <span style={{
                               fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 10,
-                              background: v.metodoPago === 'EFECTIVO' ? 'var(--green-light)' : 'var(--blue-light)',
-                              color: v.metodoPago === 'EFECTIVO' ? 'var(--green)' : 'var(--blue-dark)',
+                              background: METODO_PAGO_INFO[v.metodoPago].bg,
+                              color: METODO_PAGO_INFO[v.metodoPago].color,
                             }}>
-                              {v.metodoPago === 'EFECTIVO' ? 'Efectivo' : 'Transferencia'}
+                              {metodoPagoLabel(v.metodoPago)}
                             </span>
                           </td>
                           <td>{v.detalles?.length ?? 0}</td>
                           <td style={{ fontWeight: 600 }}>{fmtGs(v.total)}</td>
                           <td>
-                            {v.cancelada && (
+                            {v.cancelada ? (
                               <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 10, background: 'var(--red-light)', color: 'var(--red)' }}>
                                 Cancelada
                               </span>
-                            )}
+                            ) : v.metodoPago === 'CREDITO' && <CreditoEstadoBadge venta={v} />}
                           </td>
                           <td>
                             <div style={{ display: 'flex', gap: 4 }}>
                               <button className="btn-icon" title="Ver detalle" onClick={() => setDetalleVenta(v)}>
                                 <i className="ti ti-eye" />
                               </button>
+                              {puedeCobrar(v) && (
+                                <button className="btn-icon" title="Registrar cobro" onClick={() => abrirModalPago(v)}>
+                                  <i className="ti ti-cash" style={{ color: 'var(--green)' }} />
+                                </button>
+                              )}
                               {puedeCancelar && !v.cancelada && (
                                 <button className="btn-icon" title="Cancelar venta" onClick={() => cancelarVenta(v)}>
                                   <i className="ti ti-x" style={{ color: 'var(--red)' }} />
@@ -492,11 +616,11 @@ export default function VentaProductosPage() {
                     <div key={v.id} className="list-card" style={{ opacity: v.cancelada ? 0.55 : 1 }}>
                       <div className="list-card-header">
                         <div className="list-card-title">{v.numero}</div>
-                        {v.cancelada && (
+                        {v.cancelada ? (
                           <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 10, background: 'var(--red-light)', color: 'var(--red)' }}>
                             Cancelada
                           </span>
-                        )}
+                        ) : v.metodoPago === 'CREDITO' && <CreditoEstadoBadge venta={v} />}
                       </div>
                       <div className="list-card-body">
                         <div className="list-card-item">
@@ -509,7 +633,7 @@ export default function VentaProductosPage() {
                         </div>
                         <div className="list-card-item">
                           <span className="list-card-label">Pago</span>
-                          <span className="list-card-value">{v.metodoPago === 'EFECTIVO' ? 'Efectivo' : 'Transferencia'}</span>
+                          <span className="list-card-value">{metodoPagoLabel(v.metodoPago)}</span>
                         </div>
                         <div className="list-card-item">
                           <span className="list-card-label">Total</span>
@@ -520,6 +644,11 @@ export default function VentaProductosPage() {
                         <button className="btn btn-sm" style={{ flex: 1 }} onClick={() => setDetalleVenta(v)}>
                           <i className="ti ti-eye" /> Ver detalle
                         </button>
+                        {puedeCobrar(v) && (
+                          <button className="btn btn-sm" onClick={() => abrirModalPago(v)}>
+                            <i className="ti ti-cash" style={{ color: 'var(--green)' }} /> Cobrar
+                          </button>
+                        )}
                         {puedeCancelar && !v.cancelada && (
                           <button className="btn btn-sm" onClick={() => cancelarVenta(v)}>
                             <i className="ti ti-x" style={{ color: 'var(--red)' }} /> Cancelar
@@ -543,6 +672,85 @@ export default function VentaProductosPage() {
         onCancel={() => setConfirmVentaOpen(false)}
       />
 
+      {/* Modal de registrar cobro de una venta a crédito */}
+      <Modal
+        open={!!modalPago}
+        title={`Registrar cobro — Venta ${modalPago?.numero || ''}`}
+        onClose={() => setModalPago(null)}
+        footer={
+          <>
+            <button className="btn" onClick={() => setModalPago(null)}>Cancelar</button>
+            <button className="btn btn-primary" onClick={confirmarPago} disabled={guardandoPago}>
+              {guardandoPago ? 'Guardando...' : 'Confirmar cobro'}
+            </button>
+          </>
+        }
+      >
+        {modalPago && (
+          <form onSubmit={confirmarPago} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+              Total de la venta: <strong>{fmtGs(modalPago.total)}</strong> — ya cobrado: <strong>{fmtGs(modalPago.montoCobrado)}</strong>
+            </div>
+            <FormGroup label="Monto a cobrar (Gs)" required>
+              <input
+                type="number" min="1" max={Number(modalPago.total) - Number(modalPago.montoCobrado)}
+                value={formPago.monto}
+                onChange={e => setFormPago(f => ({ ...f, monto: e.target.value }))}
+                required
+              />
+            </FormGroup>
+            <FormGroup label="Forma de pago" required>
+              <select value={formPago.metodoPago} onChange={e => setFormPago(f => ({ ...f, metodoPago: e.target.value }))} required>
+                <option value="EFECTIVO">Efectivo</option>
+                <option value="TRANSFERENCIA">Transferencia</option>
+              </select>
+            </FormGroup>
+            <FormGroup label="Observación (opcional)">
+              <textarea rows={2} value={formPago.observacion} onChange={e => setFormPago(f => ({ ...f, observacion: e.target.value }))} />
+            </FormGroup>
+          </form>
+        )}
+      </Modal>
+
+      {/* Modal de editar fecha de vencimiento de una venta a crédito */}
+      <Modal
+        open={!!modalVencimiento}
+        title={`Editar vencimiento — Venta ${modalVencimiento?.numero || ''}`}
+        onClose={() => setModalVencimiento(null)}
+        footer={
+          <>
+            <button className="btn" onClick={() => setModalVencimiento(null)}>Cancelar</button>
+            <button className="btn btn-primary" onClick={confirmarVencimiento} disabled={guardandoVencimiento}>
+              {guardandoVencimiento ? 'Guardando...' : 'Guardar'}
+            </button>
+          </>
+        }
+      >
+        {modalVencimiento && (
+          <form onSubmit={confirmarVencimiento} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <FormGroup label="Fecha de vencimiento">
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <input
+                  type="date"
+                  min={hoyLocalStr()}
+                  value={formVencimiento}
+                  onChange={e => setFormVencimiento(e.target.value)}
+                  style={{ flex: 1, minWidth: 140 }}
+                />
+                {formVencimiento && (
+                  <button type="button" className="btn btn-sm" onClick={() => setFormVencimiento('')}>
+                    Quitar vencimiento
+                  </button>
+                )}
+              </div>
+            </FormGroup>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+              El cambio queda registrado en la auditoría.
+            </div>
+          </form>
+        )}
+      </Modal>
+
       {detalleVenta && (
         <Modal
           open={true}
@@ -550,9 +758,16 @@ export default function VentaProductosPage() {
           onClose={() => setDetalleVenta(null)}
           width={560}
           footer={
-            <button className="btn" onClick={() => dispararImpresionVenta(detalleVenta)}>
-              <i className="ti ti-printer" /> Imprimir Ticket
-            </button>
+            <>
+              {puedeCobrar(detalleVenta) && (
+                <button className="btn btn-primary" onClick={() => abrirModalPago(detalleVenta)}>
+                  <i className="ti ti-cash" /> Registrar cobro
+                </button>
+              )}
+              <button className="btn" onClick={() => dispararImpresionVenta(detalleVenta)}>
+                <i className="ti ti-printer" /> Imprimir Ticket
+              </button>
+            </>
           }
         >
           <div style={{ display: 'grid', gap: 10, fontSize: 13 }}>
@@ -562,12 +777,58 @@ export default function VentaProductosPage() {
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--text-secondary)' }}>Forma de pago</span>
-              <span style={{ fontWeight: 500 }}>{detalleVenta.metodoPago === 'EFECTIVO' ? 'Efectivo' : 'Transferencia'}</span>
+              <span style={{ fontWeight: 500 }}>{metodoPagoLabel(detalleVenta.metodoPago)}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--text-secondary)' }}>Registrada por</span>
               <span style={{ fontWeight: 500 }}>{detalleVenta.usuario?.nombre || '—'}</span>
             </div>
+
+            {detalleVenta.metodoPago === 'CREDITO' && (
+              <div style={{ background: 'var(--surface-2)', borderRadius: 8, padding: 10, display: 'grid', gap: 6 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'var(--text-secondary)' }}>Cobrado</span>
+                  <span style={{ fontWeight: 600 }}>{fmtGs(detalleVenta.montoCobrado)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'var(--text-secondary)' }}>Saldo pendiente</span>
+                  <span style={{ fontWeight: 700, color: Number(detalleVenta.total) - Number(detalleVenta.montoCobrado) > 0 ? 'var(--red)' : 'var(--green)' }}>
+                    {fmtGs(Number(detalleVenta.total) - Number(detalleVenta.montoCobrado))}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ color: 'var(--text-secondary)' }}>Vencimiento</span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontWeight: 600, color: estaVencida(detalleVenta) ? 'var(--red)' : 'inherit' }}>
+                      {detalleVenta.fechaVencimiento ? fmtVencimiento(detalleVenta.fechaVencimiento) : 'Sin fecha'}
+                      {estaVencida(detalleVenta) && ' (vencida)'}
+                    </span>
+                    {puedeCobrar(detalleVenta) && (
+                      <button className="btn-icon" title="Editar vencimiento" onClick={() => abrirModalVencimiento(detalleVenta)}>
+                        <i className="ti ti-pencil" />
+                      </button>
+                    )}
+                  </span>
+                </div>
+                {detalleVenta.pagos?.length > 0 && (
+                  <div className="table-wrap" style={{ marginTop: 4 }}>
+                    <table>
+                      <thead><tr><th>Fecha</th><th>Forma</th><th>Monto</th></tr></thead>
+                      <tbody>
+                        {detalleVenta.pagos.map(p => (
+                          <tr key={p.id}>
+                            <td>{new Date(p.fechaPago).toLocaleString('es-PY')}</td>
+                            <td>{metodoPagoLabel(p.metodoPago)}</td>
+                            <td>{fmtGs(p.monto)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="table-wrap">
               <table>
                 <thead><tr><th>Ítem</th><th>Cant.</th><th>P. Unit.</th><th>Subtotal</th></tr></thead>
@@ -616,7 +877,10 @@ export default function VentaProductosPage() {
             </>}
             <strong>Fecha:</strong> {new Date(ventaParaImprimir.fechaVenta).toLocaleString('es-PY')}<br />
             <strong>Vendedor:</strong> {ventaParaImprimir.usuario?.nombre || '—'}<br />
-            <strong>Forma de pago:</strong> {ventaParaImprimir.metodoPago === 'TRANSFERENCIA' ? 'Transferencia' : 'Efectivo'}
+            <strong>Forma de pago:</strong> {metodoPagoLabel(ventaParaImprimir.metodoPago)}
+            {ventaParaImprimir.metodoPago === 'CREDITO' && ventaParaImprimir.fechaVencimiento && (
+              <><br /><strong>Vence:</strong> {fmtVencimiento(ventaParaImprimir.fechaVencimiento)}</>
+            )}
           </div>
 
           <table className="ticket-table">

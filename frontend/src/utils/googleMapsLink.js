@@ -40,8 +40,8 @@ export function isShortGoogleMapsLink(text) {
 }
 
 // Intenta extraer { lat, lon } de un texto pegado (link o coordenadas).
-// Para links cortos (maps.app.goo.gl) sin coordenadas visibles, devuelve null:
-// hay que resolverlos primero contra el backend (ver resolveShortMapsLink).
+// Para links cortos (maps.app.goo.gl) o de "lugar" sin coordenadas visibles,
+// devuelve null: hay que resolverlos primero (ver resolveGoogleMapsLocation).
 export function parseGoogleMapsLink(text) {
   if (!text) return null
   const trimmed = text.trim()
@@ -52,9 +52,69 @@ export function parseGoogleMapsLink(text) {
   return coordsFromText(decoded) || coordsFromText(trimmed)
 }
 
-// Resuelve un link corto de Google Maps siguiendo el redirect en el backend
-// (el navegador no puede leer la URL final de un redirect cross-origin).
-export async function resolveShortMapsLink(api, url) {
-  const { data } = await api.get('/maps/resolve', { params: { url } })
-  return parseGoogleMapsLink(data.finalUrl || '')
+// Los links de un "lugar" (un negocio compartido por nombre, ej. desde la
+// app de Maps) no traen coordenadas en la URL, solo un ID de lugar interno
+// de Google (.../maps/place/<nombre>/data=!...!1s<cid>...). Como último
+// recurso extraemos el nombre del lugar para geocodificarlo.
+function placeQueryFromUrl(url) {
+  if (!url) return null
+  const place = url.match(/\/maps\/place\/([^/]+)/)
+  const raw = place ? place[1] : (url.match(/[?&]q=([^&]+)/) || [])[1]
+  if (!raw) return null
+  let q = raw.replace(/\+/g, ' ')
+  try { q = decodeURIComponent(q) } catch { /* texto no codificado, se usa tal cual */ }
+  return q.trim() || null
+}
+
+async function searchNominatim(query) {
+  // Restringido a Paraguay (mismo bias que usa el resto de la app al
+  // buscar direcciones) para evitar que un nombre de negocio ambiguo
+  // caiga en un resultado de otro país.
+  const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=py&viewbox=-58.5,-27.5,-54.0,-19.3&q=${encodeURIComponent(query)}`)
+  const data = await res.json()
+  if (Array.isArray(data) && data[0]) {
+    const lat = parseFloat(data[0].lat)
+    const lon = parseFloat(data[0].lon)
+    if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) return { lat, lon }
+  }
+  return null
+}
+
+// Geocodifica un texto libre (nombre/dirección de un lugar) contra Nominatim.
+// Se usa como último recurso cuando el link de Google Maps no trae
+// coordenadas explícitas (links de "lugar"). Muchos negocios pequeños no
+// están cargados en OpenStreetMap con ese nombre, así que si la búsqueda
+// completa no encuentra nada reintentamos solo con la dirección (sin el
+// nombre del negocio, que suele ser el primer segmento separado por coma).
+export async function geocodePlaceQuery(query) {
+  if (!query) return null
+  try {
+    const found = await searchNominatim(query)
+    if (found) return found
+    const withoutName = query.split(',').slice(1).join(',').trim()
+    if (withoutName) return await searchNominatim(withoutName)
+  } catch { /* sin conexión o sin resultados, se resuelve como no encontrado */ }
+  return null
+}
+
+// Resuelve cualquier link de Google Maps (largo o corto) a { lat, lon }.
+// 1) si la URL ya trae coordenadas, las usa directo.
+// 2) si es un link corto (maps.app.goo.gl), lo resuelve contra el backend
+//    para leer el destino real (el navegador no puede leer la URL final de
+//    un redirect cross-origin).
+// 3) si el destino es un link de "lugar" sin coordenadas, geocodifica el
+//    nombre del lugar como último recurso.
+export async function resolveGoogleMapsLocation(api, url) {
+  const trimmed = (url || '').trim()
+  const direct = parseGoogleMapsLink(trimmed)
+  if (direct) return direct
+
+  let finalUrl = trimmed
+  if (isShortGoogleMapsLink(trimmed)) {
+    const { data } = await api.get('/maps/resolve', { params: { url: trimmed } })
+    finalUrl = data.finalUrl || ''
+    const resolved = parseGoogleMapsLink(finalUrl)
+    if (resolved) return resolved
+  }
+  return geocodePlaceQuery(placeQueryFromUrl(finalUrl))
 }

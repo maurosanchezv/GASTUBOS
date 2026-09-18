@@ -4,7 +4,7 @@ import api from '../services/api.js'
 import { PageHeader, Modal, FormGroup, Spinner, EmptyState, TipoBadge } from '../components/ui.jsx'
 import { useToast } from '../components/ui.jsx'
 import MiniMapaPicker from '../components/MiniMapaPicker.jsx'
-import { isGoogleMapsLink, isShortGoogleMapsLink, parseGoogleMapsLink, resolveShortMapsLink } from '../utils/googleMapsLink.js'
+import { isGoogleMapsLink, parseGoogleMapsLink, resolveGoogleMapsLocation } from '../utils/googleMapsLink.js'
 
 const EMPTY = {
   nombre: '',
@@ -311,24 +311,16 @@ export default function ClientesPage() {
 
   // Pegar un link de ubicación (WhatsApp comparte vía Google Maps) en el campo
   // de dirección: si trae coordenadas las usamos directo; si es un link corto
-  // (maps.app.goo.gl) lo resolvemos contra el backend para leer el destino real.
+  // (maps.app.goo.gl) o de "lugar" sin coordenadas, se resuelve contra el
+  // backend y, si hace falta, se geocodifica el nombre del lugar.
   const manejarPegadoDireccion = async (e, setter) => {
     const text = e.clipboardData?.getData('text') || ''
     if (!isGoogleMapsLink(text) && !parseGoogleMapsLink(text)) return
     e.preventDefault()
 
-    const direct = parseGoogleMapsLink(text)
-    if (direct) {
-      aplicarUbicacionPegada(setter, direct)
-      return
-    }
-    if (!isShortGoogleMapsLink(text)) {
-      toast('No se encontraron coordenadas en ese link', 'error')
-      return
-    }
     setAddrBuscando(true)
     try {
-      const resolved = await resolveShortMapsLink(api, text.trim())
+      const resolved = await resolveGoogleMapsLocation(api, text)
       if (resolved) aplicarUbicacionPegada(setter, resolved)
       else toast('No se pudo leer la ubicación de ese link', 'error')
     } catch {

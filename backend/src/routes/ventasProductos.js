@@ -4,6 +4,8 @@ import { z } from 'zod'
 import { prisma } from '../utils/prisma.js'
 import { requireAuth, requireRol } from '../middleware/auth.js'
 import { generarNumero } from '../utils/helpers.js'
+import { registrarPagoVentaProducto, parsearFechaVencimiento, ErrorPagoVentaProducto } from '../utils/ventaProducto.js'
+import { registrarAuditoria } from '../utils/auditoria.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -18,16 +20,27 @@ const detalleSchema = z.object({
 })
 
 const ventaProductoSchema = z.object({
-  clienteId:     z.string().optional().nullable(),
-  metodoPago:    z.enum(['EFECTIVO', 'TRANSFERENCIA']),
-  observaciones: z.string().optional().nullable(),
-  detalles:      z.array(detalleSchema).min(1, 'Debe incluir al menos un ítem'),
+  clienteId:        z.string().optional().nullable(),
+  metodoPago:       z.enum(['EFECTIVO', 'TRANSFERENCIA', 'CREDITO']),
+  fechaVencimiento: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha inválida').optional().nullable(),
+  observaciones:    z.string().optional().nullable(),
+  detalles:         z.array(detalleSchema).min(1, 'Debe incluir al menos un ítem'),
+}).refine(data => data.metodoPago !== 'CREDITO' || !!data.clienteId, {
+  message: 'Debe seleccionar un cliente para vender a crédito',
+  path: ['clienteId'],
+}).refine(data => !data.fechaVencimiento || data.metodoPago === 'CREDITO', {
+  message: 'Solo las ventas a crédito admiten fecha de vencimiento',
+  path: ['fechaVencimiento'],
 })
 
 const includeCompleto = {
   cliente: { select: { id: true, nombre: true, ruc: true } },
   usuario: { select: { id: true, nombre: true, username: true } },
   detalles: { include: { producto: { select: { id: true, codigo: true } } } },
+  pagos: {
+    include: { usuario: { select: { id: true, nombre: true, username: true } } },
+    orderBy: { fechaPago: 'desc' },
+  },
 }
 
 // ─── GET /api/venta-productos ──────────────────────────────────────────────────
@@ -63,6 +76,14 @@ router.get('/:id', async (req, res, next) => {
 router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
   try {
     const data = ventaProductoSchema.parse(req.body)
+
+    let fechaVencimiento
+    try {
+      fechaVencimiento = parsearFechaVencimiento(data.fechaVencimiento)
+    } catch (err) {
+      if (err instanceof ErrorPagoVentaProducto) return res.status(err.status).json({ error: err.message })
+      throw err
+    }
 
     const productoIds = [...new Set(data.detalles.map(d => d.productoId).filter(Boolean))]
     const productos = productoIds.length
@@ -109,6 +130,7 @@ router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res,
           clienteId: data.clienteId || null,
           usuarioId: req.user.id,
           metodoPago: data.metodoPago,
+          fechaVencimiento,
           observaciones: data.observaciones,
           total,
           detalles: { create: detallesCreate },
@@ -134,15 +156,99 @@ router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res,
   }
 })
 
+// ─── POST /api/venta-productos/:id/pagar (cobro de venta a crédito) ───────────
+const pagoSchema = z.object({
+  monto:       z.coerce.number().positive(),
+  metodoPago:  z.enum(['EFECTIVO', 'TRANSFERENCIA']),
+  observacion: z.string().optional().nullable(),
+})
+
+router.post('/:id/pagar', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
+  try {
+    const data = pagoSchema.parse(req.body)
+
+    let resultado
+    try {
+      resultado = await prisma.$transaction(tx => registrarPagoVentaProducto(tx, {
+        ventaProductoId: req.params.id,
+        monto: data.monto,
+        metodoPago: data.metodoPago,
+        observacion: data.observacion,
+        usuarioId: req.user.id,
+      }))
+    } catch (err) {
+      if (err instanceof ErrorPagoVentaProducto) return res.status(err.status).json({ error: err.message })
+      throw err
+    }
+
+    const venta = await prisma.ventaProducto.findUnique({ where: { id: req.params.id }, include: includeCompleto })
+    res.json({ venta, pago: resultado.pago })
+  } catch (err) {
+    if (err instanceof z.ZodError) return res.status(400).json({ error: err.errors })
+    next(err)
+  }
+})
+
+// ─── PATCH /api/venta-productos/:id/vencimiento (editar fecha de vencimiento) ──
+const vencimientoSchema = z.object({
+  fechaVencimiento: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha inválida').nullable(),
+})
+
+router.patch('/:id/vencimiento', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
+  try {
+    const data = vencimientoSchema.parse(req.body)
+
+    const venta = await prisma.ventaProducto.findUnique({ where: { id: req.params.id } })
+    if (!venta) return res.status(404).json({ error: 'Venta no encontrada' })
+    if (venta.cancelada) return res.status(400).json({ error: 'La venta está cancelada' })
+    if (venta.metodoPago !== 'CREDITO') return res.status(400).json({ error: 'Solo las ventas a crédito admiten fecha de vencimiento' })
+    if (Number(venta.montoCobrado) >= Number(venta.total)) {
+      return res.status(400).json({ error: 'La venta ya está totalmente cobrada' })
+    }
+
+    let fechaVencimiento
+    try {
+      fechaVencimiento = parsearFechaVencimiento(data.fechaVencimiento)
+    } catch (err) {
+      if (err instanceof ErrorPagoVentaProducto) return res.status(err.status).json({ error: err.message })
+      throw err
+    }
+
+    const anterior = venta.fechaVencimiento ? venta.fechaVencimiento.toISOString().slice(0, 10) : null
+    const nueva = fechaVencimiento ? fechaVencimiento.toISOString().slice(0, 10) : null
+
+    const actualizada = await prisma.ventaProducto.update({
+      where: { id: req.params.id },
+      data: { fechaVencimiento },
+      include: includeCompleto,
+    })
+
+    await registrarAuditoria({
+      usuarioId: req.user.id,
+      accion: 'Vencimiento de crédito modificado',
+      observaciones: `Venta ${venta.numero}`,
+      metadata: { ventaProductoId: venta.id, numero: venta.numero, anterior, nueva },
+    })
+
+    res.json(actualizada)
+  } catch (err) {
+    if (err instanceof z.ZodError) return res.status(400).json({ error: err.errors })
+    next(err)
+  }
+})
+
 // ─── PATCH /api/venta-productos/:id/cancelar ───────────────────────────────────
 router.patch('/:id/cancelar', requireRol('ADMIN', 'SUPERVISOR'), async (req, res, next) => {
   try {
     const venta = await prisma.ventaProducto.findUnique({
       where: { id: req.params.id },
-      include: { detalles: true },
+      include: { detalles: true, _count: { select: { pagos: true } } },
     })
     if (!venta) return res.status(404).json({ error: 'Venta no encontrada' })
     if (venta.cancelada) return res.status(400).json({ error: 'La venta ya está cancelada' })
+    if (venta._count.pagos > 0) {
+      return res.status(400).json({ error: 'No se puede cancelar una venta que ya tiene cobros registrados' })
+    }
 
     // Reponer el stock descontado al vender, en la misma transacción que la
     // cancelación. Los productos con stock null nunca se descontaron (no

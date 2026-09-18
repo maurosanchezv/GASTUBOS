@@ -6,6 +6,7 @@
 import { EscPosBuilder, generarLogoEscPos } from './escPosBuilder.js'
 import { formatCapacidad } from '../components/ui.jsx'
 import { precioFilaDetalle, subtotalItemsTicket } from './ticketMontos.js'
+import { metodoPagoLabel, fmtVencimiento } from './metodoPago.js'
 
 export const formatNumberSpanish = (val) => {
   const num = Number(val)
@@ -684,7 +685,11 @@ export async function construirBufferTicketVentaProductos(venta, config) {
   builder.boldOn().addTextLine(justify('TOTAL:', Number(venta.total).toLocaleString('es-PY') + ' GS')).boldOff()
   builder.addTextLine(doubleLine())
 
-  builder.addTextLine('Forma de pago: ' + (venta.metodoPago === 'TRANSFERENCIA' ? 'Transferencia' : 'Efectivo'))
+  builder.addTextLine('Forma de pago: ' + metodoPagoLabel(venta.metodoPago))
+
+  if (venta.metodoPago === 'CREDITO' && venta.fechaVencimiento) {
+    builder.boldOn().addTextLine('Vence: ' + fmtVencimiento(venta.fechaVencimiento)).boldOff()
+  }
 
   if (venta.observaciones) {
     builder.addTextLine(line())

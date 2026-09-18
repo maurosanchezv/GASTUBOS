@@ -109,6 +109,13 @@ const entregaSchema = z.object({
   fechaVencimiento: z.string().datetime().optional(),
   // Solo si tipoOperacion = VENTA
   referencia:       z.string().optional(),
+}).superRefine((data, ctx) => {
+  // Entrega en Salón: se exige georreferenciar dónde retira el tubo el
+  // cliente, para dejar precedente en el mapa (a diferencia de REPARTO,
+  // que ya trae GPS real del repartidor en el momento de la entrega).
+  if (data.canal === 'SALON' && (data.latitud == null || data.longitud == null)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'La ubicación es obligatoria para entregas en salón', path: ['latitud'] })
+  }
 })
 
 // ─── GET /api/entregas ────────────────────────────────────────────────────────

@@ -2,18 +2,41 @@
 import { useEffect, useState, useMemo } from 'react'
 import api from '../services/api.js'
 import { PageHeader, Spinner, EmptyState, useToast } from '../components/ui.jsx'
+import { METODO_PAGO_INFO, hoyLocalStr } from '../utils/metodoPago.js'
 
 const fmtGs = (v) => `${Number(v || 0).toLocaleString('es-PY')} Gs.`
 const fmtFecha = (f) => new Date(f).toLocaleString('es-PY', { dateStyle: 'short', timeStyle: 'short' })
+// dd/mm en UTC — el vencimiento se guarda como fecha sin hora, a medianoche
+// UTC, y hay que formatearlo siempre en UTC o corre un día para atrás en
+// Paraguay (UTC-3).
+const fmtVencimientoCorto = (f) => new Date(f).toLocaleDateString('es-PY', { day: '2-digit', month: '2-digit', timeZone: 'UTC' })
 
+function VencimientoTag({ movimiento }) {
+  if (!movimiento.fechaVencimiento) return null
+  // El backend ya solo manda fechaVencimiento para ventas con saldo pendiente
+  // (PENDIENTE/PARCIAL) — acá solo falta saber si esa fecha ya pasó.
+  const vencida = new Date(movimiento.fechaVencimiento) < new Date(hoyLocalStr() + 'T00:00:00.000Z')
+  return (
+    <div style={{ fontSize: 10, fontWeight: 600, marginTop: 2, color: vencida ? 'var(--red)' : 'var(--text-muted)' }}>
+      {vencida ? 'Vencida ' : 'Vence '}{fmtVencimientoCorto(movimiento.fechaVencimiento)}
+    </div>
+  )
+}
+
+// Mismas claves y labels que TIPO_LABEL en el backend (movimientosDinero.js)
+// — los cuatro tipos de alquiler van explícitos, nunca un 'ALQUILER' genérico
+// que no matchea nada y deja el filtro roto en silencio.
 const TIPOS = [
   ['ENTREGA',        'Entrega'],
-  ['ALQUILER',       'Alquiler'],
   ['VENTA_CILINDRO', 'Venta de cilindro'],
   ['RECARGA',        'Recarga (recambio)'],
   ['VENTA_SALON',    'Venta en salón'],
   ['VENTA_CAMION',   'Venta desde camión'],
   ['VENTA_PRODUCTO', 'Venta de producto'],
+  ['ALQUILER_INICIAL',     'Alquiler Inicial'],
+  ['ALQUILER_MENSUALIDAD', 'Mensualidad Alquiler'],
+  ['ALQUILER_RECARGA',     'Recarga Alquiler'],
+  ['ALQUILER_OTRO',        'Otro cargo de Alquiler'],
 ]
 
 const ESTADO_COLOR = {
@@ -25,15 +48,10 @@ const ESTADO_COLOR = {
 }
 
 function FormaPagoBadge({ formaPago }) {
-  const esEfectivo = formaPago === 'EFECTIVO'
+  const info = METODO_PAGO_INFO[formaPago] || METODO_PAGO_INFO.EFECTIVO
   return (
-    <span style={{
-      fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 10,
-      background: esEfectivo ? 'var(--green-light)' : 'var(--blue-light)',
-      color: esEfectivo ? 'var(--green)' : 'var(--blue-dark)',
-      whiteSpace: 'nowrap',
-    }}>
-      {esEfectivo ? 'Efectivo' : 'Transferencia'}
+    <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 10, background: info.bg, color: info.color, whiteSpace: 'nowrap' }}>
+      {info.label}
     </span>
   )
 }
@@ -68,7 +86,7 @@ export default function MovimientoDineroPage() {
   const [hasta, setHasta] = useState(() => new Date().toISOString().slice(0, 10))
 
   const [movimientos, setMovimientos] = useState([])
-  const [resumen, setResumen] = useState({ efectivo: 0, transferencia: 0, total: 0, cantidad: 0 })
+  const [resumen, setResumen] = useState({ efectivo: 0, transferencia: 0, credito: 0, total: 0, cantidad: 0 })
   const [loading, setLoading] = useState(true)
 
   const [formaPagoFiltro, setFormaPagoFiltro] = useState('')
@@ -82,7 +100,7 @@ export default function MovimientoDineroPage() {
       if (periodo === 'custom') { params.desde = desde; params.hasta = hasta }
       const r = await api.get('/movimientos-dinero', { params })
       setMovimientos(r.data.movimientos || [])
-      setResumen(r.data.resumen || { efectivo: 0, transferencia: 0, total: 0, cantidad: 0 })
+      setResumen(r.data.resumen || { efectivo: 0, transferencia: 0, credito: 0, total: 0, cantidad: 0 })
     } catch {
       toast('Error al cargar los movimientos de dinero', 'error')
     } finally {
@@ -169,6 +187,10 @@ export default function MovimientoDineroPage() {
             <div className="stat-label"><i className="ti ti-report-money" style={{ color: 'var(--text-secondary)' }} /> Total General</div>
             <div className="stat-value" style={{ fontSize: 22 }}>{fmtGs(resumen.total)}</div>
           </div>
+          <div className="stat-card" style={{ borderLeft: '4px solid var(--amber)' }}>
+            <div className="stat-label"><i className="ti ti-credit-card" style={{ color: 'var(--amber)' }} /> Crédito (no incluido)</div>
+            <div className="stat-value" style={{ color: 'var(--amber)', fontSize: 22 }}>{fmtGs(resumen.credito)}</div>
+          </div>
         </div>
 
         {/* FILTROS SECUNDARIOS */}
@@ -182,6 +204,7 @@ export default function MovimientoDineroPage() {
             <option value="">Todas las formas de pago</option>
             <option value="EFECTIVO">Efectivo</option>
             <option value="TRANSFERENCIA">Transferencia</option>
+            <option value="CREDITO">Crédito</option>
           </select>
           <select value={tipoFiltro} onChange={e => setTipoFiltro(e.target.value)} style={selectStyle}>
             <option value="">Todos los tipos</option>
@@ -215,7 +238,10 @@ export default function MovimientoDineroPage() {
                         <td>{m.cliente}</td>
                         <td><FormaPagoBadge formaPago={m.formaPago} /></td>
                         <td style={{ fontWeight: 600 }}>{fmtGs(m.monto)}</td>
-                        <td><EstadoBadge estado={m.estado} label={m.estadoLabel} /></td>
+                        <td>
+                          <EstadoBadge estado={m.estado} label={m.estadoLabel} />
+                          <VencimientoTag movimiento={m} />
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -254,6 +280,7 @@ export default function MovimientoDineroPage() {
                       <div className="list-card-item col-span-2">
                         <span className="list-card-label">Estado</span>
                         <EstadoBadge estado={m.estado} label={m.estadoLabel} />
+                        <VencimientoTag movimiento={m} />
                       </div>
                     </div>
                   </div>

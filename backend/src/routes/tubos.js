@@ -87,6 +87,8 @@ router.get('/', async (req, res, next) => {
         { id:    { contains: q, mode: 'insensitive' } },
         { serie: { contains: q, mode: 'insensitive' } },
         { gas:   { contains: q, mode: 'insensitive' } },
+        { cliente: { nombre: { contains: q, mode: 'insensitive' } } },
+        { cliente: { ruc:    { contains: q, mode: 'insensitive' } } },
       ]
     }
 

@@ -142,6 +142,7 @@ enum UnidadGas {
 enum MetodoPago {
   EFECTIVO
   TRANSFERENCIA
+  CREDITO
 }
 
 // ─── USUARIOS ─────────────────────────────────────────────────────────────────
@@ -167,6 +168,7 @@ model Usuario {
   camionesEnUso              Camion[]    @relation("CamionRepartidorActual")
   ventasProductos            VentaProducto[]
   pagosCargoAlquiler         PagoCargoAlquiler[]
+  pagosVentaProducto         PagoVentaProducto[]
   ordenesRecargaComoRepartidor OrdenRecargaAlquiler[] @relation("OrdenRecargaRepartidor")
   ordenesRecargaCreadas       OrdenRecargaAlquiler[] @relation("OrdenRecargaCreadaPor")
 
@@ -663,17 +665,45 @@ model VentaProducto {
   usuario       Usuario    @relation(fields: [usuarioId], references: [id])
   metodoPago    MetodoPago
   total         Decimal    @db.Decimal(10, 2)
+  montoCobrado  Decimal    @db.Decimal(10, 2) @default(0)  // solo relevante si CREDITO
+  // Fecha límite de cobro, solo tiene sentido con metodoPago = CREDITO. Se
+  // guarda como fecha sin hora, a medianoche UTC (ver parsearFechaVencimiento
+  // en utils/ventaProducto.js) — nunca formatear en hora local sin
+  // timeZone: 'UTC' o corre un día para atrás en Paraguay (UTC-3).
+  fechaVencimiento DateTime?
   observaciones String?
   cancelada     Boolean    @default(false)
   fechaVenta    DateTime   @default(now())
   createdAt     DateTime   @default(now())
 
   detalles      DetalleVentaProducto[]
+  pagos         PagoVentaProducto[]
 
   @@index([clienteId])
   @@index([usuarioId])
   @@index([fechaVenta])
   @@map("ventas_productos")
+}
+
+// Historial de cobros de una venta a crédito (pagos parciales incluidos). Es
+// la fuente de verdad del dinero; VentaProducto.montoCobrado es un
+// acumulado/cache que se mantiene en sincronía con SUM(PagoVentaProducto.monto)
+// — mismo patrón que PagoCargoAlquiler/CargoAlquiler.montoPagado.
+model PagoVentaProducto {
+  id              String        @id @default(cuid())
+  ventaProductoId String
+  ventaProducto   VentaProducto @relation(fields: [ventaProductoId], references: [id])
+  monto           Decimal       @db.Decimal(10, 2)
+  metodoPago      String        // 'EFECTIVO' | 'TRANSFERENCIA' — cómo se cobró realmente
+  fechaPago       DateTime      @default(now())
+  observacion     String?
+  usuarioId       String
+  usuario         Usuario       @relation(fields: [usuarioId], references: [id])
+  createdAt       DateTime      @default(now())
+
+  @@index([ventaProductoId])
+  @@index([fechaPago])
+  @@map("pagos_venta_producto")
 }
 
 model DetalleVentaProducto {
