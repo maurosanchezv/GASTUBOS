@@ -69,7 +69,7 @@ router.get('/', async (req, res, next) => {
 })
 
 // POST /api/planes-alquiler
-router.post('/', requireRol('ADMIN'), async (req, res, next) => {
+router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
   try {
     const data = planSchema.parse(req.body)
     const { items, ...planData } = data
@@ -99,7 +99,7 @@ router.post('/', requireRol('ADMIN'), async (req, res, next) => {
 })
 
 // PUT /api/planes-alquiler/:id
-router.put('/:id', requireRol('ADMIN'), async (req, res, next) => {
+router.put('/:id', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res, next) => {
   try {
     const data = planSchema.partial().parse(req.body)
     const { items, ...planData } = data

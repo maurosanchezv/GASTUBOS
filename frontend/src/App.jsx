@@ -109,7 +109,7 @@ export default function App() {
             <PrivateRoute roles={['ADMIN', 'SUPERVISOR', 'OPERADOR']}><AlquileresPage /></PrivateRoute>
           } />
           <Route path="planes-alquiler" element={
-            <PrivateRoute roles={['ADMIN']}><PlanesAlquilerPage /></PrivateRoute>
+            <PrivateRoute roles={['ADMIN', 'SUPERVISOR', 'OPERADOR']}><PlanesAlquilerPage /></PrivateRoute>
           } />
           <Route path="recargas-alquiler" element={
             <PrivateRoute roles={['ADMIN', 'SUPERVISOR', 'OPERADOR']}><RecargasAlquilerPage /></PrivateRoute>
