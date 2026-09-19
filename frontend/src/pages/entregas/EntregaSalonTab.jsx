@@ -306,7 +306,7 @@ export default function EntregaSalonTab({ toast, onFinish }) {
     } catch { /* la dirección de texto es solo de apoyo, seguimos con lat/lng igual */ }
   }
 
-  function aplicarUbicacionPegada({ lat, lon }) {
+  function aplicarUbicacionPegada({ lat, lon, approximate }) {
     const placeholder = 'Ubicación de WhatsApp/Google Maps (obteniendo dirección...)'
     lastSelectedAddress.current = placeholder
     setDireccionEntrega(placeholder)
@@ -314,7 +314,11 @@ export default function EntregaSalonTab({ toast, onFinish }) {
     setLongitud(lon)
     setAddrSugs([])
     reverseGeocodeDireccion(lat, lon)
-    toast('Ubicación detectada desde el link', 'success')
+    if (approximate) {
+      toast('Ubicación aproximada: el link no traía el pin exacto, verificá y ajustá el marcador en el mapa', 'warning')
+    } else {
+      toast('Ubicación detectada desde el link', 'success')
+    }
   }
 
   async function handleAddressPaste(e) {

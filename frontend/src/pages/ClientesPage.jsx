@@ -293,7 +293,7 @@ export default function ClientesPage() {
 
   // Aplica una ubicación (lat/lon) extraída de un link de Google Maps/WhatsApp
   // al formulario indicado (cliente principal o sucursal) y resuelve la dirección legible.
-  const aplicarUbicacionPegada = async (setter, { lat, lon }) => {
+  const aplicarUbicacionPegada = async (setter, { lat, lon, approximate }) => {
     const placeholder = 'Ubicación de WhatsApp/Google Maps (obteniendo dirección...)'
     lastSelectedAddress.current = placeholder
     setter(f => ({ ...f, direccion: placeholder, latitud: lat, longitud: lon }))
@@ -306,7 +306,11 @@ export default function ClientesPage() {
         setter(f => ({ ...f, direccion: data.display_name }))
       }
     } catch {}
-    toast('Ubicación detectada desde el link', 'success')
+    if (approximate) {
+      toast('Ubicación aproximada: el link no traía el pin exacto, verificá y ajustá el marcador en el mapa', 'warning')
+    } else {
+      toast('Ubicación detectada desde el link', 'success')
+    }
   }
 
   // Pegar un link de ubicación (WhatsApp comparte vía Google Maps) en el campo

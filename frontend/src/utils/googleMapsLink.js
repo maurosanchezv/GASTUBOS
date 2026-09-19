@@ -2,10 +2,14 @@
 // Extrae coordenadas de un link de Google Maps (los que WhatsApp comparte al
 // tocar "Compartir ubicación" y luego "Copiar enlace").
 
+// Orden importa: !3d!4d es la coordenada exacta del pin/lugar, mientras que
+// @lat,lon es el centro del viewport (la cámara del mapa) y puede quedar
+// corrido del pin real cuando el link trae ambos. Por eso !3d!4d se revisa
+// primero.
 const COORD_PATTERNS = [
   /[?&](?:q|query)=(-?\d{1,2}\.\d+),\s*(-?\d{1,3}\.\d+)/,  // ?q=lat,lon
-  /@(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)/,                     // /@lat,lon,17z
-  /!3d(-?\d{1,2}\.\d+)!4d(-?\d{1,3}\.\d+)/,                 // data=...!3dlat!4dlon
+  /!3d(-?\d{1,2}\.\d+)!4d(-?\d{1,3}\.\d+)/,                 // data=...!3dlat!4dlon (pin exacto)
+  /@(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)/,                     // /@lat,lon,17z (centro del viewport)
   /[?&]ll=(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)/,               // ?ll=lat,lon
 ]
 
@@ -97,24 +101,30 @@ export async function geocodePlaceQuery(query) {
   return null
 }
 
-// Resuelve cualquier link de Google Maps (largo o corto) a { lat, lon }.
-// 1) si la URL ya trae coordenadas, las usa directo.
+// Resuelve cualquier link de Google Maps (largo o corto) a { lat, lon, approximate }.
+// 1) si la URL ya trae coordenadas, las usa directo (approximate: false).
 // 2) si es un link corto (maps.app.goo.gl), lo resuelve contra el backend
 //    para leer el destino real (el navegador no puede leer la URL final de
-//    un redirect cross-origin).
+//    un redirect cross-origin). Google solo agrega @lat,lon/!3d!4d al link
+//    del lado del cliente (vía JS), así que un redirect resuelto por el
+//    backend casi siempre llega "pelado", sin coordenadas.
 // 3) si el destino es un link de "lugar" sin coordenadas, geocodifica el
-//    nombre del lugar como último recurso.
+//    nombre del lugar como último recurso: es una búsqueda por texto, no la
+//    coordenada real del pin, así que puede caer en la calle más cercana en
+//    vez del comercio exacto — se marca approximate: true para que la UI
+//    avise y el usuario verifique/ajuste el pin en el mapa.
 export async function resolveGoogleMapsLocation(api, url) {
   const trimmed = (url || '').trim()
   const direct = parseGoogleMapsLink(trimmed)
-  if (direct) return direct
+  if (direct) return { ...direct, approximate: false }
 
   let finalUrl = trimmed
   if (isShortGoogleMapsLink(trimmed)) {
     const { data } = await api.get('/maps/resolve', { params: { url: trimmed } })
     finalUrl = data.finalUrl || ''
     const resolved = parseGoogleMapsLink(finalUrl)
-    if (resolved) return resolved
+    if (resolved) return { ...resolved, approximate: false }
   }
-  return geocodePlaceQuery(placeQueryFromUrl(finalUrl))
+  const geocoded = await geocodePlaceQuery(placeQueryFromUrl(finalUrl))
+  return geocoded ? { ...geocoded, approximate: true } : null
 }

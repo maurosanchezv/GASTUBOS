@@ -371,13 +371,17 @@ export default function EntregasPage() {
 
   // Aplica una ubicación (lat/lon) extraída de un link de Google Maps/WhatsApp:
   // fija el marcador, actualiza el mapa si está abierto y resuelve la dirección legible.
-  const aplicarUbicacionPegada = ({ lat, lon }) => {
+  const aplicarUbicacionPegada = ({ lat, lon, approximate }) => {
     const placeholder = 'Ubicación de WhatsApp/Google Maps (obteniendo dirección...)'
     lastSelectedAddress.current = placeholder
     setForm(f => ({ ...f, direccionEntrega: placeholder, latitud: lat, longitud: lon }))
     setAddrSugs([])
     reverseGeocode(lat, lon)
-    toast('Ubicación detectada desde el link', 'success')
+    if (approximate) {
+      toast('Ubicación aproximada: el link no traía el pin exacto, verificá y ajustá el marcador en el mapa', 'warning')
+    } else {
+      toast('Ubicación detectada desde el link', 'success')
+    }
     if (mapaPickerInstance.current) {
       const { map, marker } = mapaPickerInstance.current
       if (marker) marker.setLatLng([lat, lon])
