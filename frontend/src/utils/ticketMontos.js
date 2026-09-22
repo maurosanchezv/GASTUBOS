@@ -38,7 +38,13 @@ export function subtotalItemsTicket(entrega) {
   return (entrega?.detalles || []).reduce((s, d) => s + Number(d.subtotal || 0), 0)
 }
 
-// Total del ticket = subtotal de ítems + delivery.
+// Subtotal de productos de catálogo agregados a la entrega ("Agregar
+// productos"), independiente del tipoOperacion.
+export function subtotalProductosTicket(entrega) {
+  return Number(entrega?.ventaProducto?.total || 0)
+}
+
+// Total del ticket = subtotal de ítems + productos de catálogo + delivery.
 export function totalTicket(entrega) {
-  return subtotalItemsTicket(entrega) + Number(entrega?.costoDelivery || 0)
+  return subtotalItemsTicket(entrega) + subtotalProductosTicket(entrega) + Number(entrega?.costoDelivery || 0)
 }

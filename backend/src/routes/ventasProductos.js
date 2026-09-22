@@ -4,27 +4,18 @@ import { z } from 'zod'
 import { prisma } from '../utils/prisma.js'
 import { requireAuth, requireRol } from '../middleware/auth.js'
 import { generarNumero } from '../utils/helpers.js'
-import { registrarPagoVentaProducto, parsearFechaVencimiento, ErrorPagoVentaProducto } from '../utils/ventaProducto.js'
+import { registrarPagoVentaProducto, parsearFechaVencimiento, ErrorPagoVentaProducto, detalleVentaProductoSchema, calcularDetallesVenta } from '../utils/ventaProducto.js'
 import { registrarAuditoria } from '../utils/auditoria.js'
 
 const router = Router()
 router.use(requireAuth)
-
-const detalleSchema = z.object({
-  productoId:     z.string().optional().nullable(),
-  descripcion:    z.string().min(1).optional(),
-  cantidad:       z.coerce.number().positive().default(1),
-  precioUnitario: z.coerce.number().nonnegative().optional(),
-}).refine(d => d.productoId || (d.descripcion && d.precioUnitario !== undefined), {
-  message: 'Cada ítem debe tener productoId, o una descripción y un precio unitario',
-})
 
 const ventaProductoSchema = z.object({
   clienteId:        z.string().optional().nullable(),
   metodoPago:       z.enum(['EFECTIVO', 'TRANSFERENCIA', 'CREDITO']),
   fechaVencimiento: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha inválida').optional().nullable(),
   observaciones:    z.string().optional().nullable(),
-  detalles:         z.array(detalleSchema).min(1, 'Debe incluir al menos un ítem'),
+  detalles:         z.array(detalleVentaProductoSchema).min(1, 'Debe incluir al menos un ítem'),
 }).refine(data => data.metodoPago !== 'CREDITO' || !!data.clienteId, {
   message: 'Debe seleccionar un cliente para vender a crédito',
   path: ['clienteId'],
@@ -99,24 +90,7 @@ router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res,
       if (!cliente) return res.status(400).json({ error: 'Cliente no encontrado' })
     }
 
-    // Los precios de ítems de catálogo siempre se toman del maestro (fuente única de verdad);
-    // subtotal/total siempre se calculan acá, nunca se confía en lo que mande el cliente.
-    let total = 0
-    const detallesCreate = data.detalles.map(d => {
-      const producto = d.productoId ? productosPorId.get(d.productoId) : null
-      const descripcion = producto ? producto.nombre : d.descripcion
-      const precioUnitario = producto ? Number(producto.precio) : d.precioUnitario
-      const subtotal = Math.round(d.cantidad * precioUnitario * 100) / 100
-      total += subtotal
-      return {
-        productoId: producto ? producto.id : null,
-        descripcion,
-        cantidad: d.cantidad,
-        precioUnitario,
-        subtotal,
-      }
-    })
-    total = Math.round(total * 100) / 100
+    const { detallesCreate, total } = calcularDetallesVenta(data.detalles, productosPorId)
 
     const numero = await generarNumero('VP')
     // Registrar la venta y descontar el stock de los productos de catálogo

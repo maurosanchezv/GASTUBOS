@@ -4,6 +4,7 @@
 // alquilerCargos.js (registrarPagoCargo): VentaProducto no tiene un estado de
 // cobro propio, se deriva de montoCobrado vs. total (ver estadoCreditoVenta).
 
+import { z } from 'zod'
 import { diasHasta } from './fechas.js'
 
 // Error tipado: la ruta HTTP lo usa para devolver el status/mensaje correctos
@@ -14,6 +15,42 @@ export class ErrorPagoVentaProducto extends Error {
     this.name = 'ErrorPagoVentaProducto'
     this.status = status
   }
+}
+
+// Un ítem de venta: producto de catálogo (productoId) o ítem libre
+// (descripcion + precioUnitario). Compartido por ventasProductos.js y por
+// el "Agregar productos" de entregas.js.
+export const detalleVentaProductoSchema = z.object({
+  productoId:     z.string().optional().nullable(),
+  descripcion:    z.string().min(1).optional(),
+  cantidad:       z.coerce.number().positive().default(1),
+  precioUnitario: z.coerce.number().nonnegative().optional(),
+}).refine(d => d.productoId || (d.descripcion && d.precioUnitario !== undefined), {
+  message: 'Cada ítem debe tener productoId, o una descripción y un precio unitario',
+})
+
+// Calcula descripción/precio/subtotal de cada ítem y el total de la venta.
+// Los precios de ítems de catálogo siempre se toman del maestro (fuente
+// única de verdad); nunca se confía en lo que mande el cliente si hay
+// productoId.
+export function calcularDetallesVenta(detalles, productosPorId) {
+  let total = 0
+  const detallesCreate = detalles.map(d => {
+    const producto = d.productoId ? productosPorId.get(d.productoId) : null
+    const descripcion = producto ? producto.nombre : d.descripcion
+    const precioUnitario = producto ? Number(producto.precio) : d.precioUnitario
+    const subtotal = Math.round(d.cantidad * precioUnitario * 100) / 100
+    total += subtotal
+    return {
+      productoId: producto ? producto.id : null,
+      descripcion,
+      cantidad: d.cantidad,
+      precioUnitario,
+      subtotal,
+    }
+  })
+  total = Math.round(total * 100) / 100
+  return { detallesCreate, total }
 }
 
 // Convierte 'YYYY-MM-DD' a medianoche UTC. null/undefined → sin vencimiento.

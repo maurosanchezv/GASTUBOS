@@ -306,6 +306,7 @@ model Entrega {
   alquileres      Alquiler[]    // si tipoOperacion = ALQUILER
   recambios       Recambio[]
   cilindrosTerceros CilindroTerceroInfo[]
+  ventaProducto   VentaProducto? // productos de catálogo agregados a esta entrega (opcional)
   costoDelivery   Decimal       @db.Decimal(10, 2) @default(0.00)
   confirmada      Boolean       @default(false)
   cancelada       Boolean       @default(false)
@@ -677,6 +678,11 @@ model VentaProducto {
   cancelada     Boolean    @default(false)
   fechaVenta    DateTime   @default(now())
   createdAt     DateTime   @default(now())
+
+  // Si viene de "Agregar productos" en una Entrega (nunca CREDITO en ese caso,
+  // entregaSchema no lo admite). null = venta de productos independiente.
+  entregaId     String?    @unique
+  entrega       Entrega?   @relation(fields: [entregaId], references: [id])
 
   detalles      DetalleVentaProducto[]
   pagos         PagoVentaProducto[]

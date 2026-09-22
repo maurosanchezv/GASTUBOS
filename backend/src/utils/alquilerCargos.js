@@ -204,6 +204,17 @@ export async function crearCargoInicial(tx, alquiler, { montoPagado = 0, metodoP
 // de montoRestante en entregas.js. Se registra acá como un cargo propio
 // (tipo OTRO) por el monto exacto de costoDelivery, con el mismo criterio de
 // idempotencia y auto-liquidación que crearCargoInicial.
+
+// No hay un campo dedicado para distinguir el cargo de delivery de otro
+// futuro cargo tipo OTRO — se identifica por esta observación fija. Usado
+// por esCargoDelivery para que el frontend pueda fusionarlo visualmente con
+// el cargo INICIAL de la misma entrega (ver AlquileresPage.jsx).
+export const OBS_CARGO_DELIVERY = 'Costo de delivery de la entrega inicial del alquiler'
+
+export function esCargoDelivery(cargo) {
+  return cargo.tipo === 'OTRO' && cargo.observacion === OBS_CARGO_DELIVERY
+}
+
 export async function crearCargoDelivery(tx, alquiler, { monto, montoPagado = 0, metodoPago = null, fechaPago = null, usuarioId = null } = {}) {
   if (!monto || monto <= 0) return null
 
@@ -230,7 +241,7 @@ export async function crearCargoDelivery(tx, alquiler, { monto, montoPagado = 0,
       estado,
       metodoPago: pagado > 0 ? metodoPago : null,
       fechaPago: fechaPagoFinal,
-      observacion: 'Costo de delivery de la entrega inicial del alquiler',
+      observacion: OBS_CARGO_DELIVERY,
     },
   })
 

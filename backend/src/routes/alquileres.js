@@ -12,6 +12,7 @@ import {
   registrarPagoCargo,
   anularCargo,
   ErrorPagoAlquiler,
+  esCargoDelivery,
 } from '../utils/alquilerCargos.js'
 
 const router = Router()
@@ -163,6 +164,7 @@ router.get('/:id', async (req, res, next) => {
 
     res.json({
       ...alquiler,
+      cargos: alquiler.cargos.map(c => ({ ...c, esDelivery: esCargoDelivery(c) })),
       nivelAlerta: calcularNivelAlerta(alquiler.fechaVencimiento),
       saldoPendiente: saldoPendiente(alquiler.cargos),
     })

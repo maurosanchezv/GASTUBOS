@@ -14,6 +14,7 @@ import { generarNumero, mapTuboGasToTipoGas } from '../utils/helpers.js'
 import { sumarDias, aMedianocheUTC } from '../utils/fechas.js'
 import { crearCargoInicial, crearCargoDelivery } from '../utils/alquilerCargos.js'
 import { asignarTuboInicial, cerrarTuboActivo } from '../utils/alquilerTubos.js'
+import { detalleVentaProductoSchema, calcularDetallesVenta } from '../utils/ventaProducto.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -109,6 +110,10 @@ const entregaSchema = z.object({
   fechaVencimiento: z.string().datetime().optional(),
   // Solo si tipoOperacion = VENTA
   referencia:       z.string().optional(),
+  // Productos de catálogo agregados a la entrega (botón "Agregar productos"),
+  // independiente del tipoOperacion. Se cobran junto con el resto vía
+  // metodoPago/montoRecibido de la entrega — nunca a crédito (ver arriba).
+  productos:        z.array(detalleVentaProductoSchema).optional().default([]),
 }).superRefine((data, ctx) => {
   // Entrega en Salón: se exige georreferenciar dónde retira el tubo el
   // cliente, para dejar precedente en el mapa (a diferencia de REPARTO,
@@ -164,6 +169,7 @@ router.get('/', async (req, res, next) => {
           recambios:  { include: { tuboEntregado: { select: { id: true, gas: true, observaciones: true } } } },
           alquileres: { include: { plan: { select: { codigo: true, nombre: true } }, items: { orderBy: { orden: 'asc' } } } },
           cilindrosTerceros: true,
+          ventaProducto: { include: { detalles: { include: { producto: { select: { id: true, codigo: true } } } } } },
         },
         orderBy: { fechaEntrega: 'desc' },
         skip: (Number(page) - 1) * Number(limit),
@@ -192,6 +198,7 @@ router.get('/numero/:numero', async (req, res, next) => {
         recambios:  { include: { tuboEntregado: { select: { id: true, gas: true, observaciones: true } } } },
         alquileres: { include: { plan: { select: { codigo: true, nombre: true } }, items: { orderBy: { orden: 'asc' } } } },
         cilindrosTerceros: true,
+        ventaProducto: { include: { detalles: { include: { producto: { select: { id: true, codigo: true } } } } } },
       },
     })
     if (!entrega) return res.status(404).json({ error: 'Remisión no encontrada' })
@@ -253,6 +260,16 @@ router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res,
           orden:       i.orden !== undefined ? Number(i.orden) : idx,
         }))
     }
+
+    // Productos de catálogo agregados a la entrega ("Agregar productos")
+    const productoIds = [...new Set(data.productos.map(p => p.productoId).filter(Boolean))]
+    const productos = productoIds.length
+      ? await prisma.producto.findMany({ where: { id: { in: productoIds } } })
+      : []
+    if (productos.length !== productoIds.length) {
+      return res.status(400).json({ error: 'Uno o más productos no existen' })
+    }
+    const productosPorId = new Map(productos.map(p => [p.id, p]))
 
     const numero = await generarNumero('E')
 
@@ -355,6 +372,35 @@ router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res,
         include: { detalles: true, sucursal: true },
       })
 
+      // 3b. Productos de catálogo agregados a la entrega, si vinieron. Es una
+      // VentaProducto propia ligada por entregaId (nunca a crédito, ver schema).
+      let ventaProducto = null
+      if (data.productos.length > 0) {
+        const { detallesCreate, total } = calcularDetallesVenta(data.productos, productosPorId)
+        const numeroVP = await generarNumero('VP', tx)
+        ventaProducto = await tx.ventaProducto.create({
+          data: {
+            numero: numeroVP,
+            entregaId: entrega.id,
+            clienteId: data.clienteId,
+            usuarioId: req.user.id,
+            metodoPago: data.metodoPago,
+            total,
+            detalles: { create: detallesCreate },
+          },
+          include: { detalles: { include: { producto: { select: { id: true, codigo: true } } } } },
+        })
+
+        for (const d of detallesCreate) {
+          if (!d.productoId) continue
+          if (productosPorId.get(d.productoId).stock === null) continue
+          await tx.producto.update({
+            where: { id: d.productoId },
+            data: { stock: { decrement: Math.round(d.cantidad) } },
+          })
+        }
+      }
+
       // 4. Actualizar estado de todos los tubos a RESERVADO (En Tránsito)
       await tx.tubo.updateMany({
         where: { id: { in: data.tubosIds } },
@@ -427,7 +473,7 @@ router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res,
         })
       ))
 
-      return entrega
+      return { ...entrega, ventaProducto }
     })
 
     res.status(201).json(resultado)
@@ -711,9 +757,11 @@ router.put('/:id/confirmar', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR', 'REPA
         })
 
         const fechaInicioReal = aMedianocheUTC(new Date())
-        // El pago ya recolectado en la confirmación se reparte entre los
-        // cargos INICIAL en orden (caso común: un solo tubo, cubre todo).
-        let montoRestante = Number(montoRecibido || 0)
+        // Confirmar la entrega es evidencia de cobro: el repartidor no deja el
+        // equipo sin cobrar el pago inicial (ni el delivery). El cargo queda
+        // PAGADO por el monto completo del plan, sin depender de lo tipeado en
+        // montoRecibido ni de la forma de pago elegida al confirmar.
+        const metodoPagoCobro = metodoPago || entrega.metodoPago
 
         for (const alq of alquileresAConfirmar) {
           const dias = alq.diasIncluidosAplicados || 30
@@ -730,13 +778,11 @@ router.put('/:id/confirmar', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR', 'REPA
           })
 
           const precioInicial = Number(alq.precioInicialAplicado || 0)
-          const pagadoEste = Math.max(0, Math.min(montoRestante, precioInicial))
-          montoRestante -= pagadoEste
 
           await crearCargoInicial(tx, alqActualizado, {
-            montoPagado: pagadoEste,
-            metodoPago:  pagadoEste > 0 ? (metodoPago || entrega.metodoPago) : null,
-            fechaPago:   pagadoEste > 0 ? new Date() : null,
+            montoPagado: precioInicial,
+            metodoPago:  metodoPagoCobro,
+            fechaPago:   new Date(),
             usuarioId:   req.user.id,
           })
 
@@ -778,19 +824,18 @@ router.put('/:id/confirmar', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR', 'REPA
         // El costo de delivery de la entrega no tiene fuente financiera propia
         // una vez que la Entrega ALQUILER queda excluida de Movimiento de Dinero
         // (ver movimientosDinero.js) — sin esto, ese monto desaparecía en
-        // silencio del reparto de montoRestante de arriba. Se registra como
-        // cargo propio (OTRO) contra el primer contrato de la entrega.
+        // silencio. Se registra como cargo propio (OTRO) contra el primer
+        // contrato de la entrega, también PAGADO por completo al confirmar
+        // (mismo criterio que el cargo inicial, ver más arriba).
         const costoDelivery = Number(entrega.costoDelivery || 0)
         if (costoDelivery > 0 && alquileresAConfirmar.length > 0) {
           const alqParaDelivery = await tx.alquiler.findUnique({ where: { id: alquileresAConfirmar[0].id } })
-          const pagadoDelivery = Math.max(0, Math.min(montoRestante, costoDelivery))
-          montoRestante -= pagadoDelivery
 
           await crearCargoDelivery(tx, alqParaDelivery, {
             monto: costoDelivery,
-            montoPagado: pagadoDelivery,
-            metodoPago: pagadoDelivery > 0 ? (metodoPago || entrega.metodoPago) : null,
-            fechaPago: pagadoDelivery > 0 ? new Date() : null,
+            montoPagado: costoDelivery,
+            metodoPago: metodoPagoCobro,
+            fechaPago: new Date(),
             usuarioId: req.user.id,
           })
         }
@@ -823,7 +868,7 @@ router.put('/:id/cancelar', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR', 'REPAR
     const { motivo } = req.body
     const entrega = await prisma.entrega.findUnique({
       where: { id },
-      include: { detalles: true }
+      include: { detalles: true, ventaProducto: { include: { detalles: true } } }
     })
     if (!entrega) return res.status(404).json({ error: 'Entrega no encontrada' })
     if (entrega.confirmada) return res.status(400).json({ error: 'No se puede cancelar una entrega ya confirmada' })
@@ -868,6 +913,23 @@ router.put('/:id/cancelar', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR', 'REPAR
             observaciones: `Venta cancelada debido a cancelación de entrega ${entrega.numero}. Motivo: ${motivo || 'No concretada en terreno'}`
           }
         })
+      }
+
+      // 3b. Cancelar la venta de productos ligada (si hay) y reponer stock
+      if (entrega.ventaProducto && !entrega.ventaProducto.cancelada) {
+        await tx.ventaProducto.update({
+          where: { id: entrega.ventaProducto.id },
+          data: { cancelada: true },
+        })
+        for (const d of entrega.ventaProducto.detalles) {
+          if (!d.productoId) continue
+          const producto = await tx.producto.findUnique({ where: { id: d.productoId } })
+          if (!producto || producto.stock === null) continue
+          await tx.producto.update({
+            where: { id: d.productoId },
+            data: { stock: { increment: Math.round(Number(d.cantidad)) } },
+          })
+        }
       }
 
       // 4. Revertir el estado de los tubos

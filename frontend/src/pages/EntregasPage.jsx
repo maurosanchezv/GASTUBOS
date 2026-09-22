@@ -15,12 +15,13 @@ import { useConfigStore } from '../store/configStore.js'
 import { LOGO_TUBOS_SVG, LOGO_PMS_SVG, getBrandingSources } from '../utils/logosSvg.js'
 import { isGoogleMapsLink, parseGoogleMapsLink, resolveGoogleMapsLocation } from '../utils/googleMapsLink.js'
 import { construirBufferTicketEntrega, construirBufferTicketRemisionInicial } from '../utils/ticketsImpresion.js'
-import { precioFilaDetalle, totalTicket } from '../utils/ticketMontos.js'
+import { precioFilaDetalle, totalTicket, subtotalProductosTicket } from '../utils/ticketMontos.js'
 import { conectarImpresoraWebBluetooth, enviarBufferWebBluetooth, esNavegadorMovilConWebBluetooth } from '../utils/webBluetoothPrinter.js'
 import TuboChip from '../components/TuboChip.jsx'
 import EntregaSalonTab from './entregas/EntregaSalonTab.jsx'
 import ClienteAutocomplete from '../components/ClienteAutocomplete.jsx'
 import PlanAlquilerTicketBlock from '../components/PlanAlquilerTicketBlock.jsx'
+import ProductoSelectorModal from '../components/ProductoSelectorModal.jsx'
 
 // ... (EMPTY y fixes de Leaflet se mantienen arriba)
 delete L.Icon.Default.prototype._getIconUrl
@@ -73,6 +74,8 @@ const EMPTY = {
   latitud: null, longitud: null,
   costoDelivery: '',
   metodoPago: '',
+  // Productos de catálogo agregados con el botón "Agregar productos".
+  productos: [],
 }
 
 const GAS_STRING_TO_ENUM = {
@@ -116,6 +119,7 @@ export default function EntregasPage() {
   const [usuarios, setUsuarios] = useState([])
   const [precios, setPrecios]   = useState([])
   const [planesAlquiler, setPlanesAlquiler] = useState([])
+  const [modalProductosOpen, setModalProductosOpen] = useState(false)
 
   // Búsqueda de tubos mejorada
   const [tuboBusq, setTuboBusq]       = useState('')
@@ -1274,6 +1278,41 @@ export default function EntregasPage() {
                     })
                   )}
                 </div>
+
+                {/* Productos de catálogo (accesorios, no cilindros) */}
+                <div className="card" style={{ marginTop: 16 }}>
+                  <div className="card-header">
+                    <div className="card-title">Productos</div>
+                    <button type="button" className="btn btn-sm" onClick={() => setModalProductosOpen(true)}>
+                      <i className="ti ti-plus" /> Agregar productos
+                    </button>
+                  </div>
+                  {form.productos.length === 0 ? (
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Sin productos agregados</div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {form.productos.map((p, idx) => (
+                        <div key={idx} style={{
+                          display: 'flex', alignItems: 'center', gap: 8,
+                          padding: '8px 10px', background: 'var(--surface-2)', borderRadius: 8,
+                          border: '1px solid var(--border)', fontSize: 12,
+                        }}>
+                          <div style={{ flex: 1 }}>{p.descripcion} <span style={{ color: 'var(--text-muted)' }}>x{p.cantidad}</span></div>
+                          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                            {Math.round(p.cantidad * p.precioUnitario).toLocaleString('es-PY')} Gs
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <ProductoSelectorModal
+                  open={modalProductosOpen}
+                  onClose={() => setModalProductosOpen(false)}
+                  itemsIniciales={form.productos}
+                  onConfirm={items => setForm(p => ({ ...p, productos: items }))}
+                />
               </div>
 
               {/* Resumen lateral */}
@@ -1305,8 +1344,9 @@ export default function EntregasPage() {
                           const prec = Number(d.precioUnitario || 0)
                           return acc + (cant > 0 ? (cant * prec) : prec)
                         }, 0)
+                    const subtotalProductos = form.productos.reduce((acc, p) => acc + Number(p.cantidad || 0) * Number(p.precioUnitario || 0), 0)
                     const costoDeliv = Number(form.costoDelivery || 0)
-                    const totalGral = subtotalTubosCalculado + costoDeliv
+                    const totalGral = subtotalTubosCalculado + subtotalProductos + costoDeliv
 
                     return (
                       <>
@@ -1316,6 +1356,14 @@ export default function EntregasPage() {
                             {subtotalTubosCalculado.toLocaleString('es-PY')} Gs
                           </div>
                         </div>
+                        {subtotalProductos > 0 && (
+                          <div style={{ marginBottom: 10 }}>
+                            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>PRODUCTOS</div>
+                            <div style={{ fontSize: 14, fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
+                              {subtotalProductos.toLocaleString('es-PY')} Gs
+                            </div>
+                          </div>
+                        )}
                         {costoDeliv > 0 && (
                           <div style={{ marginBottom: 10 }}>
                             <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>DELIVERY</div>
@@ -1727,6 +1775,14 @@ export default function EntregasPage() {
                         </td>
                       </tr>
                     ))}
+                    {subtotalProductosTicket(entregaSeleccionada) > 0 && (
+                      <tr>
+                        <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>PRODUCTOS:</td>
+                        <td style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>
+                          {subtotalProductosTicket(entregaSeleccionada).toLocaleString('es-PY')} GS
+                        </td>
+                      </tr>
+                    )}
                     <tr style={{ borderTop: '1px dashed #000' }}>
                       <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>DELIVERY:</td>
                       <td style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>
@@ -1832,6 +1888,14 @@ export default function EntregasPage() {
                           </td>
                         </tr>
                       ))}
+                      {subtotalProductosTicket(entregaSeleccionada) > 0 && (
+                        <tr>
+                          <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>PRODUCTOS:</td>
+                          <td style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>
+                            {subtotalProductosTicket(entregaSeleccionada).toLocaleString('es-PY')} GS
+                          </td>
+                        </tr>
+                      )}
                       <tr style={{ borderTop: '1px dashed #000' }}>
                         <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>DELIVERY:</td>
                         <td style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>
@@ -1984,6 +2048,14 @@ export default function EntregasPage() {
                   </tr>
                 );
               })}
+              {subtotalProductosTicket(entregaSeleccionada) > 0 && (
+                <tr>
+                  <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>PRODUCTOS:</td>
+                  <td style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>
+                    {subtotalProductosTicket(entregaSeleccionada).toLocaleString('es-PY')} GS
+                  </td>
+                </tr>
+              )}
               <tr style={{ borderTop: '1px dashed #000' }}>
                 <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>DELIVERY:</td>
                 <td style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>

@@ -7,6 +7,7 @@
 import { Router } from 'express'
 import { prisma } from '../utils/prisma.js'
 import { requireAuth, requireRol } from '../middleware/auth.js'
+import { esCargoDelivery } from '../utils/alquilerCargos.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -94,6 +95,7 @@ router.get('/', async (req, res, next) => {
           repartidor: { select: { id: true, nombre: true, username: true } },
           creadoPor:  { select: { id: true, nombre: true, username: true } },
           detalles:   { select: { subtotal: true } },
+          ventaProducto: { select: { total: true } },
         },
         orderBy: { fechaEntrega: 'desc' },
       }),
@@ -117,7 +119,18 @@ router.get('/', async (req, res, next) => {
         // cuenta corriente con muchos cargos futuros. Su monto es el saldo
         // (total - montoCobrado), no el total de la venta; los cobros
         // posteriores llegan aparte por PagoVentaProducto (ver abajo).
-        where: { fechaVenta: { gte: startDate, lte: endDate } },
+        // Las ligadas a una entrega ("Agregar productos") ya se cuentan dentro
+        // del movimiento de esa entrega (arriba) — salvo que la entrega sea
+        // ALQUILER, que está excluida de esa consulta (su dinero va por
+        // CargoAlquiler); en ese caso el producto sigue como movimiento propio
+        // para no perderse.
+        where: {
+          fechaVenta: { gte: startDate, lte: endDate },
+          OR: [
+            { entregaId: null },
+            { entrega: { tipoOperacion: 'ALQUILER' } },
+          ],
+        },
         include: {
           usuario: { select: { id: true, nombre: true, username: true } },
           cliente: { select: { id: true, nombre: true } },
@@ -134,7 +147,9 @@ router.get('/', async (req, res, next) => {
         include: {
           cargoAlquiler: {
             select: {
+              alquilerId: true,
               tipo: true,
+              observacion: true, // para esCargoDelivery() — distingue el cargo OTRO de delivery
               alquiler: { select: { numero: true, clienteId: true, cliente: { select: { nombre: true } } } },
             },
           },
@@ -162,7 +177,7 @@ router.get('/', async (req, res, next) => {
       const tipoKey = e.tipoOperacion === 'VENTA' ? 'VENTA_CILINDRO' : 'ENTREGA'
 
       const subtotalProductos = (e.detalles || []).reduce((sum, d) => sum + Number(d.subtotal || 0), 0)
-      const totalOperacion = subtotalProductos + Number(e.costoDelivery || 0)
+      const totalOperacion = subtotalProductos + Number(e.costoDelivery || 0) + Number(e.ventaProducto?.total || 0)
       const recibido = Number(e.montoRecibido || 0)
 
       let estado = 'PENDIENTE'
@@ -209,20 +224,56 @@ router.get('/', async (req, res, next) => {
       })
     }
 
+    // El pago del cargo INICIAL y el del cargo de delivery de un mismo
+    // contrato (esCargoDelivery) se cobran siempre juntos, al confirmar la
+    // entrega — para quien lee Movimiento de Dinero es un solo cobro, no dos
+    // líneas separadas ("Alquiler Inicial" + "Otro cargo de Alquiler").
+    // Se fusionan acá por alquilerId; el resto de los cargos (mensualidad,
+    // recarga a domicilio) siguen listados uno por pago, como siempre.
+    const inicialesPorAlquiler = new Map() // alquilerId -> movimiento acumulado
+
     for (const p of pagosCargoAlquiler) {
+      const cargo = p.cargoAlquiler
+      const esInicial = cargo?.tipo === 'INICIAL'
+      const esDelivery = esCargoDelivery(cargo)
+
+      if ((esInicial || esDelivery) && cargo?.alquilerId) {
+        const key = cargo.alquilerId
+        const existente = inicialesPorAlquiler.get(key)
+        if (existente) {
+          existente.monto += Number(p.monto)
+          if (new Date(p.fechaPago) > new Date(existente.fecha)) existente.fecha = p.fechaPago
+        } else {
+          inicialesPorAlquiler.set(key, {
+            id: `pago-cargo-alquiler-inicial-${key}`,
+            tipo: 'ALQUILER_INICIAL',
+            tipoLabel: TIPO_LABEL.ALQUILER_INICIAL,
+            referencia: cargo.alquiler?.numero || '—',
+            fecha: p.fechaPago,
+            usuario: p.usuario?.nombre || p.usuario?.username || 'Alquileres',
+            cliente: cargo.alquiler?.cliente?.nombre || 'Sin cliente',
+            formaPago: normalizarFormaPago(p.metodoPago),
+            monto: Number(p.monto),
+            estado: 'COBRADO',
+            estadoLabel: ESTADO_LABEL.COBRADO,
+          })
+        }
+        continue
+      }
+
       // Cada fila es un cobro real e independiente — un cargo pagado en dos
       // partes aparece acá dos veces, cada una con su propia fecha/monto/forma
       // de pago, nunca como un único movimiento con el último dato pisado.
-      const tipoKey = TIPO_CARGO_A_MOVIMIENTO[p.cargoAlquiler?.tipo] || 'ALQUILER_OTRO'
+      const tipoKey = TIPO_CARGO_A_MOVIMIENTO[cargo?.tipo] || 'ALQUILER_OTRO'
 
       movimientos.push({
         id: `pago-cargo-alquiler-${p.id}`,
         tipo: tipoKey,
         tipoLabel: TIPO_LABEL[tipoKey],
-        referencia: p.cargoAlquiler?.alquiler?.numero || '—',
+        referencia: cargo?.alquiler?.numero || '—',
         fecha: p.fechaPago,
         usuario: p.usuario?.nombre || p.usuario?.username || 'Alquileres',
-        cliente: p.cargoAlquiler?.alquiler?.cliente?.nombre || 'Sin cliente',
+        cliente: cargo?.alquiler?.cliente?.nombre || 'Sin cliente',
         formaPago: normalizarFormaPago(p.metodoPago),
         monto: Number(p.monto),
         // Cada pago es, en sí mismo, un cobro confirmado — no hereda el
@@ -231,6 +282,7 @@ router.get('/', async (req, res, next) => {
         estadoLabel: ESTADO_LABEL.COBRADO,
       })
     }
+    for (const m of inicialesPorAlquiler.values()) movimientos.push(m)
 
     for (const v of ventasProductos) {
       let estado, monto

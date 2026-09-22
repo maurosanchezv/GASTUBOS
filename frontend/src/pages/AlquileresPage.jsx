@@ -7,6 +7,7 @@ import { useConfigStore } from '../store/configStore.js'
 import { getBrandingSources } from '../utils/logosSvg.js'
 import { construirBufferTicketReciboAlquiler } from '../utils/ticketsImpresion.js'
 import { conectarImpresoraWebBluetooth, enviarBufferWebBluetooth, esNavegadorMovilConWebBluetooth } from '../utils/webBluetoothPrinter.js'
+import ReciboAlquilerTicket from '../components/ReciboAlquilerTicket.jsx'
 
 const NIVEL_ALERTA = {
   normal:    { color: 'var(--text-secondary)', label: null },
@@ -18,7 +19,6 @@ const NIVEL_ALERTA = {
 
 const gs = (val) => Number(val || 0).toLocaleString('es-PY') + ' Gs'
 const fecha = (val) => val ? new Date(val).toLocaleDateString('es-PY') : '—'
-const fechaHora = (val) => val ? new Date(val).toLocaleString('es-PY') : '—'
 
 // Etiqueta legible del concepto de un cargo, para el recibo de pago.
 const CONCEPTO_LABEL = {
@@ -26,6 +26,36 @@ const CONCEPTO_LABEL = {
   MENSUALIDAD: 'Mensualidad de alquiler',
   RECARGA_DOMICILIO: 'Recarga a domicilio',
   OTRO: 'Otro concepto',
+}
+
+function conceptoLabel(c) {
+  return c.esDelivery ? 'Delivery' : (CONCEPTO_LABEL[c.tipo] || c.tipo.replace(/_/g, ' '))
+}
+
+// Agrupa visualmente el cargo INICIAL con su cargo de delivery (c.esDelivery,
+// ver backend/utils/alquilerCargos.js) de la misma entrega en una sola fila
+// combinada — puramente de presentación, cada cargo real sigue existiendo por
+// separado y se paga/anula individualmente (ver el desglose expandido). No
+// todo INICIAL tiene un delivery: en una entrega con varios tubos, el costo
+// de delivery se cobra una sola vez, contra un solo contrato.
+function agruparCargos(cargos) {
+  const deliverys = cargos.filter(c => c.esDelivery)
+  const deliveryUsado = new Set()
+  const items = cargos
+    .filter(c => !c.esDelivery)
+    .map(c => {
+      if (c.tipo !== 'INICIAL') return { tipo: 'simple', cargo: c }
+      const delivery = deliverys.find(d => d.alquilerId === c.alquilerId)
+      if (!delivery) return { tipo: 'simple', cargo: c }
+      deliveryUsado.add(delivery.id)
+      return { tipo: 'combinado', inicial: c, delivery }
+    })
+  // Un delivery sin su INICIAL correspondiente (no debería pasar en la
+  // práctica) no se pierde: se muestra suelto en vez de quedar oculto.
+  for (const d of deliverys) {
+    if (!deliveryUsado.has(d.id)) items.push({ tipo: 'simple', cargo: d })
+  }
+  return items
 }
 
 export default function AlquileresPage() {
@@ -115,29 +145,51 @@ export default function AlquileresPage() {
     })
   }
 
-  function abrirPago(alquilerId, cargo) {
-    const saldo = Number(cargo.monto) - Number(cargo.montoPagado)
+  // `cargos`: 1 cargo suelto, o [inicial, delivery] para la fila combinada —
+  // en ese caso el pago se reparte entre ambos (primero el inicial, el resto
+  // al delivery), con 1 o 2 llamadas a la API según haga falta.
+  function abrirPago(alquilerId, cargos) {
+    const saldo = cargos.reduce((s, c) => s + (Number(c.monto) - Number(c.montoPagado)), 0)
     setFormPago({ montoPagado: saldo, metodoPago: 'EFECTIVO' })
-    setModalPago({ alquilerId, cargo })
+    setModalPago({ alquilerId, cargos })
   }
 
-  // Reimprime el recibo de un cargo ya cobrado, desde el historial financiero
-  // del contrato. Arma el mismo objeto que deja un pago recién hecho.
-  function imprimirReciboCargo(c) {
-    const pagos = c.pagos || []
-    if (pagos.length === 0) return
-    const totalAbonado = pagos.reduce((s, p) => s + Number(p.monto), 0)
-    const ultimo = pagos[pagos.length - 1]
+  // Reimprime el recibo de un cargo (o de un par inicial+delivery combinado)
+  // ya cobrado, desde el historial financiero del contrato. Une los pagos de
+  // cada cargo en una línea propia del recibo — mismo objeto que deja un pago
+  // recién hecho, para que la vista previa/impresión sea siempre la misma.
+  function imprimirRecibo(cargos) {
+    const conPagos = cargos.filter(c => (c.pagos || []).length > 0)
+    if (conPagos.length === 0) return
+    let totalAbonado = 0
+    let ultimaFecha = null
+    let cobradoPor = null
+    let metodoPago = null
+    let metodosDistintos = false
+    const lineas = []
+    for (const c of conPagos) {
+      const pagos = c.pagos || []
+      const sub = pagos.reduce((s, p) => s + Number(p.monto), 0)
+      totalAbonado += sub
+      const ultimo = pagos[pagos.length - 1]
+      const metodoDeEste = pagos.length > 1 ? 'Varios' : ultimo.metodoPago
+      if (!ultimaFecha || new Date(ultimo.fechaPago) > new Date(ultimaFecha)) {
+        ultimaFecha = ultimo.fechaPago
+        cobradoPor = ultimo.usuario?.nombre || ultimo.usuario?.username || null
+      }
+      if (metodoPago === null) metodoPago = metodoDeEste
+      else if (metodoPago !== metodoDeEste) metodosDistintos = true
+      lineas.push({ concepto: conceptoLabel(c), periodo: c.esDelivery ? null : { desde: c.periodoDesde, hasta: c.periodoHasta }, monto: sub })
+    }
+    const saldoTotal = cargos.reduce((s, c) => s + (Number(c.monto) - Number(c.montoPagado)), 0)
     setReciboPago({
-      cargo: c,
-      pago: {
-        monto: totalAbonado,
-        metodoPago: pagos.length > 1 ? 'Varios' : ultimo.metodoPago,
-        fechaPago: ultimo.fechaPago,
-      },
       alquiler: { numero: detalle.numero, cliente: detalle.cliente, plan: detalle.plan },
-      cobradoPor: ultimo.usuario?.nombre || ultimo.usuario?.username || null,
-      montoAbonado: totalAbonado,
+      cobradoPor,
+      fechaPago: ultimaFecha,
+      metodoPago: metodosDistintos ? 'Varios' : metodoPago,
+      lineas,
+      totalAbonado,
+      saldoTotal: Math.max(0, saldoTotal),
     })
   }
 
@@ -164,21 +216,52 @@ export default function AlquileresPage() {
 
   async function confirmarPago(e) {
     e.preventDefault()
-    if (!formPago.montoPagado || Number(formPago.montoPagado) <= 0) {
+    const montoTotal = Number(formPago.montoPagado)
+    if (!montoTotal || montoTotal <= 0) {
       return toast('Ingresá un monto válido', 'error')
+    }
+    const { alquilerId, cargos } = modalPago
+    const saldoCombinado = cargos.reduce((s, c) => s + (Number(c.monto) - Number(c.montoPagado)), 0)
+    if (montoTotal > saldoCombinado) {
+      return toast('El monto supera el saldo pendiente', 'error')
     }
     setGuardandoPago(true)
     try {
-      const { data } = await api.post(`/alquileres/${modalPago.alquilerId}/cargos/${modalPago.cargo.id}/pagar`, {
-        montoPagado: Number(formPago.montoPagado),
-        metodoPago: formPago.metodoPago,
-      })
+      // Reparte el monto entre los cargos en orden (inicial primero, el resto
+      // al delivery): 1 llamada a la API si es un cargo suelto, hasta 2 si es
+      // la fila combinada — cada llamada valida su propio saldo igual que hoy.
+      let restante = montoTotal
+      const lineas = []
+      let cobradoPor = null
+      let alquilerResp = null
+      let fechaPagoResp = null
+      for (const c of cargos) {
+        const saldoCargo = Number(c.monto) - Number(c.montoPagado)
+        if (saldoCargo <= 0 || restante <= 0) continue
+        const aPagar = Math.min(restante, saldoCargo)
+        const { data } = await api.post(`/alquileres/${alquilerId}/cargos/${c.id}/pagar`, {
+          montoPagado: aPagar,
+          metodoPago: formPago.metodoPago,
+        })
+        restante -= aPagar
+        cobradoPor = data.cobradoPor
+        alquilerResp = data.alquiler
+        fechaPagoResp = data.pago.fechaPago
+        lineas.push({ concepto: conceptoLabel(c), periodo: c.esDelivery ? null : { desde: c.periodoDesde, hasta: c.periodoHasta }, monto: aPagar })
+      }
       toast('Pago registrado correctamente', 'success')
       setModalPago(null)
-      // Recibo imprimible del pago (mismo esquema que la remisión de entregas/recargas).
-      setReciboPago({ ...data, montoAbonado: Number(formPago.montoPagado) })
+      setReciboPago({
+        alquiler: alquilerResp,
+        cobradoPor,
+        fechaPago: fechaPagoResp,
+        metodoPago: formPago.metodoPago,
+        lineas,
+        totalAbonado: montoTotal,
+        saldoTotal: Math.max(0, saldoCombinado - montoTotal),
+      })
       load() // refresca lista, indicadores y el panel de cobranza
-      if (detalle?.id === modalPago.alquilerId) abrirDetalle(modalPago.alquilerId)
+      if (detalle?.id === alquilerId) abrirDetalle(alquilerId)
     } catch (err) {
       toast(err.response?.data?.error || 'Error al registrar el pago', 'error')
     } finally {
@@ -249,6 +332,121 @@ export default function AlquileresPage() {
     ['vencidos', 'Vencidos'],
     ['finalizados', 'Finalizados'],
   ]
+
+  // Fila de un cargo real (con su desglose de pagos) — reusada tanto para
+  // cargos sueltos como, dentro del desglose expandido, para cada uno de los
+  // dos cargos reales de una fila "combinado" (ver agruparCargos arriba).
+  function FilaCargo({ c }) {
+    const tienePagos = (c.pagos || []).length > 0
+    const expandido = cargosExpandidos.has(c.id)
+    return (
+      <Fragment key={c.id}>
+        <tr>
+          <td style={{ width: 24 }}>
+            {tienePagos && (
+              <button className="btn-icon" title="Ver pagos" onClick={() => toggleCargoExpandido(c.id)}>
+                <i className={`ti ${expandido ? 'ti-chevron-down' : 'ti-chevron-right'}`} />
+              </button>
+            )}
+          </td>
+          <td style={{ fontSize: 11 }}>{fecha(c.fechaEmision)}</td>
+          <td style={{ fontSize: 12 }}>{c.esDelivery ? 'DELIVERY' : c.tipo.replace(/_/g, ' ')}</td>
+          <td style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{fecha(c.periodoDesde)} → {fecha(c.periodoHasta)}</td>
+          <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>
+            {gs(c.montoPagado)} / {gs(c.monto)}
+          </td>
+          <td><span className={`badge badge-${c.estado}`}>{c.estado}</span></td>
+          <td style={{ whiteSpace: 'nowrap' }}>
+            {['PENDIENTE', 'PARCIAL', 'VENCIDO'].includes(c.estado) && (
+              <button className="btn btn-sm btn-primary" onClick={() => abrirPago(detalle.id, [c])}>Registrar pago</button>
+            )}
+            {tienePagos && (
+              <button className="btn btn-sm" style={{ marginLeft: 6 }} onClick={() => imprimirRecibo([c])} title="Imprimir recibo de este cargo">
+                <i className="ti ti-printer" /> Recibo
+              </button>
+            )}
+            {c.estado !== 'ANULADO' && !tienePagos && (
+              <button className="btn btn-sm" style={{ marginLeft: 6 }} onClick={() => anularCargoDetalle(detalle.id, c)}>Anular</button>
+            )}
+          </td>
+        </tr>
+        {expandido && tienePagos && (
+          <tr key={`${c.id}-pagos`}>
+            <td></td>
+            <td colSpan={6} style={{ padding: '4px 8px 12px' }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 4 }}>PAGOS</div>
+              <table style={{ width: '100%' }}>
+                <tbody>
+                  {c.pagos.map(p => (
+                    <tr key={p.id}>
+                      <td style={{ fontSize: 11, padding: '3px 6px' }}>{fecha(p.fechaPago)}</td>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12, padding: '3px 6px' }}>{gs(p.monto)}</td>
+                      <td style={{ fontSize: 11, padding: '3px 6px' }}>{p.metodoPago}</td>
+                      <td style={{ fontSize: 11, color: 'var(--text-muted)', padding: '3px 6px' }}>{p.usuario?.nombre || p.usuario?.username || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </td>
+          </tr>
+        )}
+      </Fragment>
+    )
+  }
+
+  // Fila resumen "Pago inicial + delivery": solo lectura, agrupa monto/estado
+  // de los dos cargos reales; las acciones viven en el desglose expandido
+  // (misma mecánica de cargosExpandidos, con la clave del cargo INICIAL).
+  function FilaCargoCombinado({ inicial, delivery }) {
+    const expandido = cargosExpandidos.has(inicial.id)
+    const monto = Number(inicial.monto) + Number(delivery.monto)
+    const montoPagado = Number(inicial.montoPagado) + Number(delivery.montoPagado)
+    const estados = [inicial.estado, delivery.estado]
+    const estado = estados.includes('VENCIDO') ? 'VENCIDO'
+      : estados.every(e => e === 'PAGADO') ? 'PAGADO'
+      : estados.every(e => e === 'ANULADO') ? 'ANULADO'
+      : montoPagado > 0 ? 'PARCIAL' : 'PENDIENTE'
+    return (
+      <Fragment key={inicial.id}>
+        <tr>
+          <td style={{ width: 24 }}>
+            <button className="btn-icon" title="Ver desglose" onClick={() => toggleCargoExpandido(inicial.id)}>
+              <i className={`ti ${expandido ? 'ti-chevron-down' : 'ti-chevron-right'}`} />
+            </button>
+          </td>
+          <td style={{ fontSize: 11 }}>{fecha(inicial.fechaEmision)}</td>
+          <td style={{ fontSize: 12 }}>Pago inicial + delivery</td>
+          <td style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{fecha(inicial.periodoDesde)} → {fecha(inicial.periodoHasta)}</td>
+          <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{gs(montoPagado)} / {gs(monto)}</td>
+          <td><span className={`badge badge-${estado}`}>{estado}</span></td>
+          <td style={{ whiteSpace: 'nowrap' }}>
+            {['PENDIENTE', 'PARCIAL', 'VENCIDO'].includes(estado) && (
+              <button className="btn btn-sm btn-primary" onClick={() => abrirPago(detalle.id, [inicial, delivery])}>Registrar pago</button>
+            )}
+            {((inicial.pagos || []).length > 0 || (delivery.pagos || []).length > 0) && (
+              <button className="btn btn-sm" style={{ marginLeft: 6 }} onClick={() => imprimirRecibo([inicial, delivery])} title="Imprimir recibo combinado">
+                <i className="ti ti-printer" /> Recibo
+              </button>
+            )}
+          </td>
+        </tr>
+        {expandido && (
+          <tr>
+            <td></td>
+            <td colSpan={6} style={{ padding: '4px 8px 12px' }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 4 }}>DESGLOSE</div>
+              <table style={{ width: '100%' }}>
+                <tbody>
+                  <FilaCargo c={inicial} />
+                  <FilaCargo c={delivery} />
+                </tbody>
+              </table>
+            </td>
+          </tr>
+        )}
+      </Fragment>
+    )
+  }
 
   return (
     <>
@@ -485,63 +683,10 @@ export default function AlquileresPage() {
                   <table>
                     <thead><tr><th></th><th>Fecha</th><th>Concepto</th><th>Período</th><th>Monto</th><th>Estado</th><th></th></tr></thead>
                     <tbody>
-                      {detalle.cargos.map(c => {
-                        const tienePagos = (c.pagos || []).length > 0
-                        const expandido = cargosExpandidos.has(c.id)
-                        return (
-                          <Fragment key={c.id}>
-                            <tr>
-                              <td style={{ width: 24 }}>
-                                {tienePagos && (
-                                  <button className="btn-icon" title="Ver pagos" onClick={() => toggleCargoExpandido(c.id)}>
-                                    <i className={`ti ${expandido ? 'ti-chevron-down' : 'ti-chevron-right'}`} />
-                                  </button>
-                                )}
-                              </td>
-                              <td style={{ fontSize: 11 }}>{fecha(c.fechaEmision)}</td>
-                              <td style={{ fontSize: 12 }}>{c.tipo.replace(/_/g, ' ')}</td>
-                              <td style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{fecha(c.periodoDesde)} → {fecha(c.periodoHasta)}</td>
-                              <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>
-                                {gs(c.montoPagado)} / {gs(c.monto)}
-                              </td>
-                              <td><span className={`badge badge-${c.estado}`}>{c.estado}</span></td>
-                              <td style={{ whiteSpace: 'nowrap' }}>
-                                {['PENDIENTE', 'PARCIAL', 'VENCIDO'].includes(c.estado) && (
-                                  <button className="btn btn-sm btn-primary" onClick={() => abrirPago(detalle.id, c)}>Registrar pago</button>
-                                )}
-                                {tienePagos && (
-                                  <button className="btn btn-sm" style={{ marginLeft: 6 }} onClick={() => imprimirReciboCargo(c)} title="Imprimir recibo de este cargo">
-                                    <i className="ti ti-printer" /> Recibo
-                                  </button>
-                                )}
-                                {c.estado !== 'ANULADO' && !tienePagos && (
-                                  <button className="btn btn-sm" style={{ marginLeft: 6 }} onClick={() => anularCargoDetalle(detalle.id, c)}>Anular</button>
-                                )}
-                              </td>
-                            </tr>
-                            {expandido && tienePagos && (
-                              <tr key={`${c.id}-pagos`}>
-                                <td></td>
-                                <td colSpan={6} style={{ padding: '4px 8px 12px' }}>
-                                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 4 }}>PAGOS</div>
-                                  <table style={{ width: '100%' }}>
-                                    <tbody>
-                                      {c.pagos.map(p => (
-                                        <tr key={p.id}>
-                                          <td style={{ fontSize: 11, padding: '3px 6px' }}>{fecha(p.fechaPago)}</td>
-                                          <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12, padding: '3px 6px' }}>{gs(p.monto)}</td>
-                                          <td style={{ fontSize: 11, padding: '3px 6px' }}>{p.metodoPago}</td>
-                                          <td style={{ fontSize: 11, color: 'var(--text-muted)', padding: '3px 6px' }}>{p.usuario?.nombre || p.usuario?.username || '—'}</td>
-                                        </tr>
-                                      ))}
-                                    </tbody>
-                                  </table>
-                                </td>
-                              </tr>
-                            )}
-                          </Fragment>
-                        )
-                      })}
+                      {agruparCargos(detalle.cargos).map(item => item.tipo === 'combinado'
+                        ? <FilaCargoCombinado key={item.inicial.id} inicial={item.inicial} delivery={item.delivery} />
+                        : <FilaCargo key={item.cargo.id} c={item.cargo} />
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -672,7 +817,7 @@ export default function AlquileresPage() {
           pop-up de cobranza cuando se cobra desde ahí. */}
       <Modal
         open={!!modalPago}
-        title={`Registrar pago — ${modalPago?.cargo?.tipo?.replace(/_/g, ' ') || ''}`}
+        title={`Registrar pago — ${modalPago?.cargos?.map(conceptoLabel).join(' + ') || ''}`}
         onClose={() => setModalPago(null)}
         footer={
           <>
@@ -686,7 +831,8 @@ export default function AlquileresPage() {
         {modalPago && (
           <form onSubmit={confirmarPago} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-              Monto del cargo: <strong>{gs(modalPago.cargo.monto)}</strong> — ya pagado: <strong>{gs(modalPago.cargo.montoPagado)}</strong>
+              Monto total: <strong>{gs(modalPago.cargos.reduce((s, c) => s + Number(c.monto), 0))}</strong>
+              {' — '}ya pagado: <strong>{gs(modalPago.cargos.reduce((s, c) => s + Number(c.montoPagado), 0))}</strong>
             </div>
             <FormGroup label="Monto a pagar (Gs)" required>
               <input type="number" min="1" value={formPago.montoPagado} onChange={e => setFormPago(f => ({ ...f, montoPagado: e.target.value }))} required />
@@ -701,7 +847,9 @@ export default function AlquileresPage() {
         )}
       </Modal>
 
-      {/* Modal "Pago registrado" — con el recibo imprimible del pago */}
+      {/* Modal "Pago registrado" — la vista previa es el mismo ticket que se
+          imprime (ver ReciboAlquilerTicket.jsx), solo cambia el contenedor:
+          .ticket-preview en pantalla, .print-ticket-container al imprimir. */}
       <Modal
         open={!!reciboPago}
         title="Pago registrado"
@@ -716,92 +864,18 @@ export default function AlquileresPage() {
           </>
         }
       >
-        {reciboPago && (() => {
-          const { cargo, alquiler, montoAbonado } = reciboPago
-          const saldoCargo = Number(cargo.monto) - Number(cargo.montoPagado)
-          return (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 13 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-muted)' }}>Contrato</span><span style={{ fontFamily: 'var(--font-mono)' }}>{alquiler?.numero || '—'}</span></div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-muted)' }}>Concepto</span><span>{CONCEPTO_LABEL[cargo.tipo] || cargo.tipo}</span></div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-muted)' }}>Período</span><span>{fecha(cargo.periodoDesde)} → {fecha(cargo.periodoHasta)}</span></div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}><span>Abonado</span><span style={{ fontFamily: 'var(--font-mono)' }}>{gs(montoAbonado)}</span></div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-muted)' }}>Saldo del cargo</span>
-                <span style={{ fontFamily: 'var(--font-mono)', color: saldoCargo > 0 ? 'var(--red)' : 'var(--green)', fontWeight: 700 }}>{gs(saldoCargo)}</span>
-              </div>
-            </div>
-          )
-        })()}
+        {reciboPago && (
+          <div className="ticket-preview">
+            <ReciboAlquilerTicket recibo={reciboPago} branding={branding} nombreEmpresa={nombre_empresa} direccion={direccion} telefono={telefono} />
+          </div>
+        )}
       </Modal>
 
       {/* Recibo imprimible (solo visible al imprimir; se dispara desde el modal de arriba) */}
       {reciboPago && createPortal(
-        (() => {
-          const { cargo, pago, alquiler, cobradoPor, montoAbonado } = reciboPago
-          const saldoCargo = Number(cargo.monto) - Number(cargo.montoPagado)
-          return (
-            <div className="print-ticket-container">
-              <div className="ticket-header">
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', marginBottom: '10px' }}>
-                  <img src={branding.isotipoSrc} alt="Isotipo" style={{ width: '40px', height: '40px', objectFit: 'contain' }} />
-                  <img src={branding.logoSrc} alt="Logo" style={{ width: '108px', height: '40px', objectFit: 'contain' }} />
-                </div>
-                {direccion ? <p style={{ margin: 0, fontSize: '10px' }}>{direccion}</p> : <p style={{ margin: 0, fontSize: '10px' }}>{nombre_empresa || 'GasTubos'}</p>}
-                {telefono && <p style={{ margin: '2px 0 0', fontSize: '10px' }}>Tel: {telefono}</p>}
-                <p style={{ margin: '4px 0 0', fontSize: '11px', fontWeight: 'bold' }}>RECIBO DE PAGO — ALQUILER</p>
-                <p style={{ margin: '2px 0 0', fontSize: '10px' }}>Contrato {alquiler?.numero || '—'}</p>
-              </div>
-
-              <div style={{ margin: '8px 0', fontSize: '11px' }}>
-                <strong>Cliente:</strong> {alquiler?.cliente?.nombre || '—'}<br />
-                <strong>RUC/CI:</strong> {alquiler?.cliente?.ruc || '—'}<br />
-                <strong>Dirección:</strong> {alquiler?.cliente?.direccion || '—'}<br />
-                <strong>Fecha:</strong> {fechaHora(pago?.fechaPago)}<br />
-                <strong>Cobrado por:</strong> {cobradoPor || '—'}<br />
-                <strong>Plan:</strong> {alquiler?.plan?.nombre || '—'}
-              </div>
-
-              <table className="ticket-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px dashed #000' }}>
-                    <th style={{ textAlign: 'left', paddingBottom: '4px' }}>Concepto</th>
-                    <th style={{ textAlign: 'right', paddingBottom: '4px' }}>Monto</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td style={{ paddingTop: '6px' }}>
-                      <strong>{CONCEPTO_LABEL[cargo.tipo] || cargo.tipo}</strong><br />
-                      <span style={{ fontSize: '10px', color: '#555' }}>
-                        Período {fecha(cargo.periodoDesde)} → {fecha(cargo.periodoHasta)}
-                      </span>
-                    </td>
-                    <td style={{ textAlign: 'right', fontWeight: 500, paddingTop: '6px' }}>{gs(montoAbonado)}</td>
-                  </tr>
-                  <tr style={{ borderTop: '1px dashed #000' }}>
-                    <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px', paddingTop: '6px' }}>TOTAL ABONADO:</td>
-                    <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px', paddingTop: '6px' }}>{gs(montoAbonado)}</td>
-                  </tr>
-                </tbody>
-              </table>
-
-              <div style={{ margin: '8px 0', fontSize: '11px' }}>
-                <strong>Forma de pago:</strong> {pago?.metodoPago || '—'}<br />
-                <strong>Monto del cargo:</strong> {gs(cargo.monto)}
-                {saldoCargo > 0 && <><br /><strong>Saldo pendiente:</strong> {gs(saldoCargo)}</>}
-                {saldoCargo <= 0 && <><br /><strong>Estado:</strong> CANCELADO</>}
-              </div>
-
-              <div className="ticket-signatures" style={{ display: 'flex', justifyContent: 'center', marginTop: '24px', paddingTop: '10px' }}>
-                <div className="signature-line" style={{ width: '60%', borderTop: '1px solid #000', textAlign: 'center', fontSize: '10px', paddingTop: '4px' }}>Firma Cliente</div>
-              </div>
-
-              <div className="ticket-footer" style={{ textAlign: 'center', borderTop: '1px dashed #000', paddingTop: '8px', marginTop: '16px', fontSize: '10px' }}>
-                ¡Gracias por su preferencia!
-              </div>
-            </div>
-          )
-        })(),
+        <div className="print-ticket-container">
+          <ReciboAlquilerTicket recibo={reciboPago} branding={branding} nombreEmpresa={nombre_empresa} direccion={direccion} telefono={telefono} />
+        </div>,
         document.body
       )}
     </>

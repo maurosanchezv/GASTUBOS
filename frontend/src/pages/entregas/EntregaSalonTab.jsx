@@ -20,6 +20,7 @@ import TuboChip from '../../components/TuboChip.jsx'
 import ClienteAutocomplete from '../../components/ClienteAutocomplete.jsx'
 import MiniMapaPicker from '../../components/MiniMapaPicker.jsx'
 import { isGoogleMapsLink, parseGoogleMapsLink, resolveGoogleMapsLocation } from '../../utils/googleMapsLink.js'
+import ProductoSelectorModal from '../../components/ProductoSelectorModal.jsx'
 
 const SCANNER_VERIFICAR_ID = 'entrega-salon-verificar-qr-reader'
 const SCANNER_RETORNO_ID = 'entrega-salon-retorno-qr-reader'
@@ -41,6 +42,8 @@ export default function EntregaSalonTab({ toast, onFinish }) {
   const [tipoOperacion, setTipoOperacion] = useState('ENTREGA_SIMPLE')
   const [tubosIds, setTubosIds] = useState([])
   const [tubosDetalles, setTubosDetalles] = useState([])
+  const [productos, setProductos] = useState([])
+  const [modalProductosOpen, setModalProductosOpen] = useState(false)
   const [metodoPago, setMetodoPago] = useState('')
   const [planId, setPlanId] = useState('')
   const [planesAlquiler, setPlanesAlquiler] = useState([])
@@ -125,6 +128,7 @@ export default function EntregaSalonTab({ toast, onFinish }) {
     setTipoOperacion('ENTREGA_SIMPLE')
     setTubosIds([])
     setTubosDetalles([])
+    setProductos([])
     setMetodoPago('')
     setPlanId('')
     setReferencia('')
@@ -449,6 +453,7 @@ export default function EntregaSalonTab({ toast, onFinish }) {
         repartidorId: user?.id,
         tubosIds,
         tubosDetalles,
+        productos,
         costoDelivery: 0,
         metodoPago,
         planId: tipoOperacion === 'ALQUILER' ? planId : undefined,
@@ -466,7 +471,8 @@ export default function EntregaSalonTab({ toast, onFinish }) {
       const subtotal = tipoOperacion === 'ALQUILER'
         ? Number(planElegido?.precioInicial || 0) * tubosIds.length
         : (completa.detalles || []).reduce((acc, d) => acc + Number(d.subtotal || 0), 0)
-      setMontoRecibido(String(subtotal))
+      const subtotalProductos = productos.reduce((acc, p) => acc + Number(p.cantidad || 0) * Number(p.precioUnitario || 0), 0)
+      setMontoRecibido(String(subtotal + subtotalProductos))
       toast('Entrega creada — verificá los tubos', 'success')
       setPaso('verificar')
     } catch (err) {
@@ -608,6 +614,7 @@ export default function EntregaSalonTab({ toast, onFinish }) {
   }
 
   const subtotalDetalles = (entregaCreada?.detalles || []).reduce((acc, d) => acc + Number(d.subtotal || 0), 0)
+    + productos.reduce((acc, p) => acc + Number(p.cantidad || 0) * Number(p.precioUnitario || 0), 0)
   const totalDetalles = entregaCreada?.detalles?.length || 0
   const todosVerificados = totalDetalles > 0 && scannedIds.length === totalDetalles
 
@@ -901,6 +908,40 @@ export default function EntregaSalonTab({ toast, onFinish }) {
               ))
             )}
           </div>
+
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div className="card-header">
+              <div className="card-title">Productos</div>
+              <button type="button" className="btn btn-sm" onClick={() => setModalProductosOpen(true)}>
+                <i className="ti ti-plus" /> Agregar productos
+              </button>
+            </div>
+            {productos.length === 0 ? (
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Sin productos agregados</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {productos.map((p, idx) => (
+                  <div key={idx} style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '8px 10px', background: 'var(--surface-2)', borderRadius: 8,
+                    border: '1px solid var(--border)', fontSize: 12,
+                  }}>
+                    <div style={{ flex: 1 }}>{p.descripcion} <span style={{ color: 'var(--text-muted)' }}>x{p.cantidad}</span></div>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                      {Math.round(p.cantidad * p.precioUnitario).toLocaleString('es-PY')} Gs
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <ProductoSelectorModal
+            open={modalProductosOpen}
+            onClose={() => setModalProductosOpen(false)}
+            itemsIniciales={productos}
+            onConfirm={setProductos}
+          />
 
           <button className="btn btn-primary" style={{ width: '100%', height: 46 }} onClick={crearEntregaSalon} disabled={creando}>
             {creando ? 'Creando entrega...' : <><i className="ti ti-check" /> Crear entrega y continuar</>}

@@ -89,13 +89,24 @@ export default function DevolucionesPage() {
     } catch { setTuboSugs([]) } finally { setBuscando(false) }
   }
 
+  // Las dos peticiones son independientes y pueden resolver en cualquier
+  // orden — si se setea el estado por separado, la que responde después
+  // pisa a la otra (a veces queda vacía la lista según quién gane la
+  // carrera). Se combinan en un solo setPendientes para que sea atómico.
+  const fetchPendientes = async () => {
+    const [rEntregado, rAlquilado] = await Promise.all([
+      api.get('/tubos', { params: { estado: 'ENTREGADO', limit: 50 } }).catch(() => ({ data: { tubos: [] } })),
+      api.get('/tubos', { params: { estado: 'ALQUILADO', limit: 50 } }).catch(() => ({ data: { tubos: [] } })),
+    ])
+    setPendientes([...(rEntregado.data.tubos || []), ...(rAlquilado.data.tubos || [])])
+  }
+
   useEffect(() => {
-    api.get('/tubos', { params: { estado: 'ENTREGADO', limit: 50 } }).then(r => setPendientes(r.data.tubos)).catch(() => {})
-    api.get('/tubos', { params: { estado: 'ALQUILADO', limit: 50 } }).then(r => setPendientes(p => [...p, ...r.data.tubos])).catch(() => {})
-    if (params.get('tubo')) { 
+    fetchPendientes()
+    if (params.get('tubo')) {
       const id = params.get('tubo')
       setTuboBusq(id)
-      buscarPorId(id) 
+      buscarPorId(id)
     }
   }, [])
 
@@ -147,8 +158,7 @@ export default function DevolucionesPage() {
       await api.post('/devoluciones', { tuboId: tubo.id, estadoDestino: estado, observaciones: obs })
       toast('Devolución registrada correctamente', 'success')
       setTubo(null); setTuboId(''); setObs('')
-      const r = await api.get('/tubos', { params: { estado: 'ENTREGADO', limit: 50 } })
-      setPendientes(r.data.tubos)
+      await fetchPendientes()
     } catch (err) {
       toast(err.response?.data?.error || 'Error al registrar devolución', 'error')
     } finally { setSaving(false) }

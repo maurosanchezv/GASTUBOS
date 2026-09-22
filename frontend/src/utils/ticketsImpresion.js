@@ -5,7 +5,7 @@
 // desde el envío por Web Bluetooth (navegador, ver webBluetoothPrinter.js).
 import { EscPosBuilder, generarLogoEscPos } from './escPosBuilder.js'
 import { formatCapacidad } from '../components/ui.jsx'
-import { precioFilaDetalle, subtotalItemsTicket } from './ticketMontos.js'
+import { precioFilaDetalle, subtotalItemsTicket, subtotalProductosTicket, totalTicket } from './ticketMontos.js'
 import { metodoPagoLabel, fmtVencimiento } from './metodoPago.js'
 
 export const formatNumberSpanish = (val) => {
@@ -208,12 +208,16 @@ export async function construirBufferTicketEntrega(entrega, config) {
     builder.addTextLine(line())
 
     const subtotalItems = subtotalItemsTicket(entrega)
+    const subtotalProductosCatalogo = subtotalProductosTicket(entrega)
     const deliveryCost = Number(entrega.costoDelivery || 0)
     if (esAlquiler) {
       builder.addTextLine(justify('PAGO INICIAL PLAN:', subtotalItems.toLocaleString('es-PY') + ' GS'))
     }
+    if (subtotalProductosCatalogo > 0) {
+      builder.addTextLine(justify('PRODUCTOS:', subtotalProductosCatalogo.toLocaleString('es-PY') + ' GS'))
+    }
     builder.addTextLine(justify('DELIVERY:', deliveryCost.toLocaleString('es-PY') + ' GS'))
-    builder.boldOn().addTextLine(justify('TOTAL:', (subtotalItems + deliveryCost).toLocaleString('es-PY') + ' GS')).boldOff()
+    builder.boldOn().addTextLine(justify('TOTAL:', totalTicket(entrega).toLocaleString('es-PY') + ' GS')).boldOff()
     builder.addTextLine(doubleLine())
 
     if (recambios.length > 0) {
@@ -468,12 +472,15 @@ export async function construirBufferTicketRecargaAlquiler(orden, config) {
   return builder.getBuffer()
 }
 
-// Recibo de un pago sobre un cargo de alquiler (mensualidad, inicial, etc.).
-// `recibo` = { cargo, pago, alquiler:{numero,cliente,plan}, cobradoPor, montoAbonado }
-// Mismo esquema que construirBufferTicketRecargaAlquiler.
+// Recibo de un pago sobre uno o dos cargos de alquiler (mensualidad, inicial,
+// inicial+delivery combinados, etc.). `recibo` = { alquiler:{numero,cliente,plan},
+// cobradoPor, fechaPago, metodoPago, lineas:[{concepto,periodo:{desde,hasta}|null,monto}],
+// totalAbonado, saldoTotal }. Mismo esquema (y mismas líneas) que el bloque
+// HTML de AlquileresPage.jsx — un solo lugar de verdad para que el texto
+// plano no diverja del HTML.
 export async function construirBufferTicketReciboAlquiler(recibo, config) {
   const { branding, nombreEmpresa, direccion, telefono, paperWidth } = config
-  const { cargo, pago, alquiler, cobradoPor, montoAbonado } = recibo
+  const { alquiler, cobradoPor, fechaPago, metodoPago, lineas, totalAbonado, saldoTotal } = recibo
 
   let logoBytes = null
   try {
@@ -486,19 +493,8 @@ export async function construirBufferTicketReciboAlquiler(recibo, config) {
   const width = paperWidth
   const { wrapText, justify, line, doubleLine } = crearHelpersTicket(width)
 
-  const CONCEPTO = {
-    INICIAL: 'Pago inicial de alquiler',
-    MENSUALIDAD: 'Mensualidad de alquiler',
-    RECARGA_DOMICILIO: 'Recarga a domicilio',
-    OTRO: 'Otro concepto',
-  }
   const gsStr = (v) => Number(v || 0).toLocaleString('es-PY') + ' GS'
   const dia = (v) => v ? new Date(v).toLocaleDateString('es-PY') : '-'
-
-  const abonado = Number(montoAbonado ?? pago?.monto ?? 0)
-  const totalCargo = Number(cargo?.monto || 0)
-  const pagadoAcum = Number(cargo?.montoPagado || 0)
-  const saldo = Math.max(0, totalCargo - pagadoAcum)
 
   builder.initialize()
   if (logoBytes) {
@@ -513,46 +509,54 @@ export async function construirBufferTicketReciboAlquiler(recibo, config) {
   if (telefono) wrapText('Tel: ' + telefono, width).forEach(l => builder.addTextLine(l))
   builder.addTextLine(doubleLine())
 
-  builder.alignLeft().boldOn().addTextLine('RECIBO DE PAGO - ALQUILER').boldOff()
-  builder.addTextLine('Contrato: ' + (alquiler?.numero || '-'))
+  builder.alignLeft().boldOn().addTextLine('RECIBO DE PAGO: ' + (alquiler?.numero || '-')).boldOff()
   builder.addTextLine(line())
 
   wrapText('Cliente: ' + (alquiler?.cliente?.nombre || ''), width).forEach(l => builder.addTextLine(l))
   builder.addTextLine('RUC/CI: ' + (alquiler?.cliente?.ruc || '-'))
   wrapText('Direccion: ' + (alquiler?.cliente?.direccion || ''), width).forEach(l => builder.addTextLine(l))
-  builder.addTextLine('Fecha: ' + new Date(pago?.fechaPago || Date.now()).toLocaleString('es-PY'))
+  builder.addTextLine('Fecha: ' + new Date(fechaPago || Date.now()).toLocaleString('es-PY'))
   builder.addTextLine('Cobrado por: ' + (cobradoPor || '-'))
   if (alquiler?.plan?.nombre) {
     wrapText('Plan: ' + alquiler.plan.nombre, width).forEach(l => builder.addTextLine(l))
   }
+  builder.addTextLine('Forma de pago: ' + (metodoPago || '-'))
   builder.addTextLine(doubleLine())
 
   builder.boldOn().addTextLine(justify('CONCEPTO', 'MONTO')).boldOff()
   builder.addTextLine(line())
-  builder.addTextLine((CONCEPTO[cargo?.tipo] || cargo?.tipo || 'Cargo').slice(0, width))
-  wrapText(`  Periodo ${dia(cargo?.periodoDesde)} - ${dia(cargo?.periodoHasta)}`, width).forEach(l => builder.addTextLine(l))
-  builder.addTextLine(justify('  Abonado', gsStr(abonado)))
+  ;(lineas || []).forEach(l => {
+    builder.addTextLine(l.concepto.slice(0, width))
+    if (l.periodo?.desde) {
+      wrapText(`  Periodo ${dia(l.periodo.desde)} - ${dia(l.periodo.hasta)}`, width).forEach(t => builder.addTextLine(t))
+    }
+    builder.addTextLine(justify('  ', gsStr(l.monto)))
+  })
   builder.addTextLine(line())
-  builder.boldOn().addTextLine(justify('TOTAL ABONADO:', gsStr(abonado))).boldOff()
+  builder.boldOn().addTextLine(justify('TOTAL ABONADO:', gsStr(totalAbonado))).boldOff()
   builder.addTextLine(doubleLine())
 
-  builder.addTextLine('Forma de pago: ' + (pago?.metodoPago || '-'))
-  builder.addTextLine('Monto del cargo: ' + gsStr(totalCargo))
-  if (saldo > 0) {
-    builder.boldOn().addTextLine('SALDO PENDIENTE: ' + gsStr(saldo)).boldOff()
+  if (Number(saldoTotal) > 0) {
+    builder.boldOn().addTextLine('SALDO PENDIENTE: ' + gsStr(saldoTotal)).boldOff()
   } else {
-    builder.boldOn().addTextLine('CARGO CANCELADO').boldOff()
+    builder.boldOn().addTextLine('ESTADO: PAGADO').boldOff()
   }
   builder.addTextLine(doubleLine())
 
   builder.addTextLine('').addTextLine('')
   const lineLength = width >= 48 ? 18 : 13
-  const soloLine = '-'.repeat(lineLength)
-  const padCentro = Math.max(0, Math.floor((width - lineLength) / 2))
-  builder.addTextLine(' '.repeat(padCentro) + soloLine)
-  const labelFirma = 'Firma Cliente'
-  const padLabel = Math.max(0, Math.floor((width - labelFirma.length) / 2))
-  builder.addTextLine(' '.repeat(padLabel) + labelFirma)
+  const leftLine = '-'.repeat(lineLength)
+  const rightLine = '-'.repeat(lineLength)
+  const spacesBetweenLines = width - (lineLength * 2)
+  builder.addTextLine(leftLine + ' '.repeat(spacesBetweenLines) + rightLine)
+
+  const labelLeft = 'Firma Cobrador'
+  const labelRight = 'Firma Cliente'
+  const padLeft = Math.max(0, Math.floor((lineLength - labelLeft.length) / 2))
+  const padRight = Math.max(0, Math.floor((lineLength - labelRight.length) / 2))
+  const strLeft = ' '.repeat(padLeft) + labelLeft + ' '.repeat(Math.max(0, lineLength - labelLeft.length - padLeft))
+  const strRight = ' '.repeat(padRight) + labelRight + ' '.repeat(Math.max(0, lineLength - labelRight.length - padRight))
+  builder.addTextLine(strLeft + ' '.repeat(spacesBetweenLines) + strRight)
   builder.addTextLine('')
 
   builder.alignCenter().boldOn().addTextLine('Gracias por su preferencia!').boldOff()
@@ -793,12 +797,16 @@ export async function construirBufferTicketRemisionInicial(entrega, config) {
   builder.addTextLine(line())
 
   const subtotalItems = subtotalItemsTicket(entrega)
+  const subtotalProductosCatalogo = subtotalProductosTicket(entrega)
   const deliveryCost = Number(entrega.costoDelivery || 0)
   if (esAlquilerRem) {
     builder.addTextLine(justify('PAGO INICIAL PLAN:', subtotalItems.toLocaleString('es-PY') + ' GS'))
   }
+  if (subtotalProductosCatalogo > 0) {
+    builder.addTextLine(justify('PRODUCTOS:', subtotalProductosCatalogo.toLocaleString('es-PY') + ' GS'))
+  }
   builder.addTextLine(justify('DELIVERY:', deliveryCost.toLocaleString('es-PY') + ' GS'))
-  builder.boldOn().addTextLine(justify('TOTAL ESTIMADO:', (subtotalItems + deliveryCost).toLocaleString('es-PY') + ' GS')).boldOff()
+  builder.boldOn().addTextLine(justify('TOTAL ESTIMADO:', totalTicket(entrega).toLocaleString('es-PY') + ' GS')).boldOff()
   builder.addTextLine(doubleLine())
 
   // Detalle del plan de alquiler — sin estado del equipo (todavía no se entregó).
