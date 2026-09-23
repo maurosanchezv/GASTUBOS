@@ -15,12 +15,12 @@ import { useConfigStore } from '../store/configStore.js'
 import { LOGO_TUBOS_SVG, LOGO_PMS_SVG, getBrandingSources } from '../utils/logosSvg.js'
 import { isGoogleMapsLink, parseGoogleMapsLink, resolveGoogleMapsLocation } from '../utils/googleMapsLink.js'
 import { construirBufferTicketEntrega, construirBufferTicketRemisionInicial } from '../utils/ticketsImpresion.js'
-import { precioFilaDetalle, totalTicket, subtotalProductosTicket } from '../utils/ticketMontos.js'
+import { getRecambiosRecibidos } from '../utils/ticketMontos.js'
 import { conectarImpresoraWebBluetooth, enviarBufferWebBluetooth, esNavegadorMovilConWebBluetooth } from '../utils/webBluetoothPrinter.js'
 import TuboChip from '../components/TuboChip.jsx'
 import EntregaSalonTab from './entregas/EntregaSalonTab.jsx'
 import ClienteAutocomplete from '../components/ClienteAutocomplete.jsx'
-import PlanAlquilerTicketBlock from '../components/PlanAlquilerTicketBlock.jsx'
+import TicketEntrega from '../components/TicketEntrega.jsx'
 import ProductoSelectorModal from '../components/ProductoSelectorModal.jsx'
 
 // ... (EMPTY y fixes de Leaflet se mantienen arriba)
@@ -86,16 +86,6 @@ const GAS_STRING_TO_ENUM = {
   'Aire comprimido': 'AIRE_COMPRIMIDO',
   'Mezcla': 'MEZCLA_CO2_ARGON',
   'Acetileno': 'ACETILENO',
-}
-
-const formatNumberSpanish = (val) => {
-  const num = Number(val)
-  if (isNaN(num)) return '0'
-  const rounded = Math.round(num * 1000) / 1000
-  if (Number.isInteger(rounded)) {
-    return rounded.toString()
-  }
-  return rounded.toFixed(3).replace('.', ',')
 }
 
 // URL pública de la remisión que codifica el QR del ticket. Al escanearla (con
@@ -257,24 +247,6 @@ export default function EntregasPage() {
     setModalDetalle(true)
     loadEntregas()
     loadEntregasMapa()
-  }
-
-  const getRecambiosRecibidos = (e) => {
-    if (!e) return []
-    const recsPropios = (e.recambios || []).map(r => {
-      const t = r.tuboEntregado || {}
-      return (t.observaciones && (t.observaciones.includes(' ') || t.observaciones.length > 15))
-        ? t.observaciones
-        : `${t.id || r.tuboEntregadoId}${t.gas ? ` (${t.gas})` : ''}`.trim()
-    })
-
-    const recsTerceros = (e.cilindrosTerceros || []).map(c => {
-      const cap = c.capacidadKg ? `${Number(c.capacidadKg)} kg` : c.capacidadLitros ? `${Number(c.capacidadLitros)} m³` : ''
-      const obsClean = (c.observaciones || '').replace(/^Recibido por repartidor en entrega E-[^.]*\.\s*Detalle:\s*/, '').trim()
-      return obsClean || `${c.gas}${cap ? ` (${cap})` : ''}`
-    })
-
-    return [...recsPropios, ...recsTerceros]
   }
 
   // Punto único de despacho de impresión, igual que en RepartoPage.jsx: app
@@ -1672,284 +1644,17 @@ export default function EntregasPage() {
         }
       >
         {entregaSeleccionada && (
-          <div>
-            {/* Pestañas de Comprobantes — una entrega de salón no tiene
-                "Remisión Inicial" (no hay despacho previo separado de la
-                confirmación), así que solo se muestra el comprobante */}
-            {entregaSeleccionada.canal !== 'SALON' && (
-              <div style={{ display: 'flex', gap: 6, marginBottom: 12, borderBottom: '1px solid var(--border)', paddingBottom: 8 }}>
-                <button
-                  type="button"
-                  className={`btn btn-sm ${ticketTab === 'remision' ? 'btn-primary' : ''}`}
-                  onClick={() => setTicketTab('remision')}
-                  style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 11 }}
-                >
-                  <i className="ti ti-file-text" /> 1. Remisión Inicial
-                </button>
-                <button
-                  type="button"
-                  className={`btn btn-sm ${ticketTab === 'comprobante' ? 'btn-primary' : ''}`}
-                  onClick={() => setTicketTab('comprobante')}
-                  style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 11 }}
-                >
-                  <i className="ti ti-receipt" /> 2. Comprobante Repartidor
-                </button>
-              </div>
-            )}
-
-            {/* CONTENIDO PESTAÑA 1: REMISIÓN INICIAL */}
-            {ticketTab === 'remision' && (
-              <div className="ticket-preview">
-                <div className="ticket-header">
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', marginBottom: '10px' }}>
-                    <img src={branding.isotipoSrc} alt="Isotipo" style={{ width: '40px', height: '40px', objectFit: 'contain' }} />
-                    <img src={branding.logoSrc} alt="Logo" style={{ width: '108px', height: '40px', objectFit: 'contain' }} />
-                  </div>
-                  {direccion ? <p style={{ margin: 0, fontSize: '10px', color: '#666' }}>{direccion}</p> : <p style={{ margin: 0, fontSize: '10px', color: '#666' }}>Gestión de Gases Industriales</p>}
-                  {telefono && <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#666' }}>Tel: {telefono}</p>}
-                  <p style={{ margin: '6px 0 0', fontSize: '11px', fontWeight: 'bold' }}>REMISIÓN DE SALIDA: {entregaSeleccionada.numero}</p>
-                </div>
-                
-                <div style={{ margin: '10px 0', fontSize: '11px', borderBottom: '1px dashed #ddd', paddingBottom: '8px' }}>
-                  <strong>Cliente:</strong> {entregaSeleccionada.cliente?.nombre}<br />
-                  <strong>RUC/CI:</strong> {entregaSeleccionada.cliente?.ruc || '—'}<br />
-                  <strong>Dirección:</strong> {entregaSeleccionada.direccionEntrega}<br />
-                  <strong>Fecha de Orden:</strong> {new Date(entregaSeleccionada.fechaEntrega).toLocaleString('es-PY')}<br />
-                  <strong>Chofer Asignado:</strong> {entregaSeleccionada.repartidor?.nombre || 'Sin asignar'}<br />
-                  <strong>Tipo Operación:</strong> {entregaSeleccionada.tipoOperacion.replace('_', ' ')}<br />
-                  <strong>Forma de pago:</strong> {entregaSeleccionada.metodoPago === 'TRANSFERENCIA' ? 'Transferencia' : 'Efectivo'}
-                </div>
-                
-                <table className="ticket-table">
-                  <thead>
-                    <tr>
-                      <th style={{ textAlign: 'left' }}>Tubo / Gas Despachado</th>
-                      <th style={{ textAlign: 'center' }}>Cant.</th>
-                      <th style={{ textAlign: 'right' }}>Subtotal</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {entregaSeleccionada.detalles?.map(d => (
-                      <tr key={d.id}>
-                        <td>
-                          <strong>{d.tuboId}</strong>
-                          {d.esAdicional && (
-                            <span style={{ fontSize: '9px', background: '#fef3c7', color: '#b45309', padding: '1px 4px', borderRadius: '3px', marginLeft: '4px', fontWeight: 'bold' }}>
-                              (Agregado por repartidor)
-                            </span>
-                          )}
-                          {!entregaSeleccionada.confirmada && !entregaSeleccionada.cancelada && d.esAdicional && (
-                            <button
-                              type="button"
-                              onClick={() => quitarTuboAdicionalDeEntrega(entregaSeleccionada.id, d.tuboId)}
-                              style={{
-                                border: 'none', background: 'transparent', color: '#ef4444',
-                                cursor: 'pointer', marginLeft: 6, padding: '2px 4px'
-                              }}
-                              title="Eliminar tubo adicional del pedido"
-                            >
-                              <i className="ti ti-trash" style={{ fontSize: 13 }} />
-                            </button>
-                          )}
-                          <br />
-                          <span style={{ fontSize: '10px', color: '#666' }}>
-                            {d.tubo?.gas}
-                          </span>
-                        </td>
-                        <td style={{ textAlign: 'center' }}>
-                          {Number(d.cantidadGas) > 0 ? (
-                            <>
-                              {formatNumberSpanish(d.cantidadGas)} {d.unidadGas}<br />
-                              <span style={{ fontSize: '9px', color: '#888' }}>
-                                x {Number(d.precioUnitario).toLocaleString('es-PY')}
-                              </span>
-                            </>
-                          ) : (
-                            <span style={{ fontSize: '10px', color: '#666', fontWeight: 500 }}>
-                              {entregaSeleccionada?.tipoOperacion === 'ALQUILER' ? 'Alquiler' : 'Envase Vacío'}
-                            </span>
-                          )}
-                        </td>
-                        <td style={{ textAlign: 'right', fontWeight: '500' }}>
-                          {precioFilaDetalle(entregaSeleccionada, d).toLocaleString('es-PY')} GS
-                        </td>
-                      </tr>
-                    ))}
-                    {subtotalProductosTicket(entregaSeleccionada) > 0 && (
-                      <tr>
-                        <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>PRODUCTOS:</td>
-                        <td style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>
-                          {subtotalProductosTicket(entregaSeleccionada).toLocaleString('es-PY')} GS
-                        </td>
-                      </tr>
-                    )}
-                    <tr style={{ borderTop: '1px dashed #000' }}>
-                      <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>DELIVERY:</td>
-                      <td style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>
-                        {Number(entregaSeleccionada.costoDelivery || 0).toLocaleString('es-PY')} GS
-                      </td>
-                    </tr>
-                    <tr>
-                      <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px' }}>TOTAL ESTIMADO:</td>
-                      <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px', color: 'var(--blue)' }}>
-                        {totalTicket(entregaSeleccionada).toLocaleString('es-PY')} GS
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-
-                <PlanAlquilerTicketBlock
-                  entrega={entregaSeleccionada}
-                  incluirEstado={false}
-                />
-
-                <div className="ticket-signatures">
-                  <div className="signature-line">Firma Despacho Depósito</div>
-                  <div className="signature-line">Firma Chofer</div>
-                </div>
-              </div>
-            )}
-
-            {/* CONTENIDO PESTAÑA 2: COMPROBANTE DEL REPARTIDOR */}
-            {ticketTab === 'comprobante' && (
-              !entregaSeleccionada.confirmada ? (
-                <div style={{ padding: '20px 16px', background: 'var(--surface-2)', borderRadius: 8, border: '1px solid var(--border)', textAlign: 'center', margin: '12px 0' }}>
-                  <i className="ti ti-clock" style={{ fontSize: 32, color: '#d97706', marginBottom: 8, display: 'block' }} />
-                  <strong style={{ fontSize: 14, display: 'block', color: 'var(--text-primary)' }}>Entrega Pendiente en Terreno</strong>
-                  <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '6px 0 0', lineHeight: 1.4 }}>
-                    El comprobante impreso por el repartidor estará disponible en cuanto el chofer entregue el pedido y registre los recambios recibidos en la app móvil.
-                  </p>
-                </div>
-              ) : (
-                <div className="ticket-preview">
-                  <div className="ticket-header">
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', marginBottom: '10px' }}>
-                      <img src={branding.isotipoSrc} alt="Isotipo" style={{ width: '40px', height: '40px', objectFit: 'contain' }} />
-                      <img src={branding.logoSrc} alt="Logo" style={{ width: '108px', height: '40px', objectFit: 'contain' }} />
-                    </div>
-                    {direccion ? <p style={{ margin: 0, fontSize: '10px', color: '#666' }}>{direccion}</p> : <p style={{ margin: 0, fontSize: '10px', color: '#666' }}>Gestión de Gases Industriales</p>}
-                    {telefono && <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#666' }}>Tel: {telefono}</p>}
-                    <p style={{ margin: '6px 0 0', fontSize: '11px', fontWeight: 'bold', color: '#059669' }}>COMPROBANTE DE ENTREGA Y RECEPCIÓN</p>
-                    <p style={{ margin: '2px 0 0', fontSize: '10px', fontWeight: '600' }}>{entregaSeleccionada.numero}</p>
-                  </div>
-                  
-                  <div style={{ margin: '10px 0', fontSize: '11px', borderBottom: '1px dashed #ddd', paddingBottom: '8px' }}>
-                    <strong>Cliente:</strong> {entregaSeleccionada.cliente?.nombre}<br />
-                    <strong>RUC/CI:</strong> {entregaSeleccionada.cliente?.ruc || '—'}<br />
-                    <strong>Dirección:</strong> {entregaSeleccionada.direccionEntrega}<br />
-                    <strong>Fecha Entrega:</strong> {new Date(entregaSeleccionada.fechaEntrega).toLocaleString('es-PY')}<br />
-                    <strong>{entregaSeleccionada.canal === 'SALON' ? 'Atendido por:' : 'Repartidor:'}</strong> {entregaSeleccionada.repartidor?.nombre || '—'}<br />
-                    <strong>Método Pago:</strong> {entregaSeleccionada.metodoPago || 'Efectivo'} {entregaSeleccionada.montoRecibido ? `(${Number(entregaSeleccionada.montoRecibido).toLocaleString('es-PY')} GS)` : ''}
-                  </div>
-
-                  {/* Secc 1: Tubos Entregados */}
-                  <div style={{ fontSize: 11, fontWeight: 700, margin: '8px 0 4px', color: 'var(--blue)' }}>
-                    CILINDROS ENTREGADOS:
-                  </div>
-                  <table className="ticket-table">
-                    <thead>
-                      <tr>
-                        <th style={{ textAlign: 'left' }}>Tubo / Gas</th>
-                        <th style={{ textAlign: 'center' }}>Cant.</th>
-                        <th style={{ textAlign: 'right' }}>Subtotal</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {entregaSeleccionada.detalles?.map(d => (
-                        <tr key={d.id}>
-                          <td>
-                            <strong>{d.tuboId}</strong>
-                            {d.esAdicional && (
-                              <span style={{ fontSize: '9px', background: '#fef3c7', color: '#b45309', padding: '1px 4px', borderRadius: '3px', marginLeft: '4px', fontWeight: 'bold' }}>
-                                (Agregado por repartidor)
-                              </span>
-                            )}
-                            <br />
-                            <span style={{ fontSize: '10px', color: '#666' }}>
-                              {d.tubo?.gas}
-                            </span>
-                          </td>
-                          <td style={{ textAlign: 'center' }}>
-                            {Number(d.cantidadGas) > 0 ? (
-                              <>
-                                {formatNumberSpanish(d.cantidadGas)} {d.unidadGas}<br />
-                                <span style={{ fontSize: '9px', color: '#888' }}>
-                                  x {Number(d.precioUnitario).toLocaleString('es-PY')}
-                                </span>
-                              </>
-                            ) : (
-                              <span style={{ fontSize: '10px', color: '#666', fontWeight: 500 }}>
-                                {entregaSeleccionada?.tipoOperacion === 'ALQUILER' ? 'Alquiler' : 'Envase Vacío'}
-                              </span>
-                            )}
-                          </td>
-                          <td style={{ textAlign: 'right', fontWeight: '500' }}>
-                            {precioFilaDetalle(entregaSeleccionada, d).toLocaleString('es-PY')} GS
-                          </td>
-                        </tr>
-                      ))}
-                      {subtotalProductosTicket(entregaSeleccionada) > 0 && (
-                        <tr>
-                          <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>PRODUCTOS:</td>
-                          <td style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>
-                            {subtotalProductosTicket(entregaSeleccionada).toLocaleString('es-PY')} GS
-                          </td>
-                        </tr>
-                      )}
-                      <tr style={{ borderTop: '1px dashed #000' }}>
-                        <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>DELIVERY:</td>
-                        <td style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>
-                          {Number(entregaSeleccionada.costoDelivery || 0).toLocaleString('es-PY')} GS
-                        </td>
-                      </tr>
-                      <tr>
-                        <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px' }}>TOTAL COBRADO:</td>
-                        <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px', color: 'var(--blue)' }}>
-                          {totalTicket(entregaSeleccionada).toLocaleString('es-PY')} GS
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-
-                  <PlanAlquilerTicketBlock
-                    entrega={entregaSeleccionada}
-                    incluirEstado={true}
-                  />
-
-                  {/* Secc 2: Recambios Recibidos */}
-                  {(() => {
-                    const recs = getRecambiosRecibidos(entregaSeleccionada)
-                    return (
-                      <div style={{ margin: '10px 0', padding: 8, background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 6, fontSize: 11 }}>
-                        <strong style={{ color: '#166534', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                          <i className="ti ti-rotate-2" /> CILINDROS / RECAMBIOS RECIBIDOS ({recs.length}):
-                        </strong>
-                        {recs.length > 0 ? (
-                          <ul style={{ paddingLeft: 16, margin: 0, color: '#14532D' }}>
-                            {recs.map((desc, idx) => (
-                              <li key={idx}><strong>{desc}</strong></li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <span style={{ fontSize: 10, color: '#15803D', fontStyle: 'italic' }}>No se recibieron recambios devueltos en esta entrega.</span>
-                        )}
-                      </div>
-                    )
-                  })()}
-
-                  {entregaSeleccionada.observaciones && (
-                    <div style={{ margin: '8px 0', fontSize: '10px', fontStyle: 'italic', borderTop: '1px dashed #ddd', paddingTop: '6px', color: '#555' }}>
-                      <strong>{entregaSeleccionada.canal === 'SALON' ? 'Obs:' : 'Obs Repartidor:'}</strong> {entregaSeleccionada.observaciones}
-                    </div>
-                  )}
-                  
-                  <div className="ticket-signatures">
-                    <div className="signature-line">{entregaSeleccionada.canal === 'SALON' ? 'Firma Operador' : 'Firma Repartidor'}</div>
-                    <div className="signature-line">Firma Cliente (Conforme)</div>
-                  </div>
-                </div>
-              )
-            )}
+          <div className="ticket-preview">
+            <TicketEntrega
+              entrega={entregaSeleccionada}
+              branding={branding}
+              nombreEmpresa={nombre_empresa}
+              direccion={direccion}
+              telefono={telefono}
+              ticketTab={ticketTab}
+              onCambiarTab={setTicketTab}
+              onQuitarTuboAdicional={quitarTuboAdicionalDeEntrega}
+            />
           </div>
         )}
       </Modal>
@@ -1980,134 +1685,16 @@ export default function EntregasPage() {
       {/* Elemento que solo se muestra para la impresión física (80mm) */}
       {entregaSeleccionada && createPortal(
         <div className="print-ticket-container">
-          <div className="ticket-header">
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', marginBottom: '10px' }}>
-              <img src={branding.isotipoSrc} alt="Isotipo" style={{ width: '40px', height: '40px', objectFit: 'contain' }} />
-              <img src={branding.logoSrc} alt="Logo" style={{ width: '108px', height: '40px', objectFit: 'contain' }} />
-            </div>
-            {direccion ? <p style={{ margin: 0, fontSize: '10px' }}>{direccion}</p> : <p style={{ margin: 0, fontSize: '10px' }}>Gestión de Gases Industriales</p>}
-            {telefono && <p style={{ margin: '2px 0 0', fontSize: '10px' }}>Tel: {telefono}</p>}
-            <p style={{ margin: '4px 0 0', fontSize: '11px', fontWeight: 'bold' }}>
-              {ticketTab === 'remision' ? `REMISIÓN DE SALIDA: ${entregaSeleccionada.numero}` : `COMPROBANTE DE ENTREGA Y RECEPCIÓN: ${entregaSeleccionada.numero}`}
-            </p>
-          </div>
-          
-          <div style={{ margin: '8px 0', fontSize: '11px' }}>
-            <strong>Cliente:</strong> {entregaSeleccionada.cliente?.nombre}<br />
-            <strong>RUC/CI:</strong> {entregaSeleccionada.cliente?.ruc || '—'}<br />
-            <strong>Dirección:</strong> {entregaSeleccionada.direccionEntrega}<br />
-            <strong>Fecha:</strong> {new Date(entregaSeleccionada.fechaEntrega).toLocaleString('es-PY')}<br />
-            <strong>{entregaSeleccionada.canal === 'SALON' ? 'Atendido por:' : 'Chofer/Repartidor:'}</strong> {entregaSeleccionada.repartidor?.nombre || 'Sin asignar'}<br />
-            <strong>Forma de pago:</strong> {entregaSeleccionada.metodoPago === 'TRANSFERENCIA' ? 'Transferencia' : 'Efectivo'}<br />
-            <strong>Tipo:</strong> {entregaSeleccionada.tipoOperacion.replace('_', ' ')}
-          </div>
-          
-          <table className="ticket-table">
-            <thead>
-              <tr>
-                <th style={{ textAlign: 'left' }}>Tubo / Gas</th>
-                <th style={{ textAlign: 'center' }}>Cant.</th>
-                <th style={{ textAlign: 'right' }}>Subtotal</th>
-              </tr>
-            </thead>
-            <tbody>
-              {entregaSeleccionada.detalles?.map(d => {
-                const capStr = d.tubo ? ` (${formatCapacidad(d.tubo)})` : '';
-                const showSerie = d.tubo?.serie && d.tubo?.serie !== d.tuboId;
-                return (
-                  <tr key={d.id}>
-                    <td>
-                      <strong>{d.tuboId}</strong>
-                      {d.esAdicional && (
-                        <span style={{ fontSize: '9px', background: '#fef3c7', color: '#b45309', padding: '1px 4px', borderRadius: '3px', marginLeft: '4px', fontWeight: 'bold' }}>
-                          (Agregado por repartidor)
-                        </span>
-                      )}
-                      {showSerie && <span style={{ fontSize: '10px', color: '#555', display: 'block' }}>Nro: {d.tubo.serie}</span>}
-                      <span style={{ fontSize: '10px', color: '#555', display: 'block' }}>
-                        {d.tubo?.gas}{capStr}
-                      </span>
-                    </td>
-                    <td style={{ textAlign: 'center' }}>
-                      {Number(d.cantidadGas) > 0 ? (
-                        <>
-                          {formatNumberSpanish(d.cantidadGas)} {d.unidadGas}<br />
-                          <span style={{ fontSize: '9px', color: '#888' }}>
-                            x {Number(d.precioUnitario).toLocaleString('es-PY')}
-                          </span>
-                        </>
-                      ) : (
-                        <span style={{ fontSize: '10px', color: '#555', fontWeight: 500 }}>
-                          {entregaSeleccionada?.tipoOperacion === 'ALQUILER' ? 'Alquiler' : 'Envase Vacío'}
-                        </span>
-                      )}
-                    </td>
-                    <td style={{ textAlign: 'right', fontWeight: '500' }}>
-                      {precioFilaDetalle(entregaSeleccionada, d).toLocaleString('es-PY')} GS
-                    </td>
-                  </tr>
-                );
-              })}
-              {subtotalProductosTicket(entregaSeleccionada) > 0 && (
-                <tr>
-                  <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>PRODUCTOS:</td>
-                  <td style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>
-                    {subtotalProductosTicket(entregaSeleccionada).toLocaleString('es-PY')} GS
-                  </td>
-                </tr>
-              )}
-              <tr style={{ borderTop: '1px dashed #000' }}>
-                <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>DELIVERY:</td>
-                <td style={{ textAlign: 'right', fontWeight: 'bold', paddingTop: '6px' }}>
-                  {Number(entregaSeleccionada.costoDelivery || 0).toLocaleString('es-PY')} GS
-                </td>
-              </tr>
-              <tr>
-                <td colSpan="2" style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px' }}>TOTAL:</td>
-                <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '12px', color: 'var(--blue)' }}>
-                  {totalTicket(entregaSeleccionada).toLocaleString('es-PY')} GS
-                </td>
-              </tr>
-            </tbody>
-          </table>
-
-          <PlanAlquilerTicketBlock
+          <TicketEntrega
             entrega={entregaSeleccionada}
-            incluirEstado={ticketTab === 'comprobante'}
+            branding={branding}
+            nombreEmpresa={nombre_empresa}
+            direccion={direccion}
+            telefono={telefono}
+            ticketTab={ticketTab}
+            mostrarSelectorTabs={false}
+            onQuitarTuboAdicional={quitarTuboAdicionalDeEntrega}
           />
-
-          {ticketTab === 'comprobante' && (() => {
-            const recs = getRecambiosRecibidos(entregaSeleccionada)
-            return (
-              <div style={{ margin: '8px 0', fontSize: '10px', borderTop: '1px dashed #000', paddingTop: '4px' }}>
-                <strong>Recambios / Tubos Recibidos:</strong>
-                {recs.length > 0 ? (
-                  <ul style={{ paddingLeft: 14, margin: 0 }}>
-                    {recs.map((desc, idx) => (
-                      <li key={idx}>{desc}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p style={{ margin: 0, fontStyle: 'italic' }}>Sin recambios devueltos.</p>
-                )}
-              </div>
-            )
-          })()}
-
-          {entregaSeleccionada.observaciones && (
-            <div style={{ margin: '8px 0', fontSize: '10px', fontStyle: 'italic', borderTop: '1px dashed #000', paddingTop: '4px' }}>
-              <strong>Obs:</strong> {entregaSeleccionada.observaciones}
-            </div>
-          )}
-          
-          <div className="ticket-signatures">
-            <div className="signature-line">{ticketTab === 'remision' ? 'Firma Despacho' : (entregaSeleccionada.canal === 'SALON' ? 'Firma Operador' : 'Firma Repartidor')}</div>
-            <div className="signature-line">{ticketTab === 'remision' ? 'Firma Chofer' : 'Firma Cliente (Acuse)'}</div>
-          </div>
-          
-          <div className="ticket-footer">
-            ¡Gracias por su preferencia!
-          </div>
         </div>,
         document.body
       )}

@@ -48,3 +48,33 @@ export function subtotalProductosTicket(entrega) {
 export function totalTicket(entrega) {
   return subtotalItemsTicket(entrega) + subtotalProductosTicket(entrega) + Number(entrega?.costoDelivery || 0)
 }
+
+// Formatea una cantidad de gas (kg/m³) al estilo local: sin decimales de
+// más, coma como separador — usado por las filas de ítems del ticket.
+export function formatNumberSpanish(val) {
+  const num = Number(val)
+  if (isNaN(num)) return '0'
+  const rounded = Math.round(num * 1000) / 1000
+  if (Number.isInteger(rounded)) return rounded.toString()
+  return rounded.toFixed(3).replace('.', ',')
+}
+
+// Recambios/tubos de terceros recibidos en una entrega, como lista de
+// descripciones legibles — sección "Recambios Recibidos" del ticket.
+export function getRecambiosRecibidos(entrega) {
+  if (!entrega) return []
+  const recsPropios = (entrega.recambios || []).map(r => {
+    const t = r.tuboEntregado || {}
+    return (t.observaciones && (t.observaciones.includes(' ') || t.observaciones.length > 15))
+      ? t.observaciones
+      : `${t.id || r.tuboEntregadoId}${t.gas ? ` (${t.gas})` : ''}`.trim()
+  })
+
+  const recsTerceros = (entrega.cilindrosTerceros || []).map(c => {
+    const cap = c.capacidadKg ? `${Number(c.capacidadKg)} kg` : c.capacidadLitros ? `${Number(c.capacidadLitros)} m³` : ''
+    const obsClean = (c.observaciones || '').replace(/^Recibido por repartidor en entrega E-[^.]*\.\s*Detalle:\s*/, '').trim()
+    return obsClean || `${c.gas}${cap ? ` (${cap})` : ''}`
+  })
+
+  return [...recsPropios, ...recsTerceros]
+}

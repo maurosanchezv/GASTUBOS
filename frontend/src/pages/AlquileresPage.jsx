@@ -5,9 +5,10 @@ import api from '../services/api.js'
 import { PageHeader, Spinner, EmptyState, Modal, FormGroup, useToast } from '../components/ui.jsx'
 import { useConfigStore } from '../store/configStore.js'
 import { getBrandingSources } from '../utils/logosSvg.js'
-import { construirBufferTicketReciboAlquiler } from '../utils/ticketsImpresion.js'
+import { construirBufferTicketEntrega, construirBufferTicketRemisionInicial } from '../utils/ticketsImpresion.js'
+import { getRecambiosRecibidos } from '../utils/ticketMontos.js'
 import { conectarImpresoraWebBluetooth, enviarBufferWebBluetooth, esNavegadorMovilConWebBluetooth } from '../utils/webBluetoothPrinter.js'
-import ReciboAlquilerTicket from '../components/ReciboAlquilerTicket.jsx'
+import TicketEntrega from '../components/TicketEntrega.jsx'
 
 const NIVEL_ALERTA = {
   normal:    { color: 'var(--text-secondary)', label: null },
@@ -76,7 +77,13 @@ export default function AlquileresPage() {
   const [cargosExpandidos, setCargosExpandidos] = useState(new Set())
   const [formPago, setFormPago] = useState({ montoPagado: '', metodoPago: 'EFECTIVO' })
   const [guardandoPago, setGuardandoPago] = useState(false)
-  const [reciboPago, setReciboPago] = useState(null) // { cargo, pago, alquiler, cobradoPor } tras un pago exitoso
+
+  // Ticket unificado de la entrega que originó el contrato — mismo documento
+  // que se ve en el módulo de Entregas (ver TicketEntrega.jsx). Se abre desde
+  // el botón "Recibo" y también automáticamente tras registrar un pago.
+  const [ticketEntrega, setTicketEntrega] = useState(null)
+  const [ticketTabAlquiler, setTicketTabAlquiler] = useState('comprobante')
+  const [cargandoTicket, setCargandoTicket] = useState(false)
 
   const [modalRecarga, setModalRecarga] = useState(false)
   const [formRecarga, setFormRecarga] = useState({ tipoServicio: 'RECARGA_MISMO_TUBO', repartidorId: '', camionId: '', fechaProgramada: '', observaciones: '' })
@@ -128,9 +135,11 @@ export default function AlquileresPage() {
     try {
       const r = await api.get(`/alquileres/${id}`)
       setDetalle(r.data)
+      return r.data
     } catch (err) {
       toast('Error al cargar el detalle del contrato', 'error')
       setDetalle(null)
+      return null
     } finally {
       setCargandoDetalle(false)
     }
@@ -154,61 +163,50 @@ export default function AlquileresPage() {
     setModalPago({ alquilerId, cargos })
   }
 
-  // Reimprime el recibo de un cargo (o de un par inicial+delivery combinado)
-  // ya cobrado, desde el historial financiero del contrato. Une los pagos de
-  // cada cargo en una línea propia del recibo — mismo objeto que deja un pago
-  // recién hecho, para que la vista previa/impresión sea siempre la misma.
-  function imprimirRecibo(cargos) {
-    const conPagos = cargos.filter(c => (c.pagos || []).length > 0)
-    if (conPagos.length === 0) return
-    let totalAbonado = 0
-    let ultimaFecha = null
-    let cobradoPor = null
-    let metodoPago = null
-    let metodosDistintos = false
-    const lineas = []
-    for (const c of conPagos) {
-      const pagos = c.pagos || []
-      const sub = pagos.reduce((s, p) => s + Number(p.monto), 0)
-      totalAbonado += sub
-      const ultimo = pagos[pagos.length - 1]
-      const metodoDeEste = pagos.length > 1 ? 'Varios' : ultimo.metodoPago
-      if (!ultimaFecha || new Date(ultimo.fechaPago) > new Date(ultimaFecha)) {
-        ultimaFecha = ultimo.fechaPago
-        cobradoPor = ultimo.usuario?.nombre || ultimo.usuario?.username || null
-      }
-      if (metodoPago === null) metodoPago = metodoDeEste
-      else if (metodoPago !== metodoDeEste) metodosDistintos = true
-      lineas.push({ concepto: conceptoLabel(c), periodo: c.esDelivery ? null : { desde: c.periodoDesde, hasta: c.periodoHasta }, monto: sub })
+  // Abre el ticket unificado de la entrega que originó el contrato — mismo
+  // documento (y mismos datos) que ya se ve en el módulo de Entregas, en vez
+  // de un recibo de pago aparte. `entregaInfo` (id/numero) es opcional: si no
+  // se pasa, usa la entrega del contrato ya cargado en `detalle`.
+  async function verTicketEntrega(entregaInfo) {
+    const info = entregaInfo !== undefined ? entregaInfo : detalle?.entrega
+    if (!info) {
+      toast('Este contrato no tiene una entrega vinculada (contrato antiguo)', 'error')
+      return
     }
-    const saldoTotal = cargos.reduce((s, c) => s + (Number(c.monto) - Number(c.montoPagado)), 0)
-    setReciboPago({
-      alquiler: { numero: detalle.numero, cliente: detalle.cliente, plan: detalle.plan },
-      cobradoPor,
-      fechaPago: ultimaFecha,
-      metodoPago: metodosDistintos ? 'Varios' : metodoPago,
-      lineas,
-      totalAbonado,
-      saldoTotal: Math.max(0, saldoTotal),
-    })
+    setCargandoTicket(true)
+    try {
+      const { data } = await api.get(`/entregas/numero/${encodeURIComponent(info.numero)}`)
+      setTicketTabAlquiler(data.canal === 'SALON' || data.confirmada ? 'comprobante' : 'remision')
+      setTicketEntrega(data)
+    } catch (err) {
+      toast('Error al cargar la remisión de la entrega', 'error')
+    } finally {
+      setCargandoTicket(false)
+    }
   }
 
-  // Impresión del recibo: en el celular manda a la térmica por Web Bluetooth
-  // (igual que el ticket de Entregas); en PC usa el diálogo del navegador.
-  async function handleImprimirRecibo() {
-    if (!reciboPago) return
-    if (esNavegadorMovilConWebBluetooth()) {
-      try {
-        const config = { branding, nombreEmpresa: nombre_empresa, direccion, telefono, paperWidth: 32 }
-        const buffer = await construirBufferTicketReciboAlquiler(reciboPago, config)
-        const conexion = await conectarImpresoraWebBluetooth()
-        await enviarBufferWebBluetooth(conexion, buffer)
-        toast('Impresión enviada correctamente', 'success')
-      } catch (err) {
-        if (err?.name !== 'NotFoundError') {
-          toast('Error al imprimir: ' + (err?.message || String(err)), 'error')
-        }
+  // Punto único de despacho de impresión — igual mecanismo que ya usa
+  // EntregasPage.jsx: Web Bluetooth en el celular, diálogo del navegador en PC.
+  async function imprimirTicketEntregaBluetooth() {
+    try {
+      const config = { branding, nombreEmpresa: nombre_empresa, direccion, telefono, paperWidth: 32 }
+      const buffer = ticketTabAlquiler === 'remision'
+        ? await construirBufferTicketRemisionInicial(ticketEntrega, config)
+        : await construirBufferTicketEntrega(ticketEntrega, { ...config, duplicarTicket: false, recambios: getRecambiosRecibidos(ticketEntrega) })
+      const conexion = await conectarImpresoraWebBluetooth()
+      await enviarBufferWebBluetooth(conexion, buffer)
+      toast('Impresión enviada correctamente', 'success')
+    } catch (err) {
+      if (err?.name !== 'NotFoundError') {
+        toast('Error al imprimir: ' + (err?.message || String(err)), 'error')
       }
+    }
+  }
+
+  function handleImprimirTicketEntrega() {
+    if (!ticketEntrega) return
+    if (esNavegadorMovilConWebBluetooth()) {
+      imprimirTicketEntregaBluetooth()
     } else {
       window.print()
     }
@@ -231,37 +229,24 @@ export default function AlquileresPage() {
       // al delivery): 1 llamada a la API si es un cargo suelto, hasta 2 si es
       // la fila combinada — cada llamada valida su propio saldo igual que hoy.
       let restante = montoTotal
-      const lineas = []
-      let cobradoPor = null
-      let alquilerResp = null
-      let fechaPagoResp = null
       for (const c of cargos) {
         const saldoCargo = Number(c.monto) - Number(c.montoPagado)
         if (saldoCargo <= 0 || restante <= 0) continue
         const aPagar = Math.min(restante, saldoCargo)
-        const { data } = await api.post(`/alquileres/${alquilerId}/cargos/${c.id}/pagar`, {
+        await api.post(`/alquileres/${alquilerId}/cargos/${c.id}/pagar`, {
           montoPagado: aPagar,
           metodoPago: formPago.metodoPago,
         })
         restante -= aPagar
-        cobradoPor = data.cobradoPor
-        alquilerResp = data.alquiler
-        fechaPagoResp = data.pago.fechaPago
-        lineas.push({ concepto: conceptoLabel(c), periodo: c.esDelivery ? null : { desde: c.periodoDesde, hasta: c.periodoHasta }, monto: aPagar })
       }
       toast('Pago registrado correctamente', 'success')
       setModalPago(null)
-      setReciboPago({
-        alquiler: alquilerResp,
-        cobradoPor,
-        fechaPago: fechaPagoResp,
-        metodoPago: formPago.metodoPago,
-        lineas,
-        totalAbonado: montoTotal,
-        saldoTotal: Math.max(0, saldoCombinado - montoTotal),
-      })
       load() // refresca lista, indicadores y el panel de cobranza
-      if (detalle?.id === alquilerId) abrirDetalle(alquilerId)
+      // Recarga el detalle completo del contrato (trae `entrega`, necesaria
+      // para abrir el ticket unificado) y abre el mismo ticket que el botón
+      // "Recibo" — sea o no el contrato que ya estaba abierto en el detalle.
+      const actualizado = await abrirDetalle(alquilerId)
+      await verTicketEntrega(actualizado?.entrega)
     } catch (err) {
       toast(err.response?.data?.error || 'Error al registrar el pago', 'error')
     } finally {
@@ -361,7 +346,7 @@ export default function AlquileresPage() {
               <button className="btn btn-sm btn-primary" onClick={() => abrirPago(detalle.id, [c])}>Registrar pago</button>
             )}
             {tienePagos && (
-              <button className="btn btn-sm" style={{ marginLeft: 6 }} onClick={() => imprimirRecibo([c])} title="Imprimir recibo de este cargo">
+              <button className="btn btn-sm" style={{ marginLeft: 6 }} onClick={() => verTicketEntrega()} title="Ver remisión de la entrega">
                 <i className="ti ti-printer" /> Recibo
               </button>
             )}
@@ -424,7 +409,7 @@ export default function AlquileresPage() {
               <button className="btn btn-sm btn-primary" onClick={() => abrirPago(detalle.id, [inicial, delivery])}>Registrar pago</button>
             )}
             {((inicial.pagos || []).length > 0 || (delivery.pagos || []).length > 0) && (
-              <button className="btn btn-sm" style={{ marginLeft: 6 }} onClick={() => imprimirRecibo([inicial, delivery])} title="Imprimir recibo combinado">
+              <button className="btn btn-sm" style={{ marginLeft: 6 }} onClick={() => verTicketEntrega()} title="Ver remisión de la entrega">
                 <i className="ti ti-printer" /> Recibo
               </button>
             )}
@@ -847,34 +832,54 @@ export default function AlquileresPage() {
         )}
       </Modal>
 
-      {/* Modal "Pago registrado" — la vista previa es el mismo ticket que se
-          imprime (ver ReciboAlquilerTicket.jsx), solo cambia el contenedor:
-          .ticket-preview en pantalla, .print-ticket-container al imprimir. */}
+      {/* Modal "Remisión de la entrega" — mismo ticket que se ve y se
+          imprime en el módulo de Entregas (ver TicketEntrega.jsx), en modo
+          de solo lectura (sin acciones de edición). Igual patrón de
+          contenedor: .ticket-preview en pantalla, .print-ticket-container
+          al imprimir. */}
       <Modal
-        open={!!reciboPago}
-        title="Pago registrado"
-        onClose={() => setReciboPago(null)}
+        open={cargandoTicket || !!ticketEntrega}
+        title={ticketEntrega ? `Remisión: ${ticketEntrega.numero}` : 'Remisión de la entrega'}
+        onClose={() => setTicketEntrega(null)}
         width={420}
-        footer={
+        footer={ticketEntrega ? (
           <>
-            <button className="btn" onClick={() => setReciboPago(null)}>Cerrar</button>
-            <button className="btn btn-primary" onClick={handleImprimirRecibo}>
-              <i className="ti ti-printer" /> Imprimir recibo
+            <button className="btn" onClick={() => setTicketEntrega(null)}>Cerrar</button>
+            <button className="btn btn-primary" onClick={handleImprimirTicketEntrega}>
+              <i className="ti ti-printer" /> Imprimir
             </button>
           </>
-        }
+        ) : null}
       >
-        {reciboPago && (
+        {!ticketEntrega ? <Spinner /> : (
           <div className="ticket-preview">
-            <ReciboAlquilerTicket recibo={reciboPago} branding={branding} nombreEmpresa={nombre_empresa} direccion={direccion} telefono={telefono} />
+            <TicketEntrega
+              entrega={ticketEntrega}
+              branding={branding}
+              nombreEmpresa={nombre_empresa}
+              direccion={direccion}
+              telefono={telefono}
+              ticketTab={ticketTabAlquiler}
+              mostrarSelectorTabs={false}
+              readOnly
+            />
           </div>
         )}
       </Modal>
 
-      {/* Recibo imprimible (solo visible al imprimir; se dispara desde el modal de arriba) */}
-      {reciboPago && createPortal(
+      {/* Ticket imprimible (solo visible al imprimir; se dispara desde el modal de arriba) */}
+      {ticketEntrega && createPortal(
         <div className="print-ticket-container">
-          <ReciboAlquilerTicket recibo={reciboPago} branding={branding} nombreEmpresa={nombre_empresa} direccion={direccion} telefono={telefono} />
+          <TicketEntrega
+            entrega={ticketEntrega}
+            branding={branding}
+            nombreEmpresa={nombre_empresa}
+            direccion={direccion}
+            telefono={telefono}
+            ticketTab={ticketTabAlquiler}
+            mostrarSelectorTabs={false}
+            readOnly
+          />
         </div>,
         document.body
       )}
