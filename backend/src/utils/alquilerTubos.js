@@ -20,6 +20,39 @@ export class ErrorAlquilerTubo extends Error {
   }
 }
 
+async function validarTuboDisponible(tx, tuboId) {
+  const asignacion = await tx.alquilerTubo.findFirst({
+    where: { tuboId, activo: true },
+    include: { alquiler: { select: { numero: true, estado: true } } },
+  })
+  if (!asignacion) return
+
+  const { numero, estado } = asignacion.alquiler
+  const cerrado = ['FINALIZADO', 'CANCELADO'].includes(estado)
+  throw new ErrorAlquilerTubo(
+    cerrado
+      ? `El tubo ${tuboId} conserva una asignación abierta en el alquiler ${numero}, aunque el contrato está ${estado}. Solicite revisar el cierre de esa asignación antes de volver a usar el tubo.`
+      : `El tubo ${tuboId} ya está asignado al alquiler ${numero} (estado: ${estado}). Revise ese alquiler y registre la devolución si corresponde antes de volver a asignarlo.`,
+    409,
+  )
+}
+
+async function crearAsignacion(tx, data) {
+  try {
+    return await tx.alquilerTubo.create({ data })
+  } catch (err) {
+    // Otra solicitud puede asignar el tubo después de nuestra validación.
+    // No consultar dentro de una transacción que ya falló.
+    if (err.code === 'P2002') {
+      throw new ErrorAlquilerTubo(
+        `No se pudo asignar el tubo ${data.tuboId}: el tubo o el alquiler ya tiene una asignación activa. Actualice la pantalla y revise las asignaciones antes de reintentar.`,
+        409,
+      )
+    }
+    throw err
+  }
+}
+
 // Asigna el primer tubo de un contrato recién activado (al confirmar la
 // entrega). Idempotente: si ya existe un AlquilerTubo activo para este
 // alquiler, no crea uno nuevo (reintento de confirmación, etc.).
@@ -27,14 +60,13 @@ export async function asignarTuboInicial(tx, { alquilerId, tuboId, fechaDesde })
   const existente = await tx.alquilerTubo.findFirst({ where: { alquilerId, activo: true } })
   if (existente) return existente
 
-  return tx.alquilerTubo.create({
-    data: {
+  await validarTuboDisponible(tx, tuboId)
+  return crearAsignacion(tx, {
       alquilerId,
       tuboId,
       fechaDesde: aMedianocheUTC(fechaDesde),
       motivoAsignacion: 'ENTREGA_INICIAL',
       activo: true,
-    },
   })
 }
 
@@ -65,22 +97,19 @@ export async function recambiarTubo(tx, { alquilerId, tuboNuevoId, motivo = 'REC
 
   // Nadie más puede tener este tubo activo en otro contrato (además del
   // índice único parcial de la base, que es el backstop final ante carreras).
-  const tuboNuevoEnUso = await tx.alquilerTubo.findFirst({ where: { tuboId: tuboNuevoId, activo: true } })
-  if (tuboNuevoEnUso) throw new ErrorAlquilerTubo('Ese tubo ya está activo en otro contrato de alquiler', 400)
+  await validarTuboDisponible(tx, tuboNuevoId)
 
   await tx.alquilerTubo.update({
     where: { id: activo.id },
     data: { activo: false, fechaHasta: fechaCambio },
   })
 
-  const nuevo = await tx.alquilerTubo.create({
-    data: {
+  const nuevo = await crearAsignacion(tx, {
       alquilerId,
       tuboId: tuboNuevoId,
       fechaDesde: fechaCambio,
       motivoAsignacion: motivo,
       activo: true,
-    },
   })
 
   await tx.alquiler.update({ where: { id: alquilerId }, data: { tuboId: tuboNuevoId } })
