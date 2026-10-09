@@ -25,6 +25,8 @@
 import { formatCapacidad } from './ui.jsx'
 import { precioFilaDetalle, totalTicket, subtotalProductosTicket, formatNumberSpanish, getRecambiosRecibidos } from '../utils/ticketMontos.js'
 import PlanAlquilerTicketBlock from './PlanAlquilerTicketBlock.jsx'
+import ResumenGasesTicket from './ResumenGasesTicket.jsx'
+import { resumenGasesEntrega } from '../utils/resumenGases.js'
 
 export default function TicketEntrega({
   entrega, branding, nombreEmpresa, direccion, telefono,
@@ -170,6 +172,8 @@ export default function TicketEntrega({
               </tr>
             </tbody>
           </table>
+
+          <ResumenGasesTicket resumen={resumenGasesEntrega(entrega)} />
 
           <PlanAlquilerTicketBlock entrega={entrega} incluirEstado={esComprobante} />
 

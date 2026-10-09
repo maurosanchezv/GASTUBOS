@@ -12,6 +12,8 @@ import { formatNumberSpanish, getObservacionesLimpias, construirBufferTicketEntr
 import { conectarImpresoraWebBluetooth, enviarBufferWebBluetooth, esNavegadorMovilConWebBluetooth } from '../utils/webBluetoothPrinter.js'
 import PlanAlquilerTicketBlock from '../components/PlanAlquilerTicketBlock.jsx'
 import { precioFilaDetalle, totalTicket } from '../utils/ticketMontos.js'
+import ResumenGasesTicket from '../components/ResumenGasesTicket.jsx'
+import { resumenGasesEntrega, resumenGasesVentaCamion } from '../utils/resumenGases.js'
 
 const SCANNER_ID = 'reparto-qr-reader'
 
@@ -2718,6 +2720,8 @@ export default function RepartoPage() {
             </tbody>
           </table>
 
+          <ResumenGasesTicket resumen={resumenGasesVentaCamion(lineasVentaCamion(ventaParaImprimir))} />
+
           <div style={{ margin: '8px 0', fontSize: '11px' }}>
             <strong>Forma de pago:</strong> {ventaParaImprimir.metodoPago || '-'}<br />
             <strong>Recibido:</strong> {Number(ventaParaImprimir.montoRecibido || 0).toLocaleString('es-PY')} GS
@@ -2898,6 +2902,8 @@ export default function RepartoPage() {
             </tbody>
           </table>
 
+          <ResumenGasesTicket resumen={resumenGasesEntrega(entregaParaImprimir)} />
+
           <PlanAlquilerTicketBlock
             entrega={entregaParaImprimir}
             incluirEstado={true}
@@ -3031,6 +3037,8 @@ export default function RepartoPage() {
                 </tr>
               </tbody>
             </table>
+
+            <ResumenGasesTicket resumen={resumenGasesEntrega(entregaSeleccionada)} />
 
             <PlanAlquilerTicketBlock
               entrega={entregaSeleccionada}
@@ -3234,6 +3242,8 @@ export default function RepartoPage() {
                 </tr>
               </tbody>
             </table>
+
+            <ResumenGasesTicket resumen={resumenGasesVentaCamion(lineasVentaCamion(cargaCamionSeleccionada))} />
 
             <div style={{ margin: '10px 0', fontSize: '11px' }}>
               <strong>Forma de pago:</strong> {cargaCamionSeleccionada.metodoPago || '-'}<br />

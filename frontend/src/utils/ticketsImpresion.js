@@ -7,6 +7,7 @@ import { EscPosBuilder, generarLogoEscPos } from './escPosBuilder.js'
 import { formatCapacidad } from '../components/ui.jsx'
 import { precioFilaDetalle, subtotalItemsTicket, subtotalProductosTicket, totalTicket } from './ticketMontos.js'
 import { metodoPagoLabel, fmtVencimiento } from './metodoPago.js'
+import { resumenGases, resumenGasesEntrega, resumenGasesVentaCamion, textoTubos } from './resumenGases.js'
 
 export const formatNumberSpanish = (val) => {
   const num = Number(val)
@@ -121,6 +122,19 @@ function imprimirBloquePlanAlquiler(builder, entrega, helpers, width, opts = {})
   builder.addTextLine(line())
 }
 
+// Bloque "Resumen de gas" (kg/m³ y tubos por gas) debajo del TOTAL. El
+// equivalente HTML es components/ResumenGasesTicket.jsx.
+function imprimirResumenGases(builder, resumen, helpers, width) {
+  if (!resumen || resumen.length === 0) return
+  const { justify, line } = helpers
+  builder.addTextLine(line())
+  builder.boldOn().addTextLine('RESUMEN DE GAS:').boldOff()
+  resumen.forEach(g => {
+    const der = `${formatNumberSpanish(g.cantidad)} ${g.unidad} (${textoTubos(g.tubos)})`
+    builder.addTextLine(justify(`  ${g.gas}`.slice(0, Math.max(4, width - der.length - 1)), der))
+  })
+}
+
 // config: { branding: {isotipoSrc, logoSrc}, nombreEmpresa, direccion, telefono,
 //           paperWidth, duplicarTicket, recambios: string[] }
 export async function construirBufferTicketEntrega(entrega, config) {
@@ -218,6 +232,7 @@ export async function construirBufferTicketEntrega(entrega, config) {
     }
     builder.addTextLine(justify('DELIVERY:', deliveryCost.toLocaleString('es-PY') + ' GS'))
     builder.boldOn().addTextLine(justify('TOTAL:', totalTicket(entrega).toLocaleString('es-PY') + ' GS')).boldOff()
+    imprimirResumenGases(builder, resumenGasesEntrega(entrega), { justify, line }, width)
     builder.addTextLine(doubleLine())
 
     if (recambios.length > 0) {
@@ -351,6 +366,7 @@ export async function construirBufferTicketVentaCamion(carga, config) {
   })
   builder.addTextLine(line())
   builder.boldOn().addTextLine(justify('TOTAL:', totalVentaCamion(carga).toLocaleString('es-PY') + ' GS')).boldOff()
+  imprimirResumenGases(builder, resumenGasesVentaCamion(lineas), { justify, line }, width)
   builder.addTextLine(doubleLine())
 
   builder.addTextLine('Forma de pago: ' + (carga.metodoPago || '-'))
@@ -527,6 +543,7 @@ export async function construirBufferTicketCargaSalon(carga, config) {
   builder.addTextLine(justify(`  ${cantStr} x ${precioUnitStr}`, subtotalStr))
   builder.addTextLine(line())
   builder.boldOn().addTextLine(justify('TOTAL:', subtotalStr)).boldOff()
+  imprimirResumenGases(builder, resumenGases([{ gas: carga.tipoGas, cantidad: carga.cantidad, unidad: carga.unidad }]), { justify, line }, width)
   builder.addTextLine(doubleLine())
 
   builder.addTextLine('Forma de pago: ' + (carga.metodoPago || '-'))
@@ -713,6 +730,7 @@ export async function construirBufferTicketRemisionInicial(entrega, config) {
   }
   builder.addTextLine(justify('DELIVERY:', deliveryCost.toLocaleString('es-PY') + ' GS'))
   builder.boldOn().addTextLine(justify('TOTAL ESTIMADO:', totalTicket(entrega).toLocaleString('es-PY') + ' GS')).boldOff()
+  imprimirResumenGases(builder, resumenGasesEntrega(entrega), { justify, line }, width)
   builder.addTextLine(doubleLine())
 
   // Detalle del plan de alquiler — sin estado del equipo (todavía no se entregó).

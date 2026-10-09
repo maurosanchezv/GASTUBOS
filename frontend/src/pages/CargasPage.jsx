@@ -9,6 +9,8 @@ import { getBrandingSources } from '../utils/logosSvg.js'
 import ClienteAutocomplete from '../components/ClienteAutocomplete.jsx'
 import { construirBufferTicketCargaSalon } from '../utils/ticketsImpresion.js'
 import { conectarImpresoraWebBluetooth, enviarBufferWebBluetooth, esNavegadorMovilConWebBluetooth } from '../utils/webBluetoothPrinter.js'
+import ResumenGasesTicket from '../components/ResumenGasesTicket.jsx'
+import { resumenGases } from '../utils/resumenGases.js'
 
 const TIPO_GAS_LABEL = {
   CO2:             'CO₂',
@@ -1135,6 +1137,8 @@ export default function CargasPage() {
               </tr>
             </tbody>
           </table>
+
+          <ResumenGasesTicket resumen={resumenGases([{ gas: TIPO_GAS_LABEL[cargaTicket.tipoGas] || cargaTicket.tipoGas, cantidad: cargaTicket.cantidad, unidad: cargaTicket.unidad }])} />
 
           {cargaTicket.observaciones && (
             <div style={{ margin: '8px 0', fontSize: '10px', fontStyle: 'italic', borderTop: '1px dashed #000', paddingTop: '4px' }}>
