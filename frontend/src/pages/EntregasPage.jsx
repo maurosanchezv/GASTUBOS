@@ -86,6 +86,7 @@ const GAS_STRING_TO_ENUM = {
   'Aire comprimido': 'AIRE_COMPRIMIDO',
   'Mezcla': 'MEZCLA_CO2_ARGON',
   'Acetileno': 'ACETILENO',
+  'Gas ecológico': 'GAS_ECOLOGICO',
 }
 
 // URL pública de la remisión que codifica el QR del ticket. Al escanearla (con

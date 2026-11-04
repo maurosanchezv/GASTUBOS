@@ -8,7 +8,7 @@ const router = Router()
 router.use(requireAuth)
 
 const updatePrecioSchema = z.object({
-  gas: z.enum(['CO2', 'OXIGENO', 'ARGON', 'NITROGENO', 'AIRE_COMPRIMIDO', 'MEZCLA_CO2_ARGON', 'ACETILENO']),
+  gas: z.enum(['CO2', 'OXIGENO', 'ARGON', 'NITROGENO', 'AIRE_COMPRIMIDO', 'MEZCLA_CO2_ARGON', 'ACETILENO', 'GAS_ECOLOGICO']),
   unidad: z.enum(['KG', 'M3']),
   precioUnitario: z.coerce.number().nonnegative(),
 })

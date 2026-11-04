@@ -12,6 +12,7 @@ const GASES = [
   { value: 'AIRE_COMPRIMIDO', label: 'Aire Comprimido' },
   { value: 'MEZCLA_CO2_ARGON', label: 'Mezcla CO₂ / Argón' },
   { value: 'ACETILENO', label: 'Acetileno (C₂H₂)' },
+  { value: 'GAS_ECOLOGICO', label: 'Gas ecológico' },
 ]
 
 export default function TarifasPage() {

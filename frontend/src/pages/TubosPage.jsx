@@ -8,7 +8,7 @@ import { useToast } from '../components/ui.jsx'
 import ClienteAutocomplete from '../components/ClienteAutocomplete.jsx'
 
 const ESTADOS = ['DISPONIBLE','CARGADO','VACIO','ENTREGADO','ALQUILADO','VENDIDO','RESERVADO','PERDIDO','DEVUELTO','EN_REVISION','DE_BAJA']
-const GASES   = ['CO2','Oxígeno','Argón','Nitrógeno','Aire comprimido','Acetileno','Mezcla Ar+CO2','Mezcla especial']
+const GASES   = ['CO2','Oxígeno','Argón','Nitrógeno','Aire comprimido','Acetileno','Gas ecológico','Mezcla Ar+CO2','Mezcla especial']
 
 const getTodayString = () => {
   const d = new Date()
@@ -100,7 +100,7 @@ export default function TubosPage() {
     setSaving(true)
     try {
       const gasLower = form.gas.toLowerCase()
-      const isKgBased = gasLower === 'acetileno' || gasLower === 'co2'
+      const isKgBased = gasLower === 'acetileno' || gasLower === 'co2' || gasLower === 'gas ecológico'
       const payload = {
         ...form,
         capacidadLitros: isKgBased ? undefined : Number(form.capacidadLitros),
@@ -123,12 +123,12 @@ export default function TubosPage() {
   const handleGasChange = (e) => {
     const val = e.target.value
     const valLower = val.toLowerCase()
-    const isKgBased = valLower === 'acetileno' || valLower === 'co2'
+    const isKgBased = valLower === 'acetileno' || valLower === 'co2' || valLower === 'gas ecológico'
     setForm(prev => ({
       ...prev,
       gas: val,
       capacidadLitros: isKgBased ? '' : 6,
-      capacidadKg: isKgBased ? (valLower === 'co2' ? 25 : 6) : '',
+      capacidadKg: isKgBased ? (valLower === 'co2' ? 25 : valLower === 'gas ecológico' ? 40 : 6) : '',
     }))
   }
 
@@ -386,7 +386,11 @@ export default function TubosPage() {
                 {GASES.map(g => <option key={g}>{g}</option>)}
               </select>
             </FormGroup>
-            {form.gas.toLowerCase() === 'acetileno' ? (
+            {form.gas.toLowerCase() === 'gas ecológico' ? (
+              <FormGroup label="Capacidad (kg)" required hint="Hasta 40 kg">
+                <input type="number" min="0.1" max="40" step="0.1" value={form.capacidadKg} onChange={f('capacidadKg')} required />
+              </FormGroup>
+            ) : form.gas.toLowerCase() === 'acetileno' ? (
               <FormGroup label="Capacidad (kg)" required>
                 <select value={form.capacidadKg} onChange={f('capacidadKg')}>
                   <option value="">Seleccionar...</option>

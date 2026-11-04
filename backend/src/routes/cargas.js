@@ -13,7 +13,7 @@ router.use(requireAuth)
 
 const cargaSchema = z.object({
   tuboId:        z.string().min(1).optional().nullable(),
-  tipoGas:       z.enum(['CO2','OXIGENO','ARGON','NITROGENO','AIRE_COMPRIMIDO','MEZCLA_CO2_ARGON','ACETILENO']),
+  tipoGas:       z.enum(['CO2','OXIGENO','ARGON','NITROGENO','AIRE_COMPRIMIDO','MEZCLA_CO2_ARGON','ACETILENO','GAS_ECOLOGICO']),
   unidad:        z.enum(['KG','M3']),
   tipoCarga:     z.enum(['NORMAL', 'SALON']).optional().default('NORMAL'),
   cantidad:      z.number().positive(),
@@ -110,6 +110,10 @@ router.post('/', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), async (req, res,
     const esSalon = data.tipoCarga === 'SALON'
     if (esSalon && !data.metodoPago) {
       return res.status(400).json({ error: 'Seleccioná la forma de pago' })
+    }
+
+    if (data.tipoGas === 'GAS_ECOLOGICO' && data.cantidad > 40) {
+      return res.status(400).json({ error: 'El Gas ecológico se puede cargar hasta 40 kg' })
     }
 
     let tubo = null

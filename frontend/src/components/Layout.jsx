@@ -9,6 +9,7 @@ const GAS_COLORS = {
   'CO2':       '#1A5FA8', 'CO₂':      '#1A5FA8',
   'Oxígeno':   '#00695C', 'Argón':    '#5B21B6',
   'Nitrógeno': '#52525B', 'Acetileno':'#B45309',
+  'Gas ecológico': '#15803D',
 }
 export const gasColor = (g) => {
   for (const k in GAS_COLORS) if (g?.includes(k)) return GAS_COLORS[k]

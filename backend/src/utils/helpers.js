@@ -55,5 +55,6 @@ export function mapTuboGasToTipoGas(tuboGas) {
   if (norm.includes('aire')) return 'AIRE_COMPRIMIDO'
   if (norm.includes('mezcla')) return 'MEZCLA_CO2_ARGON'
   if (norm.includes('acetileno')) return 'ACETILENO'
+  if (norm.includes('ecologico')) return 'GAS_ECOLOGICO'
   return 'CO2'
 }

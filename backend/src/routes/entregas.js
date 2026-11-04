@@ -32,9 +32,10 @@ function parseGasYCapacidadInfo(str, tuboReferencia) {
     else if (sLower.includes('aire')) gas = 'Aire comprimido'
     else if (sLower.includes('mezcla')) gas = 'Mezcla CO2/Argón'
     else if (sLower.includes('acetileno')) gas = 'Acetileno'
+    else if (sLower.includes('ecológico') || sLower.includes('ecologico')) gas = 'Gas ecológico'
   }
 
-  const isKgGas = gas.toLowerCase() === 'co2' || gas.toLowerCase() === 'acetileno'
+  const isKgGas = gas.toLowerCase() === 'co2' || gas.toLowerCase() === 'acetileno' || gas.toLowerCase() === 'gas ecológico'
 
   let numVal = null
   if (str && typeof str === 'string') {

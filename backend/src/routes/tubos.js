@@ -11,9 +11,16 @@ import { TRANSICIONES_VALIDAS } from '../utils/estadosTubo.js'
 const router = Router()
 router.use(requireAuth)
 
+// El Gas ecológico admite cualquier capacidad hasta este tope (kg)
+const GAS_ECOLOGICO_MAX_KG = 40
+
 // Compatibilidad entre tipo de gas y capacidad — usada tanto al crear como al editar
 function capacidadValidaParaGas(gas, capacidadLitros, capacidadKg) {
   const gasLower = (gas || '').toLowerCase()
+  if (gasLower === 'gas ecológico') {
+    if (capacidadLitros) return false
+    return capacidadKg > 0 && capacidadKg <= GAS_ECOLOGICO_MAX_KG
+  }
   if (gasLower === 'acetileno') {
     if (capacidadLitros) return false
     const allowedSizes = [1, 1.2, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 7, 8]

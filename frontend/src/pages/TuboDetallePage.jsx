@@ -27,9 +27,10 @@ const GAS_LABELS = {
   AIRE_COMPRIMIDO: "Aire comprimido",
   MEZCLA_CO2_ARGON: "Mezcla CO₂/Argón",
   ACETILENO: "Acetileno",
+  GAS_ECOLOGICO: "Gas ecológico",
 };
 
-const GASES = ['CO2', 'Oxígeno', 'Argón', 'Nitrógeno', 'Aire comprimido', 'Acetileno', 'Mezcla Ar+CO2', 'Mezcla especial'];
+const GASES = ['CO2', 'Oxígeno', 'Argón', 'Nitrógeno', 'Aire comprimido', 'Acetileno', 'Gas ecológico', 'Mezcla Ar+CO2', 'Mezcla especial'];
 
 const TIPO_CARGA_LABEL = { NORMAL: 'Normal', SALON: 'Salón', CAMION: 'En camión' };
 const TIPO_CARGA_BADGE = { NORMAL: 'badge-CARGADO', SALON: 'badge-REPARTIDOR', CAMION: 'badge-ALQUILADO' };
@@ -327,17 +328,17 @@ export default function TuboDetallePage() {
   function handleGasChangeEdit(e) {
     const val = e.target.value;
     const valLower = val.toLowerCase();
-    const isKgBased = valLower === "acetileno" || valLower === "co2";
+    const isKgBased = valLower === "acetileno" || valLower === "co2" || valLower === "gas ecológico";
     setEditGas(val);
     setEditCapacidadLitros(isKgBased ? "" : 6);
-    setEditCapacidadKg(isKgBased ? (valLower === "co2" ? 25 : 6) : "");
+    setEditCapacidadKg(isKgBased ? (valLower === "co2" ? 25 : valLower === "gas ecológico" ? 40 : 6) : "");
   }
 
   async function handleGuardarEdicion() {
     setSaving(true);
     try {
       const isKgBased =
-        editGas.toLowerCase() === "acetileno" || editGas.toLowerCase() === "co2";
+        editGas.toLowerCase() === "acetileno" || editGas.toLowerCase() === "co2" || editGas.toLowerCase() === "gas ecológico";
       await api.patch(`/tubos/${id}`, {
         gas: editGas,
         capacidadLitros: isKgBased ? null : Number(editCapacidadLitros),
@@ -1253,7 +1254,7 @@ export default function TuboDetallePage() {
               onClick={handleGuardarEdicion}
               disabled={
                 saving ||
-                (editGas.toLowerCase() === "acetileno" || editGas.toLowerCase() === "co2"
+                (editGas.toLowerCase() === "acetileno" || editGas.toLowerCase() === "co2" || editGas.toLowerCase() === "gas ecológico"
                   ? !editCapacidadKg
                   : !editCapacidadLitros)
               }
@@ -1270,7 +1271,18 @@ export default function TuboDetallePage() {
             ))}
           </select>
         </FormGroup>
-        {editGas.toLowerCase() === "acetileno" ? (
+        {editGas.toLowerCase() === "gas ecológico" ? (
+          <FormGroup label="Capacidad (kg)" required hint="Hasta 40 kg">
+            <input
+              type="number"
+              min="0.1"
+              max="40"
+              step="0.1"
+              value={editCapacidadKg}
+              onChange={(e) => setEditCapacidadKg(e.target.value)}
+            />
+          </FormGroup>
+        ) : editGas.toLowerCase() === "acetileno" ? (
           <FormGroup label="Capacidad (kg)" required>
             <select
               value={editCapacidadKg}

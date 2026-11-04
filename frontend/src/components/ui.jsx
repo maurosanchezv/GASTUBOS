@@ -173,6 +173,7 @@ const GAS_COLORS = {
   CO2: '#1A5FA8', 'CO₂': '#1A5FA8',
   Oxígeno: '#00695C', Argón: '#5B21B6',
   Nitrógeno: '#52525B', Acetileno: '#B45309',
+  'Gas ecológico': '#15803D',
 }
 export function GasDot({ gas }) {
   let color = '#9A3412'
@@ -184,7 +185,7 @@ export function GasDot({ gas }) {
 export function formatCapacidad(tubo) {
   if (!tubo) return '—'
   const gas = (tubo.gas || '').toLowerCase()
-  if (gas.includes('co2') || gas.includes('acetileno')) {
+  if (gas.includes('co2') || gas.includes('acetileno') || gas.includes('ecológico')) {
     const val = tubo.capacidadKg !== undefined && tubo.capacidadKg !== null ? tubo.capacidadKg : (tubo.capacidadLitros || 0)
     return `${Number(val)} kg`
   }
@@ -195,7 +196,7 @@ export function formatCapacidad(tubo) {
 // ── Format gas unit of measure helper ──────────────────────────
 export function formatUnidadGas(gas) {
   const g = (gas || '').toLowerCase()
-  if (g.includes('co2') || g.includes('acetileno')) return 'kg'
+  if (g.includes('co2') || g.includes('acetileno') || g.includes('ecológico')) return 'kg'
   return 'm³'
 }
 

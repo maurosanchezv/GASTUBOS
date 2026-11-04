@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "TipoGas" ADD VALUE 'GAS_ECOLOGICO';

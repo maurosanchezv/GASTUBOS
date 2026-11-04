@@ -165,7 +165,7 @@ router.post('/:id/adquirir', requireRol('ADMIN', 'SUPERVISOR', 'OPERADOR'), asyn
       const tuboId = trimmedSerie
       const finalGas = gas || registro.gas
       const finalGasLower = (finalGas || '').toLowerCase()
-      const isKg = finalGasLower === 'acetileno' || finalGasLower === 'co2'
+      const isKg = finalGasLower === 'acetileno' || finalGasLower === 'co2' || finalGasLower === 'gas ecológico'
 
       // 1. Crear nuevo tubo usando la serie como ID con el propietario correspondiente
       const nuevoTubo = await tx.tubo.create({

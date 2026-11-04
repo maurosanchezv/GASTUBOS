@@ -20,6 +20,7 @@ const TIPO_GAS_LABEL = {
   AIRE_COMPRIMIDO: 'Aire comprimido',
   MEZCLA_CO2_ARGON:'Mezcla 80% CO₂ / 20% Argón',
   ACETILENO:       'Acetileno',
+  GAS_ECOLOGICO:   'Gas ecológico',
 }
 
 const TIPO_CARGA_LABEL = {
@@ -36,7 +37,7 @@ const TIPO_CARGA_BADGE = {
 
 const TIPO_GAS_UNIDAD = {
   CO2: 'KG', OXIGENO: 'M3', ARGON: 'M3', NITROGENO: 'M3',
-  AIRE_COMPRIMIDO: 'M3', MEZCLA_CO2_ARGON: 'M3', ACETILENO: 'KG',
+  AIRE_COMPRIMIDO: 'M3', MEZCLA_CO2_ARGON: 'M3', ACETILENO: 'KG', GAS_ECOLOGICO: 'KG',
 }
 
 const GAS_STRING_TO_ENUM = {
@@ -48,6 +49,7 @@ const GAS_STRING_TO_ENUM = {
   'Mezcla': 'MEZCLA_CO2_ARGON',
   'Mezcla especial': 'MEZCLA_CO2_ARGON',
   'Acetileno': 'ACETILENO',
+  'Gas ecológico': 'GAS_ECOLOGICO',
 }
 
 const ESTADOS_CARGABLES = ['VACIO', 'DEVUELTO', 'DISPONIBLE']
@@ -273,6 +275,10 @@ export default function CargasPage() {
       toast('Completá los campos obligatorios', 'error')
       return
     }
+    if (form.tipoGas === 'GAS_ECOLOGICO' && Number(form.cantidad) > 40) {
+      toast('El Gas ecológico se puede cargar hasta 40 kg', 'error')
+      return
+    }
     // Solo Carga en Salón cobra y emite ticket; Carga Normal es una recarga interna sin
     // forma de pago (el cobro real ocurre después en la Entrega correspondiente).
     if (form.tipoCarga === 'SALON') {
@@ -385,9 +391,9 @@ export default function CargasPage() {
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <FormGroup label="Cantidad cargada" required>
+          <FormGroup label="Cantidad cargada" required hint={form.tipoGas === 'GAS_ECOLOGICO' ? 'Hasta 40 kg' : undefined}>
             <input
-              type="number" min="0.001" step="0.001"
+              type="number" min="0.001" step="0.001" max={form.tipoGas === 'GAS_ECOLOGICO' ? 40 : undefined}
               placeholder={form.unidad === 'KG' ? 'ej: 25' : 'ej: 6'}
               value={form.cantidad}
               onChange={e => handleCantidadChange(e.target.value)}

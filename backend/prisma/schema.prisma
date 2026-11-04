@@ -132,6 +132,7 @@ enum TipoGas {
   AIRE_COMPRIMIDO
   MEZCLA_CO2_ARGON
   ACETILENO
+  GAS_ECOLOGICO
 }
 
 enum UnidadGas {

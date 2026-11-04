@@ -5,7 +5,7 @@ import { PageHeader, Spinner, GasDot, useToast, EmptyState } from '../components
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 
-const GAS_COLORS = { CO2: '#1A5FA8', 'CO₂': '#1A5FA8', Oxígeno: '#00695C', Argón: '#5B21B6', Nitrógeno: '#52525B', Acetileno: '#B45309' }
+const GAS_COLORS = { CO2: '#1A5FA8', 'CO₂': '#1A5FA8', Oxígeno: '#00695C', Argón: '#5B21B6', Nitrógeno: '#52525B', Acetileno: '#B45309', 'Gas ecológico': '#15803D' }
 
 const ESTADO_COLORS = {
   DISPONIBLE: '#2E7D32', CARGADO: '#1A5FA8', VACIO: '#52525B', ENTREGADO: '#00695C',
