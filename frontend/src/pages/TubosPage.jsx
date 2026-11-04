@@ -412,7 +412,7 @@ export default function TubosPage() {
               <FormGroup label="Capacidad (m³)" required>
                 <select value={form.capacidadLitros} onChange={f('capacidadLitros')}>
                   <option value="">Seleccionar...</option>
-                  {[1, 1.5, 2.5, 3, 4, 5, 6, 6.5, 7, 7.15, 7.5, 8.5].map(m3 => (
+                  {[1, 1.5, 2.5, 3, 4, 5, 6, 6.5, 7, 7.15, 7.5, 8.5, ...(['nitrógeno', 'nitrogeno'].includes(form.gas.toLowerCase()) ? [9, 9.5, 10, 10.5, 11, 11.5, 12, 12.5, 13, 13.5, 14, 14.5, 15] : [])].map(m3 => (
                     <option key={m3} value={m3}>{m3} m³</option>
                   ))}
                 </select>

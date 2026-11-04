@@ -34,6 +34,9 @@ function capacidadValidaParaGas(gas, capacidadLitros, capacidadKg) {
   // Para Oxígeno, Nitrógeno, Argón, Aire comprimido y Mezclas, se usa capacidadLitros (representa m3)
   if (capacidadKg) return false
   const allowedSizes = [1, 1.5, 2.5, 3, 4, 5, 6, 6.5, 7, 7.15, 7.5, 8.5]
+  if (gasLower === 'nitrógeno' || gasLower === 'nitrogeno') {
+    allowedSizes.push(9, 9.5, 10, 10.5, 11, 11.5, 12, 12.5, 13, 13.5, 14, 14.5, 15)
+  }
   return allowedSizes.includes(capacidadLitros)
 }
 
