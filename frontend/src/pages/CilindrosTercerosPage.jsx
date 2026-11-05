@@ -459,7 +459,9 @@ export default function CilindrosTercerosPage() {
                   required
                 >
                   <option value="">Seleccionar...</option>
-                  {[1, 1.5, 2.5, 3, 4, 5, 6, 6.5, 7, 7.15, 7.5, 8.5].map(m3 => (
+                  {[1, 1.5, 2.5, 3, 4, 5, 6, 6.5, 7, 7.15, 7.5, 8.5,
+                    ...(['argón', 'argon'].includes(form.gas.toLowerCase()) ? [8] : []),
+                  ].sort((a, b) => a - b).map(m3 => (
                     <option key={m3} value={m3}>{m3} m³</option>
                   ))}
                 </select>

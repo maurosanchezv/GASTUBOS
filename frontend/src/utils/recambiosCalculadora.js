@@ -13,11 +13,13 @@ export const GASES_RETORNO = [
 const CAPACIDADES_ACETILENO = ['1 kg', '1.2 kg', '1.5 kg', '2 kg', '2.5 kg', '3 kg', '3.5 kg', '4 kg', '4.5 kg', '5 kg', '5.5 kg', '6 kg', '7 kg', '8 kg']
 const CAPACIDADES_CO2 = ['1 kg', '2 kg', '3 kg', '4 kg', '5 kg', '6 kg', '7 kg', '8 kg', '10 kg', '13 kg', '15 kg', '20 kg', '25 kg', '30 kg']
 const CAPACIDADES_DEFAULT = ['1 m³', '1.5 m³', '2.5 m³', '3 m³', '4 m³', '5 m³', '6 m³', '6.5 m³', '7 m³', '7.15 m³', '7.5 m³', '8.5 m³']
+const CAPACIDADES_ARGON = ['1 m³', '1.5 m³', '2.5 m³', '3 m³', '4 m³', '5 m³', '6 m³', '6.5 m³', '7 m³', '7.15 m³', '7.5 m³', '8 m³', '8.5 m³']
 
 export function capacidadesParaGas(gas) {
   const gLower = (gas || '').toLowerCase()
   if (gLower === 'acetileno') return CAPACIDADES_ACETILENO
   if (gLower === 'co2') return CAPACIDADES_CO2
+  if (gLower === 'argón' || gLower === 'argon') return CAPACIDADES_ARGON
   return CAPACIDADES_DEFAULT
 }
 

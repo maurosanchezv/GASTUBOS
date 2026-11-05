@@ -37,6 +37,9 @@ function capacidadValidaParaGas(gas, capacidadLitros, capacidadKg) {
   if (gasLower === 'nitrógeno' || gasLower === 'nitrogeno') {
     allowedSizes.push(9, 9.5, 10, 10.5, 11, 11.5, 12, 12.5, 13, 13.5, 14, 14.5, 15)
   }
+  if (gasLower === 'argón' || gasLower === 'argon') {
+    allowedSizes.push(8)
+  }
   return allowedSizes.includes(capacidadLitros)
 }
 
