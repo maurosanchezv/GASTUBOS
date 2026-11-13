@@ -23,7 +23,7 @@ function capacidadValidaParaGas(gas, capacidadLitros, capacidadKg) {
   }
   if (gasLower === 'acetileno') {
     if (capacidadLitros) return false
-    const allowedSizes = [1, 1.2, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 7, 8]
+    const allowedSizes = [1, 1.2, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 7, 7.5, 8]
     return allowedSizes.includes(capacidadKg)
   }
   if (gasLower === 'co2') {
