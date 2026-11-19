@@ -22,6 +22,10 @@ import EntregaSalonTab from './entregas/EntregaSalonTab.jsx'
 import ClienteAutocomplete from '../components/ClienteAutocomplete.jsx'
 import TicketEntrega from '../components/TicketEntrega.jsx'
 import ProductoSelectorModal from '../components/ProductoSelectorModal.jsx'
+import { descargarTicket, esEntornoDesarrollo } from '../utils/descargarTicket.js'
+import { crearEntregaPruebaLarga } from '../utils/ticketPruebaLargo.js'
+
+const ES_DESARROLLO = esEntornoDesarrollo()
 
 // ... (EMPTY y fixes de Leaflet se mantienen arriba)
 delete L.Icon.Default.prototype._getIconUrl
@@ -268,6 +272,51 @@ export default function EntregasPage() {
       }
     }
   }
+
+  // Descarga PDF/JPG del ticket. Se captura el
+  // nodo de impresión (.print-ticket-container), que no tiene el selector de
+  // pestañas ni el botón de quitar tubo.
+  const printTicketRef = useRef(null)
+  const [descargando, setDescargando] = useState(null) // 'pdf' | 'jpg' | null
+  const handleDescargarTicket = async (formato) => {
+    setDescargando(formato)
+    try {
+      const prefijo = ticketTab === 'remision' ? 'Remision' : 'Comprobante'
+      await descargarTicket(printTicketRef.current, formato, `${prefijo}_${entregaSeleccionada?.numero || 'ticket'}`)
+    } catch (err) {
+      toast('Error al descargar: ' + (err?.message || String(err)), 'error')
+    } finally {
+      setDescargando(null)
+    }
+  }
+
+  // Descarga directa desde la fila del historial (sin abrir el modal):
+  // se selecciona la entrega para que el portal de impresión la renderice y,
+  // ya montada, el efecto de abajo la captura. Se descarga el comprobante si
+  // la entrega está confirmada (o es de salón); si no, la remisión inicial.
+  const [descargaFila, setDescargaFila] = useState(null) // { id, formato } | null
+  const descargarDesdeFila = (entrega, formato) => {
+    if (descargaFila) return
+    setEntregaSeleccionada(entrega)
+    setTicketTab(entrega.confirmada || entrega.canal === 'SALON' ? 'comprobante' : 'remision')
+    setDescargaFila({ id: entrega.id, formato })
+  }
+  useEffect(() => {
+    if (!descargaFila || entregaSeleccionada?.id !== descargaFila.id) return
+    let cancelado = false
+    ;(async () => {
+      try {
+        const prefijo = ticketTab === 'remision' ? 'Remision' : 'Comprobante'
+        await descargarTicket(printTicketRef.current, descargaFila.formato, `${prefijo}_${entregaSeleccionada.numero || 'ticket'}`)
+      } catch (err) {
+        if (!cancelado) toast('Error al descargar: ' + (err?.message || String(err)), 'error')
+      } finally {
+        if (!cancelado) setDescargaFila(null)
+      }
+    })()
+    return () => { cancelado = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [descargaFila, entregaSeleccionada, ticketTab])
 
   const handlePrintTicket = () => {
     // navigator.bluetooth también existe en Chrome/Edge de escritorio, así
@@ -1406,6 +1455,14 @@ export default function EntregasPage() {
                   ? 'Ocultar mapa'
                   : loadingMapa ? 'Cargando mapa...' : `Mapa (${ubicacionesUnicasMapa.length})`}
               </button>
+
+              {ES_DESARROLLO && (
+                <button className="btn" onClick={() => verDetalle(crearEntregaPruebaLarga())}
+                  title="Abre un ticket ficticio largo (no se guarda) para probar la descarga PDF/JPG"
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, flex: '1 1 auto', justifyContent: 'center', maxWidth: '200px' }}>
+                  <i className="ti ti-test-pipe" /> Ticket de prueba
+                </button>
+              )}
             </div>
 
             {/* Mapa de historial — se mantiene montado aunque la tabla recargue (cambio
@@ -1506,6 +1563,19 @@ export default function EntregasPage() {
                                     </button>
                                     <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-muted)' }}>Ticket</span>
                                   </div>
+                                  {['pdf', 'jpg'].map(formato => {
+                                    const activo = descargaFila?.id === e.id && descargaFila?.formato === formato
+                                    return (
+                                      <div key={formato} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                                        <button className="btn-icon" title={`Descargar ticket en ${formato.toUpperCase()}`}
+                                          disabled={!!descargaFila} onClick={() => descargarDesdeFila(e, formato)}>
+                                          <i className={`ti ${activo ? 'ti-loader ti-spin' : formato === 'pdf' ? 'ti-file-type-pdf' : 'ti-photo'}`}
+                                            style={{ color: 'var(--blue)' }} />
+                                        </button>
+                                        <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-muted)' }}>{formato.toUpperCase()}</span>
+                                      </div>
+                                    )
+                                  })}
                                   {!e.confirmada && (
                                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
                                       <button className="btn-icon" title="Cancelar entrega"
@@ -1595,6 +1665,19 @@ export default function EntregasPage() {
                           </button>
                           <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)' }}>Ticket</span>
                         </div>
+                        {['pdf', 'jpg'].map(formato => {
+                          const activo = descargaFila?.id === e.id && descargaFila?.formato === formato
+                          return (
+                            <div key={formato} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                              <button className="btn-icon" disabled={!!descargaFila} onClick={() => descargarDesdeFila(e, formato)}
+                                style={{ width: 44, height: 44, fontSize: 20 }}>
+                                <i className={`ti ${activo ? 'ti-loader ti-spin' : formato === 'pdf' ? 'ti-file-type-pdf' : 'ti-photo'}`}
+                                  style={{ color: 'var(--blue)' }} />
+                              </button>
+                              <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)' }}>{formato.toUpperCase()}</span>
+                            </div>
+                          )
+                        })}
                         {!e.confirmada && !e.cancelada && (
                           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
                             <button className="btn-icon" onClick={() => cancelarEntrega(e.id, e.numero)}
@@ -1636,6 +1719,18 @@ export default function EntregasPage() {
             <button className="btn" onClick={() => setModalDetalle(false)}>
               Cerrar
             </button>
+            {(ticketTab === 'remision' || entregaSeleccionada?.confirmada) && (
+              <>
+                <button className="btn" onClick={() => handleDescargarTicket('pdf')} disabled={!!descargando}
+                  title="Descargar ticket en PDF" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <i className={`ti ${descargando === 'pdf' ? 'ti-loader ti-spin' : 'ti-file-type-pdf'}`} /> PDF
+                </button>
+                <button className="btn" onClick={() => handleDescargarTicket('jpg')} disabled={!!descargando}
+                  title="Descargar ticket en JPG" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <i className={`ti ${descargando === 'jpg' ? 'ti-loader ti-spin' : 'ti-photo'}`} /> JPG
+                </button>
+              </>
+            )}
             {ticketTab === 'remision' || entregaSeleccionada?.confirmada ? (
               <button className="btn btn-primary" onClick={handlePrintTicket} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <i className="ti ti-printer" /> {ticketTab === 'remision' ? 'Imprimir Remisión Inicial' : 'Imprimir Comprobante Final'}
@@ -1685,7 +1780,7 @@ export default function EntregasPage() {
 
       {/* Elemento que solo se muestra para la impresión física (80mm) */}
       {entregaSeleccionada && createPortal(
-        <div className="print-ticket-container">
+        <div className="print-ticket-container" ref={printTicketRef}>
           <TicketEntrega
             entrega={entregaSeleccionada}
             branding={branding}

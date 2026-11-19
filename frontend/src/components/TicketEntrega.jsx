@@ -47,7 +47,7 @@ export default function TicketEntrega({
             type="button"
             className={`btn btn-sm ${ticketTab === 'remision' ? 'btn-primary' : ''}`}
             onClick={() => onCambiarTab('remision')}
-            style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 11 }}
+            style={{ flex: 1, minWidth: 0, whiteSpace: 'normal', lineHeight: 1.2, textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 11 }}
           >
             <i className="ti ti-file-text" /> 1. Remisión Inicial
           </button>
@@ -55,7 +55,7 @@ export default function TicketEntrega({
             type="button"
             className={`btn btn-sm ${ticketTab === 'comprobante' ? 'btn-primary' : ''}`}
             onClick={() => onCambiarTab('comprobante')}
-            style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 11 }}
+            style={{ flex: 1, minWidth: 0, whiteSpace: 'normal', lineHeight: 1.2, textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 11 }}
           >
             <i className="ti ti-receipt" /> 2. Comprobante Repartidor
           </button>
