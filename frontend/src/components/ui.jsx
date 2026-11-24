@@ -182,10 +182,17 @@ export function GasDot({ gas }) {
 }
 
 // ── Format capacity helper ─────────────────────────────────────
+// Gases que se miden en kg. "Mezcla Ar+CO2" contiene "co2" pero es una mezcla
+// y se mide en m³, por eso las mezclas se descartan primero.
+export function esGasEnKg(gas) {
+  const g = (gas || '').toLowerCase()
+  if (g.includes('mezcla')) return false
+  return g.includes('co2') || g.includes('acetileno') || g.includes('ecológico')
+}
+
 export function formatCapacidad(tubo) {
   if (!tubo) return '—'
-  const gas = (tubo.gas || '').toLowerCase()
-  if (gas.includes('co2') || gas.includes('acetileno') || gas.includes('ecológico')) {
+  if (esGasEnKg(tubo.gas)) {
     const val = tubo.capacidadKg !== undefined && tubo.capacidadKg !== null ? tubo.capacidadKg : (tubo.capacidadLitros || 0)
     return `${Number(val)} kg`
   }
@@ -195,9 +202,7 @@ export function formatCapacidad(tubo) {
 
 // ── Format gas unit of measure helper ──────────────────────────
 export function formatUnidadGas(gas) {
-  const g = (gas || '').toLowerCase()
-  if (g.includes('co2') || g.includes('acetileno') || g.includes('ecológico')) return 'kg'
-  return 'm³'
+  return esGasEnKg(gas) ? 'kg' : 'm³'
 }
 
 // ── Toast notification ─────────────────────────────────────────

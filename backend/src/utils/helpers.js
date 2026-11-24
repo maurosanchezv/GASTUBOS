@@ -48,12 +48,13 @@ export async function generarNumero(prefijo, tx = prisma) {
 export function mapTuboGasToTipoGas(tuboGas) {
   if (!tuboGas) return 'CO2'
   const norm = tuboGas.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+  // "mezcla" antes que "co2": "Mezcla Ar+CO2" es MEZCLA_CO2_ARGON, no CO2.
+  if (norm.includes('mezcla')) return 'MEZCLA_CO2_ARGON'
   if (norm.includes('co2')) return 'CO2'
   if (norm.includes('oxigeno')) return 'OXIGENO'
   if (norm.includes('argon')) return 'ARGON'
   if (norm.includes('nitrogeno')) return 'NITROGENO'
   if (norm.includes('aire')) return 'AIRE_COMPRIMIDO'
-  if (norm.includes('mezcla')) return 'MEZCLA_CO2_ARGON'
   if (norm.includes('acetileno')) return 'ACETILENO'
   if (norm.includes('ecologico')) return 'GAS_ECOLOGICO'
   return 'CO2'
